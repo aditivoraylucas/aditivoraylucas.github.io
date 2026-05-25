@@ -3,181 +3,648 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Projeto Básico Aditivo</title>
+<title>Gerador de Projeto Básico</title>
+
+<!-- Bibliotecas para gerar o PDF -->
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
 <style>
-:root{--page-width:794px;--page-min-height:1123px;--pad:28px;--font:'Times New Roman',Times,serif;--fs:12px;--lh:1.14;--border:#000}
-*{box-sizing:border-box}
-body{margin:0;background:#dfe4ea;color:#111;font-family:var(--font)}
-.top{position:sticky;top:0;background:#111827;color:#fff;padding:12px 16px;font-family:Arial,sans-serif;z-index:10}
-.wrap{max-width:1600px;margin:0 auto;padding:16px;display:grid;grid-template-columns:360px 1fr;gap:16px}
-.panel,.sheet{background:#fff;border:1px solid #bfc6cf;border-radius:6px;box-shadow:0 3px 18px rgba(0,0,0,.07)}
-.panel{padding:14px;overflow:auto;max-height:calc(100vh - 88px)}
-.sheet{overflow:auto;max-height:calc(100vh - 88px)}
-label{display:block;font-family:Arial,sans-serif;font-size:12px;margin:10px 0 4px}
-input,textarea,select{width:100%;box-sizing:border-box;border:1px solid #b8c1cc;border-radius:4px;padding:8px 9px;font-family:Arial,sans-serif;font-size:13px}
-textarea{min-height:70px;resize:vertical}
-.btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
-button{border:0;border-radius:6px;padding:10px 14px;font-weight:700;cursor:pointer}
-.primary{background:#16a34a;color:#fff}.secondary{background:#374151;color:#fff}
-.doc-shell{width:100%}
-.doc-page{width:var(--page-width);min-height:var(--page-min-height);margin:0 auto;padding:var(--pad);background:#fff;font-family:var(--font);font-size:var(--fs);line-height:var(--lh);color:#111}
-.break-after{page-break-after:always}
-.doc-title{text-align:center;margin:4px 0 18px}
-.rule{letter-spacing:1px;white-space:nowrap}
-.section-title{font-weight:700;margin:12px 0 7px}
-.subsection-title{font-weight:700;margin:7px 0 5px}
-.paragraph{margin:0 0 8px}
-.doc-table{width:100%;border-collapse:collapse;margin:0 0 10px}
-.doc-table td,.doc-table th{border:1px solid var(--border);padding:4px 5px;vertical-align:top;font-size:var(--fs);line-height:1.1}
-.doc-table th{text-align:center;font-weight:700}
-.label{font-weight:700;white-space:nowrap}
-.doc-table.legal td:first-child{width:70%}.doc-table.legal td:last-child{width:30%;text-align:right}
-.doc-table.history td:nth-child(1),.doc-table.request td:nth-child(1){width:30%}
-.doc-table.history td:nth-child(2),.doc-table.request td:nth-child(2){width:25%;text-align:right}
-.doc-table.history td:nth-child(3),.doc-table.request td:nth-child(3){width:45%}
-.doc-table.application td:nth-child(1){width:48%}.doc-table.application td:nth-child(2){width:18%;text-align:center}.doc-table.application td:nth-child(3){width:34%;text-align:center}
-.doc-table.cronograma td:nth-child(1){width:18%;text-align:center}.doc-table.cronograma td:nth-child(2){width:64%}.doc-table.cronograma td:nth-child(3){width:18%;text-align:center}
-.signature-block{text-align:center;margin-top:18px}.signature-name{font-weight:700;margin-top:10px}.signature-role{margin-top:2px}
-.field{display:inline;padding:0 2px}.field-block{display:block;margin:0}.field-bold{font-weight:700}.field-muted{color:#444}
-@media print{body{background:#fff}.panel,.top{display:none}.wrap{display:block;padding:0}.sheet{border:0;box-shadow:none;overflow:visible;max-height:none}.doc-page{margin:0;width:auto;min-height:auto;box-shadow:none}.break-after{page-break-after:always}}
+:root {
+  --page-w: 794px;
+  --page-h: 1123px;
+  --font: "Times New Roman", Times, serif;
+  --fs: 12px;
+  --lh: 1.12;
+}
+
+/* Reseta layout básico */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #dfe4ea;
+  color: #111;
+  font-family: var(--font);
+}
+
+/* Barra superior */
+.top {
+  position: sticky;
+  top: 0;
+  background: #111827;
+  color: #fff;
+  padding: 12px 16px;
+  font-family: Arial, sans-serif;
+  z-index: 10;
+}
+
+/* Layout 2 colunas: painel + prévia */
+.wrap {
+  max-width: 1800px;
+  margin: 0 auto;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 420px 1fr;
+  gap: 16px;
+}
+
+.panel,
+.sheet {
+  background: #fff;
+  border: 1px solid #bfc6cf;
+  border-radius: 6px;
+  box-shadow: 0 3px 18px rgba(0,0,0,.07);
+}
+
+.panel {
+  padding: 14px;
+  overflow: auto;
+  max-height: calc(100vh - 88px);
+}
+
+.sheet {
+  overflow: auto;
+  max-height: calc(100vh - 88px);
+}
+
+/* Formulário */
+label {
+  display: block;
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+  margin: 10px 0 4px;
+}
+
+input,
+textarea,
+select {
+  width: 100%;
+  border: 1px solid #b8c1cc;
+  border-radius: 4px;
+  padding: 8px 9px;
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+}
+
+textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
+.btns {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+button {
+  border: 0;
+  border-radius: 6px;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary { background: #16a34a; color: #fff; }
+.secondary { background: #374151; color: #fff; }
+
+/* Páginas do documento */
+.doc-page {
+  width: var(--page-w);
+  min-height: var(--page-h);
+  margin: 0 auto;
+  padding: 26px 32px;
+  background: #fff;
+  font-family: var(--font);
+  font-size: var(--fs);
+  line-height: var(--lh);
+  color: #111;
+}
+
+.break { page-break-after: always; }
+
+/* Cabeçalho de página */
+.hdr {
+  display: grid;
+  grid-template-columns: 80px 1fr 220px;
+  align-items: start;
+  margin-bottom: 32px;
+}
+
+.logo {
+  width: 62px;
+  height: 62px;
+  object-fit: contain;
+}
+
+.headcenter { text-align: center; }
+
+.headtitle {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: .2px;
+  margin-top: 2px;
+}
+
+.headline {
+  height: 2px;
+  background: #5b5b8a;
+  width: 250px;
+  margin: 4px auto 0;
+}
+
+.headright {
+  text-align: right;
+  font-size: 14px;
+  line-height: 1.1;
+  padding-top: 8px;
+}
+
+.headleft {
+  font-size: 14px;
+  line-height: 1.1;
+  padding-top: 8px;
+}
+
+.titlebox {
+  display: inline-block;
+  border: 1px solid #000;
+  padding: 12px 10px;
+  width: 430px;
+  text-align: left;
+  font-size: 15px;
+  line-height: 1.12;
+  margin-top: 72px;
+}
+
+/* Títulos e textos */
+.section {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 16px 0 10px;
+}
+
+.sub {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 14px 0 8px;
+}
+
+.p {
+  margin: 0 0 8px;
+  text-align: justify;
+}
+
+/* Listas e tabelas */
+ul {
+  margin: 6px 0 8px 18px;
+  padding: 0;
+}
+
+li {
+  margin: 0 0 8px;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 10px;
+}
+
+td,
+th {
+  border: 1px solid #000;
+  padding: 5px 6px;
+  vertical-align: top;
+}
+
+th {
+  text-align: center;
+}
+
+.small td,
+.small th {
+  font-size: 11.6px;
+}
+
+/* Rodapé e assinaturas */
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-top: 10px;
+  font-size: 12px;
+  color: #445;
+}
+
+.sign {
+  text-align: center;
+  margin-top: 46px;
+}
+
+.name { font-weight: 700; }
+
+/* Destaque de campos variáveis */
+.field {
+  background: #fff4a8;
+  padding: 0 3px;
+  border-radius: 2px;
+}
+
+.note {
+  font-family: Arial, sans-serif;
+  font-size: 11px;
+  color: #555;
+  margin-top: 6px;
+}
+
+/* Impressão */
+@media print {
+  body { background: #fff; }
+  .top, .panel { display: none; }
+  .wrap { display: block; padding: 0; }
+  .sheet {
+    border: 0;
+    box-shadow: none;
+    overflow: visible;
+    max-height: none;
+  }
+  .doc-page {
+    margin: 0;
+    width: auto;
+    min-height: auto;
+    box-shadow: none;
+  }
+  .break { page-break-after: always; }
+}
 </style>
 </head>
 <body>
-<div class="top">Template HTML para GitHub Pages com estrutura próxima ao Word</div>
+<div class="top">Gerador padronizado completo para PDF</div>
+
 <div class="wrap">
+  <!-- Painel de entrada de dados -->
   <div class="panel">
-    <label>Tipo do Projeto</label><input id="projeto_basico_para" value="Acréscimo de Quantitativo no Contrato n.º 13/2025 vinculado à Concorrência n.º 006/2024, PAC n.º 59/2024, referente à empresa PRISMA INFRAESTRUTURA E ENGENHARIA LTDA.">
-    <label>Órgão</label><input id="orgao" value="PREFEITURA MUNICIPAL DE IGARAPÉ">
-    <label>CNPJ</label><input id="cnpj" value="18.715.474/0001-85">
-    <label>Endereço</label><input id="endereco" value="AV. GOVERNADOR VALADARES, 447, Centro">
-    <label>Cidade</label><input id="cidade" value="IGARAPÉ">
-    <label>UF</label><input id="uf" value="MG">
-    <label>CEP</label><input id="cep" value="32900-000">
-    <label>Telefone</label><input id="telefone" value="(31) 3534-5391">
-    <label>Título do Projeto</label><textarea id="titulo_projeto">6º Termo Aditivo ao Contrato n.º 13/2025 vinculado à Concorrência n.º 006/2024, PAC n.º 59/2024.</textarea>
-    <label>Identificação do Objeto</label><textarea id="identificacao_objeto">Aditivo de acréscimo de valor referente à inclusão de novos itens e acréscimo de quantitativo conforme demonstrado na tabela em Anexo.</textarea>
-    <label>Justificativa</label><textarea id="justificativa">Considerando as cláusulas 2.2 e 2.3 do Contrato Nº 13/2025, vinculado ao Processo Administrativo de Compras Nº 59/2024, Concorrência Nº 06/2024, que entre si celebram o Município de Igarapé e a empresa PRISMA INFRAESTRUTURA E ENGENHARIA LTDA, que diz:
+    <label>Contrato</label>
+    <input id="contrato" value="">
 
-"2.2 O contratante poderá acrescer ou suprimir os quantitativos, respeitados os limites legais." (art. 125 da Lei nº 14.133/2021).
+    <label>Concorrência</label>
+    <input id="conc" value="">
 
-"2.3 Serão incorporados ao contrato, mediante Termo Aditivo todas e quaisquer modificações, que venham ser necessárias durante sua vigência decorrente de alterações unilaterais do CONTRATANTE ou por acordo entre as partes."
+    <label>PAC</label>
+    <input id="pac" value="">
 
-Considerando o disposto no art. 125 da Lei nº 14.133/2021, que autoriza a alteração unilateral do contrato, dentro dos limites legais, a Secretaria Municipal de Esporte e Lazer propõe o presente Projeto Básico para aditar o Contrato nº 13/2025, mediante as seguintes justificativas:</textarea>
-    <label>Valor Total</label><input id="valor_total" value="R$ 39.180,91">
-    <label>Valor Itens Novos</label><input id="valor_itens_novos" value="R$ 0,00">
-    <label>Valor Quantitativos</label><input id="valor_quantitativos" value="R$ 39.180,91">
-    <label>Valor Inicial</label><input id="valor_inicial" value="R$ 2.797.404,83">
-    <label>Valor Atualizado</label><input id="valor_atualizado" value="R$ 2.797.404,83">
-    <label>Limite Legal</label><input id="limite_legal" value="R$ 699.351,21">
-    <label>Saldo para Aditivo</label><input id="saldo_para_aditivo" value="R$ 500.393,69">
-    <label>Data</label><input id="data" value="20 de março de 2026">
-    <label>Assinatura 1</label><input id="assinatura_1" value="Vinicius Rezende da Silva">
-    <label>Cargo 1</label><input id="cargo_1" value="Secretário Municipal de Esporte">
-    <label>Assinatura 2</label><input id="assinatura_2" value="Raylucas Reydman Marques Gomes">
-    <label>Cargo 2</label><input id="cargo_2" value="Secretaria Municipal de Infraestrutura e Serviços Urbanos">
-    <div class="btns"><button class="primary" onclick="render()">Atualizar prévia</button><button class="secondary" onclick="baixarPDF()">Baixar PDF</button></div>
-  </div>
-  <div class="sheet"><div id="preview" class="doc-shell"></div></div>
-</div>
-<script>
-const v=id=>document.getElementById(id).value.trim();
-function render(){
-  document.getElementById('preview').innerHTML = `
-  <section class="doc-page break-after">
-    <div class="doc-title">
-      <div class="rule">-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------</div>
-      <div><span class="field-bold">PROJETO BÁSICO PARA:</span> <span class="field" id="f_projeto_basico_para">${v('projeto_basico_para')}</span></div>
-      <div class="rule">-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------</div>
+    <label>Empresa</label>
+    <input id="empresa" value="">
+
+    <label>Secretaria</label>
+    <input id="secretaria" value="">
+
+    <label>Tipo (ex.: Acréscimo de Quantitativo no Contrato)</label>
+    <input id="tipo" value="">
+
+    <label>Órgão</label>
+    <input id="orgao" value="">
+
+    <label>CNPJ</label>
+    <input id="cnpj" value="">
+
+    <label>Endereço</label>
+    <input id="endereco" value="">
+
+    <label>Cidade</label>
+    <input id="cidade" value="">
+
+    <label>UF</label>
+    <input id="uf" value="">
+
+    <label>CEP</label>
+    <input id="cep" value="">
+
+    <label>Telefone</label>
+    <input id="tel" value="">
+
+    <label>Título do Projeto</label>
+    <textarea id="titulo"></textarea>
+
+    <label>Identificação do Objeto</label>
+    <textarea id="objeto"></textarea>
+
+    <label>Justificativa (texto principal)</label>
+    <textarea id="just"></textarea>
+
+    <label>Lista de Itens (cada item em uma linha)</label>
+    <textarea id="itens"></textarea>
+
+    <label>Valor total</label>
+    <input id="valor_total" value="">
+
+    <label>Valor itens novos</label>
+    <input id="valor_itens" value="">
+
+    <label>Valor quantitativos</label>
+    <input id="valor_quant" value="">
+
+    <label>Valor inicial do contrato</label>
+    <input id="valor_inicial" value="">
+
+    <label>Valor atualizado do contrato</label>
+    <input id="valor_atualizado" value="">
+
+    <label>Limite legal</label>
+    <input id="limite" value="">
+
+    <label>Saldo para aditivo</label>
+    <input id="saldo" value="">
+
+    <label>Data</label>
+    <input id="data" value="">
+
+    <label>Assinatura 1 (nome)</label>
+    <input id="ass1" value="">
+
+    <label>Cargo 1</label>
+    <input id="car1" value="">
+
+    <label>Assinatura 2 (nome)</label>
+    <input id="ass2" value="">
+
+    <label>Cargo 2</label>
+    <input id="car2" value="">
+
+    <div class="btns">
+      <button class="primary" onclick="render()">Atualizar prévia</button>
+      <button class="secondary" onclick="baixarPDF()">Baixar PDF</button>
     </div>
-    <h2 class="section-title">1. DADOS DA INSTITUIÇÃO</h2>
-    <table class="doc-table">
-      <tr><td class="label">Órgão/ Entidade Proponente</td><td></td><td class="label">Nº do CNPJ</td><td></td></tr>
-      <tr><td colspan="2"><span class="field" id="f_orgao">${v('orgao')}</span></td><td colspan="2"><span class="field" id="f_cnpj">${v('cnpj')}</span></td></tr>
-      <tr><td colspan="4"><span class="label">Endereço:</span> <span class="field" id="f_endereco">${v('endereco')}</span></td></tr>
-      <tr><td><span class="label">Cidade:</span> <span class="field" id="f_cidade">${v('cidade')}</span></td><td><span class="label">U.F.:</span> <span class="field" id="f_uf">${v('uf')}</span></td><td><span class="label">CEP:</span> <span class="field" id="f_cep">${v('cep')}</span></td><td><span class="label">Telefone:</span> <span class="field" id="f_telefone">${v('telefone')}</span></td></tr>
-    </table>
+
+    <div class="note">
+      Preencha os campos acima. O número de contrato, concorrência, PAC e valores serão
+      repetidos automaticamente em todas as páginas do PDF.
+    </div>
+  </div>
+
+  <!-- Prévia do documento -->
+  <div class="sheet">
+    <div id="preview"></div>
+  </div>
+</div>
+
+<script>
+const v = id => document.getElementById(id).value.trim();
+
+const contract = () =>
+  `Contrato n.º ${v('contrato')} vinculado à Concorrência n.º ${v('conc')}, PAC n.º ${v('pac')}`;
+
+function header() {
+  return `
+    <div class="hdr">
+      <div>
+        <img class="logo" alt="logo"
+             src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/77/Coat_of_arms_of_Igarape_MG.png/120px-Coat_of_arms_of_Igarape_MG.png">
+      </div>
+      <div class="headcenter">
+        <div class="headtitle">Prefeitura Municipal de Igarapé</div>
+        <div class="headline"></div>
+      </div>
+      <div></div>
+    </div>
+  `;
+}
+
+function render() {
+  const itensHtml = v('itens')
+    ? v('itens').split('\n').map(s => s.trim()).filter(Boolean).map(s => `<li>${s}</li>`).join('')
+    : '';
+
+  document.getElementById('preview').innerHTML = `
+  <!-- Página 1: capa -->
+  <section class="doc-page break">
+    <div class="hdr">
+      <div>
+        <img class="logo" alt="logo"
+             src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/77/Coat_of_arms_of_Igarape_MG.png/120px-Coat_of_arms_of_Igarape_MG.png">
+      </div>
+      <div class="headcenter">
+        <div class="headtitle">Prefeitura Municipal de Igarapé</div>
+        <div class="headline"></div>
+        <div class="titlebox">
+          <span class="field"><b>PROJETO BÁSICO PARA:</b> ${v('tipo')}</span>
+          <span class="field">${contract()}</span>,
+          referente à empresa <span class="field">${v('empresa')}</span>.
+        </div>
+      </div>
+      <div class="headright">
+        <div>${v('secretaria')}</div>
+        <div>${v('tel')}</div>
+        <div>${v('endereco').toUpperCase()}</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div>${v('secretaria') || ''}</div>
+      <div>${v('tel')}<br>${v('endereco').toUpperCase()}</div>
+    </div>
   </section>
-  <section class="doc-page break-after">
-    <h2 class="section-title">2. DESCRIÇÃO DO PROJETO</h2>
-    <h3 class="subsection-title">1. TITULO DO PROJETO</h3>
-    <p class="paragraph"><span class="field" id="f_titulo_projeto">${v('titulo_projeto')}</span></p>
-    <h3 class="subsection-title">2. IDENTIFICAÇÃO DO OBJETO</h3>
-    <p class="paragraph"><span class="field" id="f_identificacao_objeto">${v('identificacao_objeto')}</span></p>
-    <h3 class="subsection-title">3. JUSTIFICATIVA</h3>
-    <p class="paragraph"><span class="field" id="f_justificativa">${v('justificativa').replace(/\n/g,'<br>')}</span></p>
-    <h3 class="subsection-title">4. DO VALOR</h3>
-    <p class="paragraph"><span class="field" id="f_valor_total">${v('valor_total')}</span> <span class="field-muted">(texto fixo do bloco aqui, se necessário)</span></p>
-  </section>
-  <section class="doc-page break-after">
-    <h2 class="section-title">3. BASE DE CÁLCULO PARA O ADITIVO</h2>
-    <h3 class="subsection-title">1. REFERÊNCIAS</h3>
-    <p class="paragraph">A base de cálculo para incidência do percentual de aditivo, até o limite de 25%, corresponde ao <b>valor inicial atualizado do contrato</b>, conforme disposto no <b>art. 125, § 1º, da Lei nº 14.133/2021</b>.</p>
-    <h3 class="subsection-title">2. CÁLCULO DO VALOR ATUALIZADO DO CONTRATO</h3>
-    <table class="doc-table legal">
-      <tr><td class="label">VALOR INICIAL DO CONTRATO</td><td><span class="field" id="f_valor_inicial">${v('valor_inicial')}</span></td></tr>
-      <tr><td class="label">VALOR REAJUSTADO</td><td>R$ 0,00</td></tr>
-      <tr><td class="label">VALOR ATUALIZADO DO CONTRATO</td><td><span class="field" id="f_valor_atualizado">${v('valor_atualizado')}</span></td></tr>
+
+  <!-- Página 2: dados e descrição -->
+  <section class="doc-page break">
+    ${header()}
+
+    <div class="section">1. DADOS DA INSTITUIÇÃO</div>
+    <table>
+      <tr>
+        <td><b>Órgão/ Entidade Proponente</b></td>
+        <td><b>Nº do CNPJ</b></td>
+      </tr>
+      <tr>
+        <td>${v('orgao')}</td>
+        <td>${v('cnpj')}</td>
+      </tr>
+      <tr>
+        <td colspan="2"><b>Endereço:</b> ${v('endereco')}</td>
+      </tr>
+      <tr>
+        <td>
+          <b>Cidade:</b> ${v('cidade')}
+          &nbsp;&nbsp; <b>U.F.:</b> ${v('uf')}
+          &nbsp;&nbsp; <b>CEP:</b> ${v('cep')}
+          &nbsp;&nbsp; <b>Telefone:</b> ${v('tel')}
+        </td>
+        <td></td>
+      </tr>
     </table>
-    <h3 class="subsection-title">3. LIMITE LEGAL PARA ALTERAÇÕES</h3>
-    <p class="paragraph">Assim sendo, o limite legal para alterações no Contrato é de <b><span class="field" id="f_limite_legal">${v('limite_legal')}</span></b>.</p>
-    <table class="doc-table legal">
-      <tr><td class="label">LIMITE LEGAL (25%)</td><td><span class="field" id="f_limite_legal_2">${v('limite_legal')}</span></td></tr>
-      <tr><td class="label">TERMO ADITIVO 2</td><td><span class="field" id="f_valor_total_1">${v('valor_total')}</span></td></tr>
-      <tr><td class="label">TERMO ADITIVO 3 (PEDIDO ATUAL)</td><td><span class="field" id="f_valor_total_2">${v('valor_total')}</span></td></tr>
-      <tr><td class="label">SALDO PARA ADITIVO</td><td><span class="field" id="f_saldo_para_aditivo">${v('saldo_para_aditivo')}</span></td></tr>
-    </table>
+
+    <div class="section">2. DESCRIÇÃO DO PROJETO</div>
+
+    <div class="sub">2.1. TITULO DO PROJETO</div>
+    <p class="p"><span class="field">${v('titulo')}</span></p>
+
+    <div class="sub">2.2. IDENTIFICAÇÃO DO OBJETO</div>
+    <p class="p"><span class="field">${v('objeto')}</span></p>
+
+    <div class="sub">2.3. JUSTIFICATIVA</div>
+    <p class="p">${v('just').replace(/\n/g, '<br><br>')}</p>
   </section>
-  <section class="doc-page break-after">
-    <h3 class="subsection-title">1. HISTÓRICO EVOLUTIVO DO CONTRATO</h3>
-    <table class="doc-table history">
+
+  <!-- Página 3: itens e valor -->
+  <section class="doc-page break">
+    ${header()}
+
+    ${itensHtml ? `<ul>${itensHtml}</ul>` : ''}
+
+    <div class="sub">2.4. DO VALOR</div>
+    <p class="p">
+      Acréscimo: O valor total do presente Termo Aditivo é de
+      <span class="field">${v('valor_total')}</span>,
+      sendo <span class="field">${v('valor_itens')}</span> de itens novos e
+      <span class="field">${v('valor_quant')}</span> de quantitativos calculados de acordo
+      com os valores demonstrados na planilha em Anexo.
+    </p>
+
+    <div class="section">3. BASE DE CÁLCULO PARA O ADITIVO</div>
+    <div class="sub">3.1. REFERÊNCIAS</div>
+    <p class="p">
+      A base de cálculo para incidência do percentual de aditivo, até o limite de 25%,
+      corresponde ao valor inicial atualizado do contrato, conforme disposto no
+      art. 125, § 1º, da Lei nº 14.133/2021.
+    </p>
+  </section>
+
+  <!-- Página 4: base de cálculo, limite e histórico -->
+  <section class="doc-page break">
+    ${header()}
+
+    <div class="sub">3.2. CÁLCULO DO VALOR ATUALIZADO DO CONTRATO</div>
+    <table class="small">
+      <tr>
+        <td><b>VALOR INICIAL DO CONTRATO</b></td>
+        <td>${v('valor_inicial')}</td>
+      </tr>
+      <tr>
+        <td><b>VALOR ATUALIZADO DO CONTRATO</b></td>
+        <td>${v('valor_atualizado')}</td>
+      </tr>
+    </table>
+
+    <div class="sub">3.3. LIMITE LEGAL PARA ALTERAÇÕES</div>
+    <p class="p">
+      Assim sendo, o limite legal para alterações no Contrato é de
+      <b>${v('limite')}</b>.
+    </p>
+
+    <p class="p"><b>3.3.1. ACRÉSCIMO</b></p>
+    <table class="small">
+      <tr>
+        <td><b>LIMITE LEGAL (25%)</b></td>
+        <td>${v('limite')}</td>
+      </tr>
+      <tr>
+        <td><b>TERMO ADITIVO 2</b></td>
+        <td>${v('valor_total')}</td>
+      </tr>
+      <tr>
+        <td><b>SALDO PARA ADITIVO</b></td>
+        <td>${v('saldo')}</td>
+      </tr>
+    </table>
+
+    <div class="sub">1. HISTÓRICO EVOLUTIVO DO CONTRATO</div>
+    <table class="small">
       <tr><th>TERMO</th><th>VALOR</th><th>DESCRIÇÃO</th></tr>
-      <tr><td>Contrato 13/2025</td><td>${v('valor_inicial')}</td><td>Contratação</td></tr>
+      <tr><td>Contrato ${v('contrato')}</td><td>${v('valor_inicial')}</td><td>Contratação</td></tr>
       <tr><td>1º TERMO ADITIVO</td><td></td><td>PRAZO</td></tr>
       <tr><td>2º TERMO ADITIVO</td><td>${v('valor_total')}</td><td>ADITIVO DE ITENS E QUANTITATIVO</td></tr>
     </table>
-    <h3 class="subsection-title">2. SOLICITAÇÃO ATUAL</h3>
-    <table class="doc-table request">
+
+    <div class="sub">2. SOLICITAÇÃO ATUAL</div>
+    <table class="small">
       <tr><th>TERMO</th><th>VALOR</th><th>DESCRIÇÃO</th></tr>
-      <tr><td>3º TA ao Contrato 13/2025</td><td>${v('valor_total')}</td><td>Acréscimo de quantitativo</td></tr>
+      <tr><td>3º TA ao Contrato ${v('contrato')}</td><td>${v('valor_total')}</td><td>Acréscimo de quantitativo</td></tr>
     </table>
-    <h3 class="subsection-title">3. PLANO DE APLICAÇÃO</h3>
-    <table class="doc-table application">
+  </section>
+
+  <!-- Página 5: plano, cronograma, declaração e conclusão -->
+  <section class="doc-page">
+    ${header()}
+
+    <div class="section">3. PLANO DE APLICAÇÃO</div>
+    <table class="small">
       <tr><th>Dotação Orçamentária</th><th>Fonte</th><th>Elemento de Despesa</th></tr>
-      <tr><td>OBRAS<br><br>4.4.90.51.00.2.14.00.27.812.0015.1.0073.2.659.050</td><td>1.500/ 1.571/ 2.571</td><td>4.4.90.51.00</td></tr>
+      <tr>
+        <td>OBRAS<br><br>4.4.90.51.00.2.14.00.27.812.0015.1.0073.2.659.050</td>
+        <td>1.500/ 1.571/ 2.571</td>
+        <td>4.4.90.51.00</td>
+      </tr>
     </table>
-    <h3 class="subsection-title">4. CRONOGRAMA DE EXECUÇÃO (ETAPA/FASE)</h3>
-    <table class="doc-table cronograma">
+
+    <div class="section">4. CRONOGRAMA DE EXECUÇÃO (ETAPA/FASE)</div>
+    <table class="small">
       <tr><th>Etapa/ Fase</th><th>Especificação</th><th>Indicador Físico</th></tr>
-      <tr><td>Única</td><td>Aditivo de valor referente ao Contrato n.º 13/2025 vinculado à Concorrência n.º 006/2024, PAC n.º 59/2024.</td><td>01</td></tr>
+      <tr>
+        <td>Única</td>
+        <td>Aditivo de valor referente ao ${contract()}.</td>
+        <td>01</td>
+      </tr>
     </table>
-    <h3 class="subsection-title">5. DECLARAÇÃO</h3>
-    <p class="paragraph">Declaramos que o presente Projeto Básico foi elaborado em conformidade com a Lei nº 14.133, de 1º de abril de 2021, observando-se os princípios, diretrizes e requisitos nela estabelecidos, bem como as demais normas legais e regulamentares aplicáveis.</p>
-    <h3 class="subsection-title">6. CONCLUSÃO</h3>
-    <p class="paragraph">Diante do exposto, a Secretaria Gestora do contrato solicita autorização para prosseguir com Aditivo de Acréscimo apresentado.</p>
-    <p class="paragraph" style="text-align:right;">${v('cidade')}, ${v('data')}.</p>
-    <div class="signature-block"><div class="signature-name">${v('assinatura_1')}</div><div class="signature-role">${v('cargo_1')}</div></div>
-    <div class="signature-block"><div class="signature-name">${v('assinatura_2')}</div><div class="signature-role">${v('cargo_2')}</div></div>
-  </section>`;
+
+    <div class="section">5. DECLARAÇÃO</div>
+    <p class="p">
+      Declaramos que o presente Projeto Básico foi elaborado em conformidade com a Lei nº 14.133,
+      de 1º de abril de 2021, observando-se os princípios, diretrizes e requisitos nela estabelecidos,
+      bem como as demais normas legais e regulamentares aplicáveis.
+    </p>
+
+    <div class="section">6. CONCLUSÃO</div>
+    <p class="p">
+      Diante do exposto, a Secretaria Gestora do contrato solicita autorização para prosseguir com
+      Aditivo de Acréscimo apresentado.
+    </p>
+
+    <p class="p" style="text-align:right;">
+      ${v('cidade')}, ${v('data')}.
+    </p>
+
+    <div class="sign">
+      <div class="name">${v('ass1')}</div>
+      <div>${v('car1')}</div>
+    </div>
+
+    <div class="sign" style="margin-top:48px;">
+      <div class="name">${v('ass2')}</div>
+      <div>${v('car2')}</div>
+    </div>
+  </section>
+  `;
 }
-async function baixarPDF(){
+
+async function baixarPDF() {
   render();
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({unit:'pt', format:'a4'});
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const pages = document.querySelectorAll('.doc-page');
-  for(let i=0;i<pages.length;i++){
-    const canvas = await html2canvas(pages[i], {scale:2, backgroundColor:'#ffffff', useCORS:true});
-    const img = canvas.toDataURL('image/png');
+
+  for (let i = 0; i < pages.length; i++) {
+    const c = await html2canvas(pages[i], {
+      scale: 2,
+      backgroundColor: '#fff',
+      useCORS: true
+    });
+    const img = c.toDataURL('image/png');
     const pw = 595.28, ph = 841.89;
-    const ratio = Math.min(pw/canvas.width, ph/canvas.height);
-    const iw = canvas.width*ratio, ih = canvas.height*ratio;
-    const x = (pw - iw)/2;
-    if(i>0) doc.addPage();
+    const r = Math.min(pw / c.width, ph / c.height);
+    const iw = c.width * r, ih = c.height * r;
+    const x = (pw - iw) / 2;
+    if (i > 0) doc.addPage();
     doc.addImage(img, 'PNG', x, 0, iw, ih);
   }
-  doc.save('projeto-basico-aditivo.pdf');
+
+  const nome = v('contrato') ? v('contrato').replace('/', '-') : 'projeto-basico';
+  doc.save(`projeto-basico-${nome}.pdf`);
 }
+
+/* render inicial em branco */
 render();
 </script>
 </body>
