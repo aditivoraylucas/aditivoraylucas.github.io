@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Projeto Básico Aditivo</title>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<style>
+  :root{--bg:#dfe4ea;--card:#fff;--line:#bfc6cf;--text:#111;--accent:#16a34a;--dark:#111827}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);font-family:'Times New Roman',serif;color:var(--text)}
+  .top{position:sticky;top:0;background:var(--dark);color:#fff;padding:12px 16px;font-family:Arial,sans-serif;z-index:10}
+  .wrap{max-width:1600px;margin:0 auto;padding:16px;display:grid;grid-template-columns:360px 1fr;gap:16px}
+  .panel,.sheet{background:var(--card);border:1px solid var(--line);border-radius:6px;box-shadow:0 3px 18px rgba(0,0,0,.07)}
+  .panel{padding:14px;overflow:auto;max-height:calc(100vh - 88px)}
+  .sheet{overflow:auto;max-height:calc(100vh - 88px)}
+  label{display:block;font-family:Arial,sans-serif;font-size:12px;margin:10px 0 4px}
+  input,textarea,select{width:100%;box-sizing:border-box;border:1px solid #b8c1cc;border-radius:4px;padding:8px 9px;font-family:Arial,sans-serif;font-size:13px}
+  textarea{min-height:70px;resize:vertical}
+  .btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  button{border:0;border-radius:6px;padding:10px 14px;font-weight:700;cursor:pointer}
+  .primary{background:var(--accent);color:#fff}.secondary{background:#374151;color:#fff}
+  .page{width:794px;min-height:1123px;margin:0 auto;padding:24px 30px;font-size:12.2px;line-height:1.18;background:#fff}
+  .break{page-break-after:always}
+  .center{text-align:center}.right{text-align:right}.bold{font-weight:700}
+  table{border-collapse:collapse;width:100%} td,th{border:1px solid #000;padding:5px 6px;vertical-align:top}
+  .sec{font-weight:700;margin:14px 0 8px}.sub{font-weight:700;margin:8px 0 6px}
+  .title{text-align:center;margin:4px 0 18px}.sep{letter-spacing:1px}
+</style>
+</head>
+<body>
+<div class="top">Index para GitHub Pages</div>
+<div class="wrap">
+  <div class="panel">
+    <label>PROJETO BÁSICO PARA</label><textarea id="proj">Acréscimo de Quantitativo no Contrato n.º 13/2025 vinculado à Concorrência n.º 006/2024, PAC n.º 59/2024, referente à empresa PRISMA INFRAESTRUTURA E ENGENHARIA LTDA.</textarea>
+    <label>Órgão/ Entidade Proponente</label><input id="orgao" value="PREFEITURA MUNICIPAL DE IGARAPÉ">
+    <label>CNPJ</label><input id="cnpj" value="18.715.474/0001-85">
+    <label>Endereço</label><input id="end" value="AV. GOVERNADOR VALADARES, 447, Centro">
+    <label>Cidade</label><input id="cidade" value="IGARAPÉ">
+    <label>UF</label><input id="uf" value="MG">
+    <label>CEP</label><input id="cep" value="32900-000">
+    <label>Telefone</label><input id="tel" value="(31) 3534-5391">
+    <label>Título do Projeto</label><textarea id="titulo">6º Termo Aditivo ao Contrato n.º 13/2025 vinculado à Concorrência n.º 006/2024, PAC n.º 59/2024.</textarea>
+    <label>Identificação do Objeto</label><textarea id="objeto">Aditivo de acréscimo de valor referente à inclusão de novos itens e acréscimo de quantitativo conforme demonstrado na tabela em Anexo.</textarea>
+    <label>Justificativa</label><textarea id="just">Considerando as cláusulas 2.2 e 2.3 do Contrato Nº 13/2025, vinculado ao Processo Administrativo de Compras Nº 59/2024, Concorrência Nº 06/2024, que entre si celebram o Município de Igarapé e a empresa PRISMA INFRAESTRUTURA E ENGENHARIA LTDA, que diz:
+
+"2.2 O contratante poderá acrescer ou suprimir os quantitativos, respeitados os limites legais." (art. 125 da Lei nº 14.133/2021).
+
+"2.3 Serão incorporados ao contrato, mediante Termo Aditivo todas e quaisquer modificações, que venham ser necessárias durante sua vigência decorrente de alterações unilaterais do CONTRATANTE ou por acordo entre as partes."
+
+Considerando o disposto no art. 125 da Lei nº 14.133/2021, que autoriza a alteração unilateral do contrato, dentro dos limites legais, a Secretaria Municipal de Esporte e Lazer propõe o presente Projeto Básico para aditar o Contrato nº 13/2025, mediante as seguintes justificativas:</textarea>
+    <label>Valor total</label><input id="vtotal" value="R$ 39.180,91">
+    <label>Valor itens novos</label><input id="vnovos" value="R$ 0,00">
+    <label>Valor quantitativos</label><input id="vquant" value="R$ 39.180,91">
+    <label>Valor inicial</label><input id="vinicial" value="R$ 2.797.404,83">
+    <label>Valor atualizado</label><input id="vatual" value="R$ 2.797.404,83">
+    <label>Limite legal</label><input id="vlimite" value="R$ 699.351,21">
+    <label>Saldo para aditivo</label><input id="vsaldo" value="R$ 500.393,69">
+    <label>Data</label><input id="data" value="20 de março de 2026">
+    <label>Assinatura 1</label><input id="ass1" value="Vinicius Rezende da Silva">
+    <label>Cargo 1</label><input id="car1" value="Secretário Municipal de Esporte">
+    <label>Assinatura 2</label><input id="ass2" value="Raylucas Reydman Marques Gomes">
+    <label>Cargo 2</label><input id="car2" value="Secretaria Municipal de Infraestrutura e Serviços Urbanos">
+    <div class="btns"><button class="primary" onclick="render()">Atualizar prévia</button><button class="secondary" onclick="gerarPDF()">Baixar PDF</button></div>
+  </div>
+  <div class="sheet"><div id="preview"></div></div>
+</div>
+<script>
+const v=id=>document.getElementById(id).value.trim();
+function render(){document.getElementById('preview').innerHTML = `
+  <div class="page">
+    <div class="title"><div class="sep">-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------</div><div><b>PROJETO BÁSICO PARA:</b> ${v('proj')}</div><div class="sep">-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------</div></div>
+    <div class="sec">1. <b>DADOS DA INSTITUIÇÃO</b></div>
+    <table>
+      <tr><td><b>Órgão/ Entidade Proponente</b></td><td></td><td><b>Nº do CNPJ</b></td><td></td></tr>
+      <tr><td>${v('orgao')}</td><td></td><td>${v('cnpj')}</td><td></td></tr>
+      <tr><td colspan="4"><b>Endereço:</b> ${v('end')}</td></tr>
+      <tr><td><b>Cidade:</b> ${v('cidade')}</td><td><b>U.F.:</b> ${v('uf')}</td><td><b>CEP:</b> ${v('cep')}</td><td><b>Telefone:</b> ${v('tel')}</td></tr>
+    </table>
+  </div>
+  <div class="page break">
+    <div class="sec">2. <b>DESCRIÇÃO DO PROJETO</b></div>
+    <div class="sub">1. <b>TITULO DO PROJETO</b></div><p>${v('titulo')}</p>
+    <div class="sub">2. <b>IDENTIFICAÇÃO DO OBJETO</b></div><p>${v('objeto')}</p>
+    <div class="sub">3. <b>JUSTIFICATIVA</b></div><p>${v('just').replace(/\n/g,'<br>')}</p>
+    <div class="sub">4. <b>DO VALOR</b></div><p>Acréscimo: O valor total do presente Termo Aditivo é de ${v('vtotal')}, correspondente integralmente a quantitativos, calculados de acordo com os valores demonstrados na planilha em Anexo.</p>
+  </div>
+  <div class="page break">
+    <div class="sec">3. <b>BASE DE CÁLCULO PARA O ADITIVO</b></div>
+    <div class="sub">1. <b>REFERÊNCIAS</b></div><p>A base de cálculo para incidência do percentual de aditivo, até o limite de 25%, corresponde ao <b>valor inicial atualizado do contrato</b>, conforme disposto no <b>art. 125, § 1º, da Lei nº 14.133/2021</b>.</p>
+    <div class="sub">2. <b>CÁLCULO DO VALOR ATUALIZADO DO CONTRATO</b></div>
+    <table><tr><td><b>VALOR INICIAL DO CONTRATO</b></td><td>${v('vinicial')}</td></tr><tr><td><b>VALOR REAJUSTADO</b></td><td>R$ 0,00</td></tr><tr><td><b>VALOR ATUALIZADO DO CONTRATO</b></td><td>${v('vatual')}</td></tr></table>
+    <div class="sub">3. <b>LIMITE LEGAL PARA ALTERAÇÕES</b></div><p>Assim sendo, o limite legal para alterações no Contrato é de <b>${v('vlimite')}</b>.</p>
+    <table><tr><td><b>LIMITE LEGAL (25%)</b></td><td><b>${v('vlimite')}</b></td></tr><tr><td><b>TERMO ADITIVO 2</b></td><td>${v('vtotal')}</td></tr><tr><td><b>TERMO ADITIVO 3 (PEDIDO ATUAL)</b></td><td>${v('vtotal')}</td></tr><tr><td><b>SALDO PARA ADITIVO</b></td><td>${v('vsaldo')}</td></tr></table>
+  </div>
+  <div class="page break">
+    <div class="sec">1. <b>HISTÓRICO EVOLUTIVO DO CONTRATO</b></div>
+    <table><tr><th>TERMO</th><th>VALOR</th><th>DESCRIÇÃO</th></tr><tr><td>Contrato 13/2025</td><td>${v('vinicial')}</td><td>Contratação</td></tr><tr><td>1º TERMO ADITIVO</td><td></td><td>PRAZO</td></tr><tr><td>2º TERMO ADITIVO</td><td>${v('vtotal')}</td><td>ADITIVO DE ITENS E QUANTITATIVO</td></tr></table>
+    <div class="sub">2. <b>SOLICITAÇÃO ATUAL</b></div>
+    <table><tr><th>TERMO</th><th>VALOR</th><th>DESCRIÇÃO</th></tr><tr><td>3º TA ao Contrato 13/2025</td><td>${v('vtotal')}</td><td>Acréscimo de quantitativo</td></tr></table>
+    <div class="sub">3. <b>PLANO DE APLICAÇÃO</b></div>
+    <table><tr><th>Dotação Orçamentária</th><th>Fonte</th><th>Elemento de Despesa</th></tr><tr><td>OBRAS<br><br>4.4.90.51.00.2.14.00.27.812.0015.1.0073.2.659.050</td><td>1.500/ 1.571/ 2.571</td><td>4.4.90.51.00</td></tr></table>
+    <div class="sub">4. <b>CRONOGRAMA DE EXECUÇÃO (ETAPA/FASE)</b></div>
+    <table><tr><th>Etapa/ Fase</th><th>Especificação</th><th>Indicador Físico</th></tr><tr><td>Única</td><td>Aditivo de valor referente ao Contrato n.º 13/2025 vinculado à Concorrência n.º 006/2024, PAC n.º 59/2024.</td><td>01</td></tr></table>
+    <div class="sub">5. <b>DECLARAÇÃO</b></div><p>Declaramos que o presente Projeto Básico foi elaborado em conformidade com a Lei nº 14.133, de 1º de abril de 2021, observando-se os princípios, diretrizes e requisitos nela estabelecidos, bem como as demais normas legais e regulamentares aplicáveis.</p>
+    <div class="sub">6. <b>CONCLUSÃO</b></div><p>Diante do exposto, a Secretaria Gestora do contrato solicita autorização para prosseguir com Aditivo de Acréscimo apresentado.</p>
+    <p class="right">${v('cidade')}, ${v('data')}.</p>
+    <p class="center"><b>${v('ass1')}</b><br>${v('car1')}</p>
+    <p class="center"><b>${v('ass2')}</b><br>${v('car2')}</p>
+  </div>`}
+render();
+
+function gerarPDF(){
+  render();
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({unit:'pt', format:'a4'});
+  const pages = document.querySelectorAll('.page');
+  const renderPage = async (el, add=false) => {
+    const canvas = await html2canvas(el,{scale:2,useCORS:true,backgroundColor:'#ffffff'});
+    const img = canvas.toDataURL('image/png');
+    const pw = 595.28, ph = 841.89;
+    const ratio = Math.min(pw/canvas.width, ph/canvas.height);
+    const iw = canvas.width*ratio, ih = canvas.height*ratio;
+    const x = (pw - iw)/2, y = 0;
+    if(add) doc.addPage();
+    doc.addImage(img,'PNG',x,y,iw,ih);
+  };
+  (async()=>{
+    for(let i=0;i<pages.length;i++) await renderPage(pages[i], i>0);
+    doc.save('projeto-basico-aditivo.pdf');
+  })();
+}
+</script>
+</body>
+</html>
