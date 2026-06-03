@@ -109,63 +109,76 @@ async function readExcelFile(file){
   const ws = wb.Sheets[target];
   const data = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
 
-  // Verifica se um valor de célula é numérico real (não vazio)
   const isNum = v => v !== null && v !== undefined && v !== '' && !isNaN(Number(v));
+  const isVC  = v => typeof v === 'string' && /valor\s+de\s+contrato/i.test(v);
 
-  // ── PASSO 1: detecta colValorContrato e colMedicao no 1º item inteiro encontrado ──
-  // Item inteiro = col[0] é um número sem ponto/vírgula (ex: 1, 2, 3)
   let colValorContrato = -1, colMedicao = -1, colAcumulado = -1, colSaldo = -1;
 
+  // ── PASSO 0: detecta pelo cabeçalho ──
+  // Varre TODAS as linhas antes do primeiro item inteiro.
+  // Pega a Última coluna cujo texto contenha "valor de contrato" (qualquer variação).
+  // Ex: "Valor de Contrato", "Valor de Contrato Atualizado Reajuste 2" etc.
+  // As 3 colunas de índice absoluto seguintes = medicao, acumulado, saldo.
   for(let r = 0; r < data.length; r++){
     const row = data[r] || [];
-    const raw = row[0];
-    if(raw === null || raw === undefined) continue;
-    const itemStr = String(raw).trim();
-    // inteiro puro: apenas dígitos, sem ponto ou vírgula
-    if(!/^\d+$/.test(itemStr)) continue;
-
-    // Encontrou o primeiro item inteiro. Agora varre as colunas da direita
-    // procurando o primeiro valor numérico significativo (> 0) = valorContrato
-    // As 3 seguintes com valor numérico (podem ser 0) = medicao, acumulado, saldo
-    let numericCols = [];
+    // Para quando chega no primeiro item inteiro
+    const raw0 = row[0];
+    if(raw0 !== null && raw0 !== undefined && /^\d+$/.test(String(raw0).trim())) break;
+    // Varre todas as células desta linha procurando o cabeçalho VC
     for(let c = 1; c < row.length; c++){
-      if(isNum(row[c])) numericCols.push(c);
+      if(isVC(row[c])) colValorContrato = c; // guarda o último match (reajuste 2 > reajuste 1)
     }
-
-    // O valorContrato é o primeiro numérico com valor > 0
-    // (evita pegar colunas de índice ou percentual que ficam antes)
-    let vcIdx = numericCols.findIndex(c => Number(row[c]) > 0);
-    if(vcIdx < 0) continue; // linha sem valores úteis, tenta próxima
-
-    colValorContrato = numericCols[vcIdx];
-    // As 3 colunas numéricas imediatamente após colValorContrato (em ordem de coluna)
-    const afterVC = numericCols.slice(vcIdx + 1);
-    if(afterVC.length >= 3){
-      colMedicao   = afterVC[0];
-      colAcumulado = afterVC[1];
-      colSaldo     = afterVC[2];
-    } else {
-      // fallback: colunas fixas relativas
-      colMedicao   = colValorContrato + 1;
-      colAcumulado = colValorContrato + 2;
-      colSaldo     = colValorContrato + 3;
-    }
-    break; // colunas detectadas, sai do loop
+  }
+  if(colValorContrato >= 0){
+    // Colunas absolutas seguintes (mesmo que vazias nos dados)
+    colMedicao   = colValorContrato + 1;
+    colAcumulado = colValorContrato + 2;
+    colSaldo     = colValorContrato + 3;
   }
 
-  // Fallback absoluto se não detectou nada
+  // ── PASSO 1 (fallback): detecta pelo primeiro item inteiro quando cabeçalho não foi achado ──
+  if(colValorContrato < 0){
+    for(let r = 0; r < data.length; r++){
+      const row = data[r] || [];
+      const raw = row[0];
+      if(raw === null || raw === undefined) continue;
+      if(!/^\d+$/.test(String(raw).trim())) continue;
+
+      let numericCols = [];
+      for(let c = 1; c < row.length; c++){
+        if(isNum(row[c])) numericCols.push(c);
+      }
+      let vcIdx = numericCols.findIndex(c => Number(row[c]) > 0);
+      if(vcIdx < 0) continue;
+
+      colValorContrato = numericCols[vcIdx];
+      const afterVC = numericCols.slice(vcIdx + 1);
+      if(afterVC.length >= 3){
+        colMedicao   = afterVC[0];
+        colAcumulado = afterVC[1];
+        colSaldo     = afterVC[2];
+      } else {
+        colMedicao   = colValorContrato + 1;
+        colAcumulado = colValorContrato + 2;
+        colSaldo     = colValorContrato + 3;
+      }
+      break;
+    }
+  }
+
+  // Fallback absoluto
   if(colValorContrato < 0){ colValorContrato=12; colMedicao=13; colAcumulado=14; colSaldo=15; }
 
-  // ── PASSO 2: lê todos os itens inteiros com as colunas detectadas ──
+  // ── PASSO 2: lê todos os itens inteiros ──
   const items = [];
   for(let r = 0; r < data.length; r++){
     const row = data[r] || [];
     const raw = row[0];
     if(raw === null || raw === undefined) continue;
     const itemStr = String(raw).trim();
-    if(!/^\d+$/.test(itemStr)) continue; // ignora sub-itens (1.1, 2.3...)
+    if(!/^\d+$/.test(itemStr)) continue;
 
-    const descricao = row[3] ?? row[2] ?? row[1] ?? '';
+    const descricao     = row[3] ?? row[2] ?? row[1] ?? '';
     const valorContrato = Number(row[colValorContrato]) || 0;
     const medicao       = Number(row[colMedicao])       || 0;
     const acumulado     = Number(row[colAcumulado])     || 0;
@@ -183,7 +196,6 @@ async function readExcelFile(file){
     });
   }
 
-  // Resumo calculado a partir dos itens
   const summaryTotal     = items.reduce((a,i)=>a+i.valorContrato,0);
   const summaryAcumulado = items.reduce((a,i)=>a+i.acumulado,0);
   const summaryPct = summaryTotal > 0 ? +(summaryAcumulado/summaryTotal*100).toFixed(2) : 0;
