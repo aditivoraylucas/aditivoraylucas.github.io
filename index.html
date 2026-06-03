@@ -110,34 +110,42 @@ async function readExcelFile(file){
   const data = XLSX.utils.sheet_to_json(ws, {header:1, defval:null});
 
   const isNum = v => v !== null && v !== undefined && v !== '' && !isNaN(Number(v));
-  const isVC  = v => typeof v === 'string' && /valor\s+de\s+contrato/i.test(v);
+
+  // Helpers: testa se o texto da célula corresponde a cada coluna
+  // Pega o ULTIMO match para suportar múltiplos reajustes (reajuste 2 > reajuste 1)
+  const matchVC  = v => typeof v === 'string' && /valor\s+de\s+contrato/i.test(v);
+  const matchMED = v => typeof v === 'string' && /(no\s*per[ií]odo|n\.?\s*per[ií]odo|medi[cç][aã]o\s+do\s+per|do\s+per[ií]odo)/i.test(v);
+  const matchACU = v => typeof v === 'string' && /acumulad/i.test(v);
+  const matchSAL = v => typeof v === 'string' && /saldo/i.test(v);
 
   let colValorContrato = -1, colMedicao = -1, colAcumulado = -1, colSaldo = -1;
 
-  // ── PASSO 0: detecta pelo cabeçalho ──
-  // Varre TODAS as linhas antes do primeiro item inteiro.
-  // Pega a Última coluna cujo texto contenha "valor de contrato" (qualquer variação).
-  // Ex: "Valor de Contrato", "Valor de Contrato Atualizado Reajuste 2" etc.
-  // As 3 colunas de índice absoluto seguintes = medicao, acumulado, saldo.
+  // ── PASSO 0: detecta TODAS as colunas pelo cabeçalho ──
+  // Varre todas as linhas antes do 1º item inteiro.
+  // Para cada coluna, guarda o ULTIMO índice que bater com cada regex.
+  // Isso garante que "Valor de Contrato Atualizado Reajuste 2" seja preferido
+  // sobre "Valor de Contrato Atualizado Reajuste 1", independente de linha ou coluna.
   for(let r = 0; r < data.length; r++){
     const row = data[r] || [];
-    // Para quando chega no primeiro item inteiro
-    const raw0 = row[0];
-    if(raw0 !== null && raw0 !== undefined && /^\d+$/.test(String(raw0).trim())) break;
-    // Varre todas as células desta linha procurando o cabeçalho VC
-    for(let c = 1; c < row.length; c++){
-      if(isVC(row[c])) colValorContrato = c; // guarda o último match (reajuste 2 > reajuste 1)
+    // Para ao encontrar o primeiro item inteiro (início dos dados)
+    if(row[0] !== null && row[0] !== undefined && /^\d+$/.test(String(row[0]).trim())) break;
+    for(let c = 0; c < row.length; c++){
+      const v = row[c];
+      if(matchVC(v))  colValorContrato = c;
+      if(matchMED(v)) colMedicao       = c;
+      if(matchACU(v)) colAcumulado     = c;
+      if(matchSAL(v)) colSaldo         = c;
     }
   }
-  if(colValorContrato >= 0){
-    // Colunas absolutas seguintes (mesmo que vazias nos dados)
-    colMedicao   = colValorContrato + 1;
-    colAcumulado = colValorContrato + 2;
-    colSaldo     = colValorContrato + 3;
-  }
 
-  // ── PASSO 1 (fallback): detecta pelo primeiro item inteiro quando cabeçalho não foi achado ──
-  if(colValorContrato < 0){
+  // ── PASSO 1 (fallback): cabeçalho não foi suficiente ──
+  // Se VC foi encontrado pelo cabeçalho mas as demais não, completa com índices absolutos.
+  if(colValorContrato >= 0){
+    if(colMedicao   < 0) colMedicao   = colValorContrato + 1;
+    if(colAcumulado < 0) colAcumulado = colValorContrato + 2;
+    if(colSaldo     < 0) colSaldo     = colValorContrato + 3;
+  } else {
+    // Nenhuma coluna detectada pelo cabeçalho: usa detecção por valor no 1º item inteiro
     for(let r = 0; r < data.length; r++){
       const row = data[r] || [];
       const raw = row[0];
@@ -148,35 +156,29 @@ async function readExcelFile(file){
       for(let c = 1; c < row.length; c++){
         if(isNum(row[c])) numericCols.push(c);
       }
-      let vcIdx = numericCols.findIndex(c => Number(row[c]) > 0);
+      const vcIdx = numericCols.findIndex(c => Number(row[c]) > 0);
       if(vcIdx < 0) continue;
 
       colValorContrato = numericCols[vcIdx];
       const afterVC = numericCols.slice(vcIdx + 1);
-      if(afterVC.length >= 3){
-        colMedicao   = afterVC[0];
-        colAcumulado = afterVC[1];
-        colSaldo     = afterVC[2];
-      } else {
-        colMedicao   = colValorContrato + 1;
-        colAcumulado = colValorContrato + 2;
-        colSaldo     = colValorContrato + 3;
-      }
+      colMedicao   = afterVC[0] ?? colValorContrato + 1;
+      colAcumulado = afterVC[1] ?? colValorContrato + 2;
+      colSaldo     = afterVC[2] ?? colValorContrato + 3;
       break;
     }
   }
 
-  // Fallback absoluto
+  // Fallback absoluto final
   if(colValorContrato < 0){ colValorContrato=12; colMedicao=13; colAcumulado=14; colSaldo=15; }
 
-  // ── PASSO 2: lê todos os itens inteiros ──
+  // ── PASSO 2: lê todos os itens inteiros com as colunas mapeadas ──
   const items = [];
   for(let r = 0; r < data.length; r++){
     const row = data[r] || [];
     const raw = row[0];
     if(raw === null || raw === undefined) continue;
     const itemStr = String(raw).trim();
-    if(!/^\d+$/.test(itemStr)) continue;
+    if(!/^\d+$/.test(itemStr)) continue; // ignora sub-itens (1.1, 2.3…)
 
     const descricao     = row[3] ?? row[2] ?? row[1] ?? '';
     const valorContrato = Number(row[colValorContrato]) || 0;
