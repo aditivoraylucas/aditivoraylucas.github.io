@@ -111,7 +111,12 @@ async function readExcelFile(file){
 
   const isNum = v => v !== null && v !== undefined && v !== '' && !isNaN(Number(v));
 
-  // ── PASSO 1: detecta colunas no 1º item inteiro encontrado ──
+  // ── PASSO 1: detecta colValorContrato no 1º item inteiro encontrado ──
+  // Estratégia:
+  //   - Coleta TODAS as colunas numéricas com valor > 0 da linha
+  //   - A PENULTIMA é o valorContrato mais recente (reajuste mais recente)
+  //   - As 3 colunas em índice absoluto logo APÓS colValorContrato
+  //     são sempre medicao, acumulado e saldo (mesmo que estejam vazias/zero)
   let colValorContrato = -1, colMedicao = -1, colAcumulado = -1, colSaldo = -1;
 
   for(let r = 0; r < data.length; r++){
@@ -119,31 +124,37 @@ async function readExcelFile(file){
     const raw = row[0];
     if(raw === null || raw === undefined) continue;
     const itemStr = String(raw).trim();
-    if(!/^\d+$/.test(itemStr)) continue; // apenas inteiro puro
+    if(!/^\d+$/.test(itemStr)) continue;
 
-    // Coleta todas as colunas numéricas da linha (exceto col 0)
-    let numericCols = [];
+    // Colunas numéricas com valor > 0 (ignora zeros e vazios para achar o bloco de contratos)
+    let positiveCols = [];
     for(let c = 1; c < row.length; c++){
-      if(isNum(row[c])) numericCols.push(c);
+      if(isNum(row[c]) && Number(row[c]) > 0) positiveCols.push(c);
     }
 
-    // Precisa ter pelo menos 4 colunas numéricas (vc + medicao + acumulado + saldo)
-    if(numericCols.length < 4) continue;
+    // Precisa de pelo menos 2 colunas positivas para ter valorContrato + saldo
+    if(positiveCols.length < 1) continue;
 
-    // Estratégia: as 3 últimas colunas numéricas são medicao, acumulado, saldo.
-    // A coluna imediatamente antes delas (a última antes do bloco de 3) = valorContrato.
-    // Isso garante que reajuste 2 prevalece sobre reajuste 1.
-    colSaldo        = numericCols[numericCols.length - 1];
-    colAcumulado    = numericCols[numericCols.length - 2];
-    colMedicao      = numericCols[numericCols.length - 3];
-    colValorContrato = numericCols[numericCols.length - 4];
+    // O último valor positivo antes do saldo é o valorContrato mais recente.
+    // O saldo é o último valor positivo da linha.
+    // O valorContrato é o penúltimo valor positivo (ou único, se só tiver 1).
+    // Após colValorContrato, as 3 colunas absolutas seguintes = medicao, acumulado, saldo.
+    colValorContrato = positiveCols.length >= 2
+      ? positiveCols[positiveCols.length - 2]  // penúltimo positivo = VC mais recente
+      : positiveCols[0];                        // fallback: único positivo
+
+    // medicao, acumulado e saldo são as 3 colunas de índice consecutivo APÓS colValorContrato
+    // independente de terem valor ou não
+    colMedicao   = colValorContrato + 1;
+    colAcumulado = colValorContrato + 2;
+    colSaldo     = colValorContrato + 3;
     break;
   }
 
   // Fallback absoluto
   if(colValorContrato < 0){ colValorContrato=12; colMedicao=13; colAcumulado=14; colSaldo=15; }
 
-  // ── PASSO 2: lê todos os itens inteiros ──
+  // ── PASSO 2: lê todos os itens inteiros com as colunas fixas detectadas ──
   const items = [];
   for(let r = 0; r < data.length; r++){
     const row = data[r] || [];
