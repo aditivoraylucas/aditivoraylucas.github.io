@@ -39,7 +39,7 @@
     let unsubObras = null, unsubAllObras = null;
     let obras = [], selectedObraId = null, rows = [], sourceContrato = null;
     let chartInstance = null, adminChartInstance = null;
-    let allUsersData = {};   // uid → {nome,email,role,blocked,obras:[]}
+    let allUsersData = {};
     let adminUnsubMap = {};
     let adminSelectedUid = null, adminSelectedObraId = null;
     let colabFormReady = false;
@@ -94,7 +94,7 @@
       return { uid: d.id, ...d.data() };
     }
 
-    // ══ ADMIN VIEW ══════════════════════════════════════════════════════
+    // ══ ADMIN VIEW ═════════════════════════════════════════════════
     function initAdminView(){
       showView('adminView');
       listenAllUsers();
@@ -114,8 +114,6 @@
         snap.docChanges().forEach(change => {
           const d = change.doc;
           const data = d.data();
-
-          // conta desativada (removida) → ignora para admin também
           if(data.disabled){
             if(allUsersData[d.id]){
               delete allUsersData[d.id];
@@ -128,8 +126,6 @@
             if(adminUnsubMap[d.id]){ adminUnsubMap[d.id](); delete adminUnsubMap[d.id]; }
             return;
           }
-
-          // conta ativa (mesmo que bloqueada) → admin visualiza normalmente
           if(!allUsersData[d.id]) allUsersData[d.id]={nome:data.nome||data.email,email:data.email,role:data.role,blocked:!!data.blocked,obras:[]};
           else {
             allUsersData[d.id].nome    = data.nome||data.email;
@@ -137,7 +133,6 @@
             allUsersData[d.id].role    = data.role;
             allUsersData[d.id].blocked = !!data.blocked;
           }
-
           if(data.role!=='admin' && !adminUnsubMap[d.id]){
             adminUnsubMap[d.id] = onSnapshot(collection(db,'users',d.id,'obras'), oSnap => {
               allUsersData[d.id].obras = oSnap.docs.map(o=>({id:o.id,...o.data()}));
@@ -201,11 +196,13 @@
       const totalMed=itens.reduce((a,i)=>a+(Number(i.medicao)||0),0);
       const pct=totalVC>0?(totalAcum/totalVC*100).toFixed(2):0;
       const done=itens.filter(r=>Number(r.percentualExecutado)>=99.5).length;
+      const vcAditivo = obra.resumo?.valorContratoAditivo || totalVC;
+      const acumTotal = obra.resumo?.acumuladoTotal || totalAcum;
 
       html+=`
       <div class="stats-grid" style="margin-bottom:1.5rem">
-        <div class="stat-card"><span class="stat-label">Itens</span><span class="stat-value">${itens.length}</span></div>
-        <div class="stat-card"><span class="stat-label">Concluídos</span><span class="stat-value" style="color:var(--success)">${done}</span></div>
+        <div class="stat-card"><span class="stat-label">Valor CT/Aditivo</span><span class="stat-value" style="font-size:1rem">${fmtMoney(vcAditivo)}</span></div>
+        <div class="stat-card"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="font-size:1rem;color:var(--success)">${fmtMoney(acumTotal)}</span></div>
         <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct}%</span></div>
         <div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.1rem">${esc(obra.medicaoAtual||'-')}</span></div>
         <div class="stat-card"><span class="stat-label">Valor Contrato</span><span class="stat-value" style="font-size:1rem">${fmtMoney(totalVC)}</span></div>
@@ -261,7 +258,8 @@
       const itens=Array.isArray(obra.itens)?obra.itens:[];
       const vc=itens.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
       const ac=itens.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
-      const pct=vc>0?(ac/vc*100).toFixed(2):0;
+      const vcAditivo = obra.resumo?.valorContratoAditivo || vc;
+      const pct=vcAditivo>0?(ac/vcAditivo*100).toFixed(2):0;
       return `<div class="obra-card" style="cursor:pointer" onclick="adminSelectObra('${obra.id}')">
         <div class="obra-card-header">
           <div><div class="obra-card-title">${esc(obra.nome||'Sem nome')}</div>
@@ -270,7 +268,7 @@
         </div>
         <div class="obra-progress-bar"><div class="obra-progress-fill" style="width:${Math.min(100,pct)}%"></div></div>
         <div class="obra-card-footer">
-          <span>Contrato: ${fmtMoney(vc)}</span><span>Acumulado: ${fmtMoney(ac)}</span><span>Saldo: ${fmtMoney(vc-ac)}</span>
+          <span>CT/Aditivo: ${fmtMoney(vcAditivo)}</span><span>Acumulado: ${fmtMoney(ac)}</span><span>Saldo: ${fmtMoney(vcAditivo-ac)}</span>
         </div>
       </div>`;
     }
@@ -279,7 +277,13 @@
       let tot=0,tit=0,tvc=0,tac=0;
       Object.values(allUsersData).forEach(u=>{
         if(u.role==='admin') return;
-        (u.obras||[]).forEach(o=>{tot++;const it=Array.isArray(o.itens)?o.itens:[];tit+=it.length;tvc+=it.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);tac+=it.reduce((a,i)=>a+(Number(i.acumulado)||0),0);});
+        (u.obras||[]).forEach(o=>{
+          tot++;
+          const it=Array.isArray(o.itens)?o.itens:[];
+          tit+=it.length;
+          tvc+=(o.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
+          tac+=(o.resumo?.acumuladoTotal)||it.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
+        });
       });
       const pg=tvc>0?(tac/tvc*100).toFixed(2):0;
       $('adminStats').innerHTML=`
@@ -289,7 +293,6 @@
         <div class="stat-card"><span class="stat-label">Acumulado Geral</span><span class="stat-value" style="font-size:1.1rem">${fmtMoney(tac)}</span></div>`;
     }
 
-    // ── Lista de colaboradores com botões Bloquear / Desbloquear / Remover ──
     function renderColabList(){
       const box=$('colabList'); if(!box) return;
       const colabs=Object.entries(allUsersData).filter(([,u])=>u.role!=='admin');
@@ -312,7 +315,6 @@
       }).join('');
     }
 
-    // ── Bloquear / Desbloquear ───────────────────────────────────────────────
     window.toggleBloqueio = async (uid, isBlocked) => {
       const novoEstado = !isBlocked;
       const msg = novoEstado
@@ -329,7 +331,6 @@
       }catch(err){ alert('Erro: '+err.message); }
     };
 
-    // ── Remover (desativa conta) ─────────────────────────────────────────────
     window.removeColab = async uid => {
       if(!confirm('Remover este colaborador? Ele perderá acesso ao sistema.')) return;
       try{
@@ -342,7 +343,6 @@
       }catch(err){ alert('Erro ao remover: '+err.message); }
     };
 
-    // ── Cadastro ─────────────────────────────────────────────────────────────
     function setupAdminColabForm(){
       $('addColabForm').addEventListener('submit', async e=>{
         e.preventDefault();
@@ -356,7 +356,6 @@
         const msgEl = $('colabMsgError');
         msgEl.style.display='none';
         const adminEmail = currentUser.email;
-
         try{
           const cred = await createUserWithEmailAndPassword(auth, email, senha);
           await setDoc(doc(db,'users',cred.user.uid),{
@@ -366,7 +365,6 @@
           await signInWithEmailAndPassword(auth, adminEmail, ADMIN_SENHA);
           $('colabNome').value=''; $('colabEmail').value=''; $('colabSenha').value='';
           alert(`Colaborador "${nome}" cadastrado com sucesso!`);
-
         }catch(err){
           if(err.code==='auth/email-already-in-use'){
             try{
@@ -415,7 +413,7 @@
       });
     }
 
-    // ══ COLABORADOR VIEW ════════════════════════════════════════════════════
+    // ══ COLABORADOR VIEW ═══════════════════════════════════════════════════
     function initUserView(){
       getDoc(doc(db,'users',currentUser.uid)).then(snap=>{
         if(!snap.exists()){ cleanupListeners(); signOut(auth); return; }
@@ -463,11 +461,77 @@
 
     function updateChart(){const ctx=$('sCurveChart').getContext('2d');if(chartInstance)chartInstance.destroy();const theme=document.documentElement.dataset.theme,gc=theme==='dark'?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)',tc=theme==='dark'?'#94a3b8':'#64748b';chartInstance=new Chart(ctx,{type:'bar',data:{labels:rows.map(r=>String(r.item||'')),datasets:[{label:'% Executado',data:rows.map(r=>Number(r.percentualExecutado)||0),backgroundColor:'rgba(99,102,241,0.2)',borderColor:'#6366f1',borderWidth:1,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},x:{grid:{display:false},ticks:{color:tc}}},plugins:{legend:{labels:{color:tc}}}}});}
 
-    function updateDashboard(){const done=rows.filter(r=>Number(r.percentualExecutado)>=99.5).length;const rp=Number(sourceContrato?.resumo?.percentual);const tc=rows.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);const ta=rows.reduce((a,r)=>a+(Number(r.acumulado)||0),0);const pct=!isNaN(rp)?rp:(tc>0?(ta/tc*100):0);$('stats').innerHTML=`<div class="stat-card"><span class="stat-label">Itens Totais</span><span class="stat-value">${rows.length}</span></div><div class="stat-card"><span class="stat-label">Concluídos</span><span class="stat-value" style="color:var(--success)">${done}</span></div><div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct.toFixed(2)}%</span></div><div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.2rem">${esc(sourceContrato?.medicaoAtual||'-')}</span></div>`;$('countAll').textContent=obras.length;$('countDone').textContent=done;$('countPct').textContent=pct.toFixed(2)+'%';updateChart();}
+    function updateDashboard(){
+      const o = currentObra();
+      // Valor CT/Aditivo: vem do resumo extraído do cabeçalho da planilha
+      const vcAditivo = o?.resumo?.valorContratoAditivo || rows.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
+      // Acumulado Total: vem do resumo extraído do cabeçalho da planilha
+      const acumTotal = o?.resumo?.acumuladoTotal || rows.reduce((a,r)=>a+(Number(r.acumulado)||0),0);
+      const rp = Number(o?.resumo?.percentual);
+      const pct = !isNaN(rp) && rp>0 ? rp : (vcAditivo>0?(acumTotal/vcAditivo*100):0);
+      $('stats').innerHTML=`
+        <div class="stat-card">
+          <span class="stat-label">Valor CT / Aditivo</span>
+          <span class="stat-value" style="font-size:1rem">${fmtMoney(vcAditivo)}</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Acumulado Total</span>
+          <span class="stat-value" style="font-size:1rem;color:var(--success)">${fmtMoney(acumTotal)}</span>
+        </div>
+        <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct.toFixed(2)}%</span></div>
+        <div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.2rem">${esc(o?.medicaoAtual||'-')}</span></div>`;
+      $('countAll').textContent = fmtMoney(vcAditivo);
+      $('countDone').textContent = fmtMoney(acumTotal);
+      $('countPct').textContent  = pct.toFixed(2)+'%';
+      updateChart();
+    }
 
     function renderAll(){renderObrasBox();renderTable();updateDashboard();}
 
     function normalizeImportedRows(list){if(!Array.isArray(list))return[];return list.map(item=>({item:item?.item??'',descricao:item?.descricao??item?.descricaoServico??item?.name??'',valorContrato:Number(item?.valorContrato??item?.valor_contrato??0)||0,medicao:Number(item?.medicao??0)||0,acumulado:Number(item?.acumulado??0)||0,saldo:Number(item?.saldo??0)||0,percentualExecutado:Number(item?.percentualExecutado??item?.percentual_executado??0)||0}));}
+
+    // ─────────────────────────────────────────────────────────────────────
+    // REGRA 1 — Busca "Valor Contrato com Aditivos e Reajuste" em qualquer
+    //           linha do cabeçalho. O valor numérico está na mesma linha,
+    //           na primeira coluna à direita que contenha um número > 0.
+    // REGRA 2 — Busca label "Acumulado" na linha do resumo (antes dos dados).
+    //           O valor está na linha imediatamente abaixo, mesma coluna.
+    // Ambas as regras percorrem TODAS as linhas antes de dataStart,
+    // garantindo que funcionem independente do tamanho da planilha.
+    // ─────────────────────────────────────────────────────────────────────
+    const RE_VCA = /valor.{0,40}(contrato|ct).{0,40}(aditiv|reajust|atualiz)/i;
+    const RE_ACUM_LABEL = /^acumulado$/i;
+
+    function extractHeaderValues(data, dataStart){
+      let valorContratoAditivo = 0;
+      let acumuladoTotal = 0;
+      const headerRows = data.slice(0, dataStart < 0 ? data.length : dataStart);
+
+      for(let r=0; r<headerRows.length; r++){
+        const row = headerRows[r] || [];
+        for(let c=0; c<row.length; c++){
+          const cell = String(row[c]??'').trim();
+
+          // REGRA 1: label "Valor Contrato com Aditivos e Reajuste"
+          if(!valorContratoAditivo && RE_VCA.test(cell)){
+            // procura número na mesma linha a partir da próxima coluna
+            for(let cc=c+1; cc<row.length; cc++){
+              const v = Number(row[cc]);
+              if(v > 0){ valorContratoAditivo = v; break; }
+            }
+          }
+
+          // REGRA 2: label "Acumulado" na seção de resumo (linha seguinte tem o valor)
+          if(!acumuladoTotal && RE_ACUM_LABEL.test(cell)){
+            // o valor está na linha imediatamente abaixo, mesma coluna
+            const nextRow = headerRows[r+1] || [];
+            const v = Number(nextRow[c]);
+            if(v > 0){ acumuladoTotal = v; }
+          }
+        }
+      }
+      return { valorContratoAditivo, acumuladoTotal };
+    }
 
     async function readExcelFile(file){
       if(!file)throw new Error('Nenhum arquivo fornecido.');
@@ -495,8 +559,25 @@
         const pct=vc>0?+(acum/vc*100).toFixed(2):0;
         items.push({item:itemStr,descricao,valorContrato:+vc.toFixed(2),medicao:+med.toFixed(2),acumulado:+acum.toFixed(2),saldo:+saldo.toFixed(2),percentualExecutado:pct});
       }
-      const st=items.reduce((a,i)=>a+i.valorContrato,0),sa=items.reduce((a,i)=>a+i.acumulado,0);
-      return{nome:fileBaseName(file.name),nomeProjeto:wb.Props?.Title||fileBaseName(file.name)||'Nova obra',medicaoAtual:target,itens:items,resumo:{total:st,acumulado:sa,percentual:st>0?+(sa/st*100).toFixed(2):0}};
+      const st=items.reduce((a,i)=>a+i.valorContrato,0);
+      const sa=items.reduce((a,i)=>a+i.acumulado,0);
+
+      // extrai valores do cabeçalho
+      const hv = extractHeaderValues(data, dataStart);
+
+      return{
+        nome:fileBaseName(file.name),
+        nomeProjeto:wb.Props?.Title||fileBaseName(file.name)||'Nova obra',
+        medicaoAtual:target,
+        itens:items,
+        resumo:{
+          total:st,
+          acumulado:sa,
+          percentual:st>0?+(sa/st*100).toFixed(2):0,
+          valorContratoAditivo: hv.valorContratoAditivo || st,
+          acumuladoTotal: hv.acumuladoTotal || sa
+        }
+      };
     }
 
     function loadFromJsonOrExcel(replace=false){
@@ -547,7 +628,7 @@
     .btn-danger{color:var(--danger);background:rgba(239,68,68,.1)}.btn-danger:hover{background:rgba(239,68,68,.2)}
     .btn-warning{color:#92400e;background:rgba(245,158,11,.12)}.btn-warning:hover{background:rgba(245,158,11,.22)}
     .btn-success{color:#065f46;background:rgba(16,185,129,.12)}.btn-success:hover{background:rgba(16,185,129,.22)}
-    [data-theme="dark"] .btn-warning{color:#fcd34d}.btn-warning{}.  [data-theme="dark"] .btn-success{color:#6ee7b7}
+    [data-theme="dark"] .btn-warning{color:#fcd34d}[data-theme="dark"] .btn-success{color:#6ee7b7}
     .container{max-width:1440px;margin:0 auto;padding:2rem}
     .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;flex-wrap:wrap;gap:1rem}
     .brand{display:flex;align-items:center;gap:1rem}
@@ -566,7 +647,7 @@
     .nav{display:flex;flex-direction:column;gap:.5rem;position:sticky;top:2rem}
     .nav-item{display:flex;justify-content:space-between;padding:.75rem 1rem;border-radius:var(--radius-sm);font-weight:500;color:var(--text-muted)}
     .nav-item.active{background:rgba(99,102,241,.1);color:var(--primary);font-weight:700}
-    .badge{background:var(--surface-hover);padding:.125rem .5rem;border-radius:999px;font-size:.75rem;border:1px solid var(--border)}
+    .badge{background:var(--surface-hover);padding:.125rem .5rem;border-radius:999px;font-size:.75rem;border:1px solid var(--border);white-space:nowrap}
     .nav-item.active .badge{background:#fff;color:var(--primary);border-color:transparent}
     .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem}
     .form-group{display:flex;flex-direction:column;gap:.375rem;margin-bottom:1rem}
@@ -675,8 +756,8 @@
     <div class="dashboard">
       <aside>
         <div class="nav">
-          <div class="nav-item active"><span>Dashboard</span><span class="badge" id="countAll">0</span></div>
-          <div class="nav-item"><span>Concluídas</span><span class="badge" id="countDone" style="color:var(--success)">0</span></div>
+          <div class="nav-item active"><span>Dashboard</span><span class="badge" id="countAll" style="font-size:.65rem">R$ 0</span></div>
+          <div class="nav-item"><span>Acumulado</span><span class="badge" id="countDone" style="color:var(--success);font-size:.65rem">R$ 0</span></div>
           <div class="nav-item"><span>Progresso</span><span class="badge" id="countPct">0%</span></div>
           <div class="panel mt-4" style="padding:1rem">
             <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">AÇÕES DE ARQUIVO</h3>
