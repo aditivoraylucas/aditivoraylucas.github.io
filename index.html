@@ -507,12 +507,13 @@
     function normalizeImportedRows(list){if(!Array.isArray(list))return[];return list.map(item=>({item:item?.item??'',descricao:item?.descricao??item?.descricaoServico??item?.name??'',valorContrato:Number(item?.valorContrato??item?.valor_contrato??0)||0,medicao:Number(item?.medicao??0)||0,acumulado:Number(item?.acumulado??0)||0,saldo:Number(item?.saldo??0)||0,percentualExecutado:Number(item?.percentualExecutado??item?.percentual_executado??0)||0}));}
 
     // ─────────────────────────────────────────────────────────────────────
-    // REGRA 1 — Busca "Valor Contrato com Aditivos e Reajuste" no cabeçalho.
-    //           Valor numérico: mesma linha, primeira coluna à direita > 0.
+    // REGRA 1 — Busca "Valor CT / TA" (e variações) no cabeçalho.
+    //           Valor: próximas colunas na mesma linha (até 6 à frente) OU
+    //                  linha imediatamente abaixo na mesma coluna.
     // REGRA 2 — Busca label "Acumulado" no cabeçalho.
-    //           Valor numérico: linha imediatamente abaixo, mesma coluna.
+    //           Valor: linha imediatamente abaixo, mesma coluna (apenas se > 0).
     // ─────────────────────────────────────────────────────────────────────
-    const RE_VCA = /valor.{0,40}(contrato|ct).{0,40}(aditiv|reajust|atualiz)/i;
+    const RE_VCA = /valor\s*(ct|contrato)\s*[\/\-]?\s*(ta|aditiv|reajust|atualiz)?/i;
     const RE_ACUM_LABEL = /^acumulado$/i;
 
     function extractHeaderValues(data, dataStart){
@@ -523,12 +524,22 @@
         const row = headerRows[r] || [];
         for(let c=0; c<row.length; c++){
           const cell = String(row[c]??'').trim();
+
+          // Regra 1: Valor CT / TA
           if(!valorContratoAditivo && RE_VCA.test(cell)){
-            for(let cc=c+1; cc<row.length; cc++){
+            // Tenta nas próximas colunas da mesma linha
+            for(let cc=c+1; cc<Math.min(c+7, row.length); cc++){
               const v = Number(row[cc]);
               if(v > 0){ valorContratoAditivo = v; break; }
             }
+            // Fallback: linha de baixo, mesma coluna
+            if(!valorContratoAditivo){
+              const v = Number((headerRows[r+1] || [])[c]);
+              if(v > 0) valorContratoAditivo = v;
+            }
           }
+
+          // Regra 2: Acumulado
           if(!acumuladoTotal && RE_ACUM_LABEL.test(cell)){
             const nextRow = headerRows[r+1] || [];
             const v = Number(nextRow[c]);
