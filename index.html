@@ -11,7 +11,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, deleteDoc, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, deleteDoc, getDocs } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBc7jh4dai3OZIriKdFxguI44A73TRKYTI",
@@ -29,7 +29,7 @@
     const ADMIN_EMAIL = "obras@admin.com";
     const ADMIN_SENHA = "35343535";
 
-    // ── helpers ──────────────────────────────────────────────────────────────
+    // ── helpers ───────────────────────────────────────────────────────────────
     const fmtMoney = v => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v)||0);
     const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     const fileBaseName = n => String(n||'').replace(/\.[^.]+$/,'');
@@ -40,9 +40,11 @@
     let currentUser = null, isAdmin = false;
     let unsubObras = null, unsubAllObras = null;
     let obras = [], selectedObraId = null, rows = [], sourceContrato = null;
-    let chartInstance = null;
-    let allUsersData = {}; // uid → {nome, email, obras[]}
-    let adminUnsubMap = {}; // uid → unsubscribe
+    let chartInstance = null, adminChartInstance = null;
+    let allUsersData = {};
+    let adminUnsubMap = {};
+    // admin drill-down
+    let adminSelectedUid = null, adminSelectedObraId = null;
 
     // ── views ─────────────────────────────────────────────────────────────────
     const $ = id => document.getElementById(id);
@@ -54,16 +56,6 @@
     // ════════════════════════════════════════════════════════════════════════
     //  AUTH
     // ════════════════════════════════════════════════════════════════════════
-    async function ensureAdminExists(){
-      try{ await signInWithEmailAndPassword(auth, ADMIN_EMAIL, ADMIN_SENHA); }
-      catch(e){
-        if(e.code==='auth/user-not-found'||e.code==='auth/invalid-credential'||e.code==='auth/invalid-email'){
-          const cred = await createUserWithEmailAndPassword(auth, ADMIN_EMAIL, ADMIN_SENHA);
-          await setDoc(doc(db,'users',cred.user.uid),{nome:'Chefe / Admin',email:ADMIN_EMAIL,role:'admin',criadoEm:Date.now()});
-        }
-      }
-    }
-
     onAuthStateChanged(auth, async user => {
       currentUser = user;
       if(!user){ showView('loginView'); return; }
@@ -74,12 +66,12 @@
       else        { initUserView(); }
     });
 
-    // ── Login form ────────────────────────────────────────────────────────────
     $('loginForm').addEventListener('submit', async e => {
       e.preventDefault();
       const email = $('loginEmail').value.trim();
       const senha = $('loginSenha').value;
       const btn = $('loginBtn'); btn.disabled=true; btn.textContent='Entrando...';
+      $('loginError').style.display='none';
       try{
         await signInWithEmailAndPassword(auth, email, senha);
       } catch(err){
@@ -95,8 +87,8 @@
       if(unsubObras) unsubObras();
       if(unsubAllObras) unsubAllObras();
       Object.values(adminUnsubMap).forEach(fn=>fn());
-      adminUnsubMap={};
-      allUsersData={};
+      adminUnsubMap={}; allUsersData={};
+      adminSelectedUid=null; adminSelectedObraId=null;
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -109,8 +101,7 @@
     }
 
     function listenAllUsers(){
-      const q = collection(db,'users');
-      unsubAllObras = onSnapshot(q, snap => {
+      unsubAllObras = onSnapshot(collection(db,'users'), snap => {
         snap.docs.forEach(d => {
           const data = d.data();
           if(!allUsersData[d.id]) allUsersData[d.id] = {nome:data.nome||data.email, email:data.email, role:data.role, obras:[]};
@@ -118,49 +109,181 @@
           if(data.role!=='admin' && !adminUnsubMap[d.id]){
             adminUnsubMap[d.id] = onSnapshot(collection(db,'users',d.id,'obras'), oSnap => {
               allUsersData[d.id].obras = oSnap.docs.map(o=>({id:o.id,...o.data()}));
-              renderAdminDashboard();
+              renderAdminStats();
+              renderAdminColabSidebar();
+              if(adminSelectedUid===d.id) renderAdminObraDetail();
             });
           }
         });
-        renderAdminDashboard();
+        renderAdminStats();
+        renderAdminColabSidebar();
         renderColabList();
       });
     }
 
-    function renderAdminDashboard(){
-      const container = $('adminObrasList');
-      if(!container) return;
-      let html = '';
-      Object.values(allUsersData).forEach(u => {
-        if(u.role==='admin') return;
-        if(!u.obras||!u.obras.length) return;
-        u.obras.forEach(obra => {
-          const itens = Array.isArray(obra.itens)?obra.itens:[];
-          const totalVC = itens.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
-          const totalAcum = itens.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
-          const pct = totalVC>0?(totalAcum/totalVC*100).toFixed(2):0;
-          html += `
-          <div class="obra-card">
-            <div class="obra-card-header">
-              <div>
-                <div class="obra-card-title">${esc(obra.nome||'Sem nome')}</div>
-                <div class="obra-card-sub">👤 ${esc(u.nome)} &nbsp;|&nbsp; ${itens.length} itens &nbsp;|&nbsp; Aba: ${esc(obra.medicaoAtual||'-')}</div>
-              </div>
-              <div class="obra-card-pct">${pct}%</div>
-            </div>
-            <div class="obra-progress-bar"><div class="obra-progress-fill" style="width:${Math.min(100,pct)}%"></div></div>
-            <div class="obra-card-footer">
-              <span>Contrato: ${fmtMoney(totalVC)}</span>
-              <span>Acumulado: ${fmtMoney(totalAcum)}</span>
-              <span>Saldo: ${fmtMoney(totalVC-totalAcum)}</span>
-            </div>
-          </div>`;
+    // ── sidebar de colaboradores (admin) ──────────────────────────────────────
+    function renderAdminColabSidebar(){
+      const box = $('adminColabSidebar'); if(!box) return;
+      const colabs = Object.entries(allUsersData).filter(([,u])=>u.role!=='admin');
+      if(!colabs.length){
+        box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem">Nenhum colaborador ainda.</p>';
+        return;
+      }
+      box.innerHTML = colabs.map(([uid,u])=>{
+        const n = (u.obras||[]).length;
+        const active = uid===adminSelectedUid;
+        return `<div class="colab-sidebar-item ${active?'active':''}" onclick="adminSelectColab('${uid}')">
+          <div style="font-weight:600;font-size:.875rem">${esc(u.nome)}</div>
+          <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n!==1?'s':''}</div>
+        </div>`;
+      }).join('');
+    }
+
+    window.adminSelectColab = uid => {
+      adminSelectedUid = uid;
+      adminSelectedObraId = null;
+      renderAdminColabSidebar();
+      renderAdminObraDetail();
+    };
+
+    // ── detalhe da obra selecionada pelo admin ────────────────────────────────
+    function renderAdminObraDetail(){
+      const panel = $('adminDetailPanel'); if(!panel) return;
+      if(!adminSelectedUid){ panel.innerHTML='<p style="color:var(--text-muted);padding:1rem">Selecione um colaborador ao lado para ver as obras.</p>'; return; }
+      const u = allUsersData[adminSelectedUid];
+      if(!u){ panel.innerHTML=''; return; }
+      const obrasList = u.obras||[];
+
+      // seletor de obras
+      let html = `<div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
+        <div style="font-weight:700;font-size:1.1rem">👤 ${esc(u.nome)}</div>
+        <div class="form-group" style="margin:0;min-width:220px">
+          <select id="adminObraSelect" class="form-control" onchange="adminSelectObra(this.value)">
+            <option value="">-- Selecione uma obra --</option>
+            ${obrasList.map(o=>`<option value="${o.id}" ${o.id===adminSelectedObraId?'selected':''}>${esc(o.nome||'Obra')}</option>`).join('')}
+          </select>
+        </div>
+      </div>`;
+
+      if(!adminSelectedObraId || !obrasList.length){
+        // resumo de todas as obras do colaborador
+        if(!obrasList.length){ html+='<p style="color:var(--text-muted)">Este colaborador não tem obras cadastradas.</p>'; }
+        else {
+          html += obrasList.map(obra => adminObraCardHTML(obra)).join('');
+        }
+        panel.innerHTML = html; return;
+      }
+
+      const obra = obrasList.find(o=>o.id===adminSelectedObraId);
+      if(!obra){ panel.innerHTML=html+'<p style="color:var(--text-muted)">Obra não encontrada.</p>'; return; }
+
+      const itens = Array.isArray(obra.itens)?obra.itens:[];
+      const totalVC = itens.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
+      const totalAcum = itens.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
+      const totalMed = itens.reduce((a,i)=>a+(Number(i.medicao)||0),0);
+      const pct = totalVC>0?(totalAcum/totalVC*100).toFixed(2):0;
+      const done = itens.filter(r=>Number(r.percentualExecutado)>=99.5).length;
+
+      html += `
+      <div class="stats-grid" style="margin-bottom:1.5rem">
+        <div class="stat-card"><span class="stat-label">Itens</span><span class="stat-value">${itens.length}</span></div>
+        <div class="stat-card"><span class="stat-label">Concluídos</span><span class="stat-value" style="color:var(--success)">${done}</span></div>
+        <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct}%</span></div>
+        <div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.1rem">${esc(obra.medicaoAtual||'-')}</span></div>
+        <div class="stat-card"><span class="stat-label">Valor Contrato</span><span class="stat-value" style="font-size:1rem">${fmtMoney(totalVC)}</span></div>
+        <div class="stat-card"><span class="stat-label">Acumulado</span><span class="stat-value" style="font-size:1rem">${fmtMoney(totalAcum)}</span></div>
+        <div class="stat-card"><span class="stat-label">Medição</span><span class="stat-value" style="font-size:1rem">${fmtMoney(totalMed)}</span></div>
+        <div class="stat-card"><span class="stat-label">Saldo</span><span class="stat-value" style="font-size:1rem">${fmtMoney(totalVC-totalAcum)}</span></div>
+      </div>
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h3 style="margin-bottom:1rem">Curva S — Progresso Físico</h3>
+        <div class="chart-container"><canvas id="adminCurvaS"></canvas></div>
+      </div>
+      <div class="panel">
+        <h3 style="margin-bottom:1rem">Índice de Itens</h3>
+        <div class="table-container">
+          <table>
+            <thead><tr>
+              <th>Item</th><th>Descrição</th>
+              <th style="text-align:right">Valor Contrato</th>
+              <th style="text-align:right">Medição</th>
+              <th style="text-align:right">Acumulado</th>
+              <th style="text-align:right">Saldo</th>
+              <th style="text-align:right">% Exec.</th>
+            </tr></thead>
+            <tbody>
+              ${itens.map(r=>`<tr>
+                <td>${esc(r.item)}</td>
+                <td>${esc(r.descricao)}</td>
+                <td style="text-align:right">${fmtMoney(r.valorContrato)}</td>
+                <td style="text-align:right">${fmtMoney(r.medicao)}</td>
+                <td style="text-align:right">${fmtMoney(r.acumulado)}</td>
+                <td style="text-align:right">${fmtMoney(r.saldo)}</td>
+                <td style="text-align:right;font-weight:700;color:${Number(r.percentualExecutado)>=99.5?'var(--success)':'var(--text)'}">${Number(r.percentualExecutado||0).toFixed(2)}%</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+
+      panel.innerHTML = html;
+
+      // desenha curva S
+      requestAnimationFrame(()=>{
+        const canvas = $('adminCurvaS'); if(!canvas) return;
+        if(adminChartInstance) adminChartInstance.destroy();
+        const theme=document.documentElement.dataset.theme;
+        const gc=theme==='dark'?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)';
+        const tc=theme==='dark'?'#94a3b8':'#64748b';
+        adminChartInstance = new Chart(canvas.getContext('2d'),{
+          type:'bar',
+          data:{
+            labels:itens.map(r=>String(r.item||'')),
+            datasets:[{
+              label:'% Executado',
+              data:itens.map(r=>Number(r.percentualExecutado)||0),
+              backgroundColor:'rgba(99,102,241,0.2)',
+              borderColor:'#6366f1',
+              borderWidth:1,borderRadius:4
+            }]
+          },
+          options:{responsive:true,maintainAspectRatio:false,
+            scales:{
+              y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},
+              x:{grid:{display:false},ticks:{color:tc}}
+            },
+            plugins:{legend:{labels:{color:tc}}}
+          }
         });
       });
-      container.innerHTML = html || '<p style="color:var(--text-muted);padding:1rem">Nenhuma obra cadastrada pelos colaboradores ainda.</p>';
+    }
 
-      // stats
-      let totalObras=0, totalItens=0, totalVC=0, totalAcum=0;
+    window.adminSelectObra = obraId => {
+      adminSelectedObraId = obraId || null;
+      renderAdminObraDetail();
+    };
+
+    function adminObraCardHTML(obra){
+      const itens=Array.isArray(obra.itens)?obra.itens:[];
+      const vc=itens.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
+      const ac=itens.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
+      const pct=vc>0?(ac/vc*100).toFixed(2):0;
+      return `<div class="obra-card" style="cursor:pointer" onclick="adminSelectObra('${obra.id}')">
+        <div class="obra-card-header">
+          <div><div class="obra-card-title">${esc(obra.nome||'Sem nome')}</div>
+          <div class="obra-card-sub">${itens.length} itens &nbsp;|&nbsp; Aba: ${esc(obra.medicaoAtual||'-')}</div></div>
+          <div class="obra-card-pct">${pct}%</div>
+        </div>
+        <div class="obra-progress-bar"><div class="obra-progress-fill" style="width:${Math.min(100,pct)}%"></div></div>
+        <div class="obra-card-footer">
+          <span>Contrato: ${fmtMoney(vc)}</span><span>Acumulado: ${fmtMoney(ac)}</span><span>Saldo: ${fmtMoney(vc-ac)}</span>
+        </div>
+      </div>`;
+    }
+
+    // ── stats gerais ──────────────────────────────────────────────────────────
+    function renderAdminStats(){
+      let totalObras=0,totalItens=0,totalVC=0,totalAcum=0;
       Object.values(allUsersData).forEach(u=>{
         if(u.role==='admin') return;
         (u.obras||[]).forEach(o=>{
@@ -171,7 +294,7 @@
           totalAcum+=it.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
         });
       });
-      const pctGeral = totalVC>0?(totalAcum/totalVC*100).toFixed(2):0;
+      const pctGeral=totalVC>0?(totalAcum/totalVC*100).toFixed(2):0;
       $('adminStats').innerHTML=`
         <div class="stat-card"><span class="stat-label">Total de Obras</span><span class="stat-value">${totalObras}</span></div>
         <div class="stat-card"><span class="stat-label">Total de Itens</span><span class="stat-value">${totalItens}</span></div>
@@ -179,12 +302,12 @@
         <div class="stat-card"><span class="stat-label">Acumulado Geral</span><span class="stat-value" style="font-size:1.1rem">${fmtMoney(totalAcum)}</span></div>`;
     }
 
+    // ── lista de colabs (painel gerenciamento) ────────────────────────────────
     function renderColabList(){
-      const box = $('colabList');
-      if(!box) return;
-      const colabs = Object.entries(allUsersData).filter(([,u])=>u.role!=='admin');
-      if(!colabs.length){ box.innerHTML='<p style="color:var(--text-muted);font-size:.875rem">Nenhum colaborador cadastrado.</p>'; return; }
-      box.innerHTML = colabs.map(([uid,u])=>`
+      const box=$('colabList'); if(!box) return;
+      const colabs=Object.entries(allUsersData).filter(([,u])=>u.role!=='admin');
+      if(!colabs.length){box.innerHTML='<p style="color:var(--text-muted);font-size:.875rem">Nenhum colaborador cadastrado.</p>';return;}
+      box.innerHTML=colabs.map(([uid,u])=>`
         <div class="colab-item">
           <div><strong>${esc(u.nome)}</strong><br><small>${esc(u.email)}</small></div>
           <button class="btn btn-danger" style="padding:.35rem .75rem;font-size:.75rem" onclick="removeColab('${uid}')">Remover</button>
@@ -194,95 +317,85 @@
     function setupAdminColabForm(){
       $('addColabForm').addEventListener('submit', async e=>{
         e.preventDefault();
-        const nome  = $('colabNome').value.trim();
-        const email = $('colabEmail').value.trim();
-        const senha = $('colabSenha').value;
-        const btn = $('addColabBtn'); btn.disabled=true; btn.textContent='Cadastrando...';
+        const nome=$('colabNome').value.trim(),email=$('colabEmail').value.trim(),senha=$('colabSenha').value;
+        const btn=$('addColabBtn');btn.disabled=true;btn.textContent='Cadastrando...';
         try{
-          // salva auth atual para relogar depois
-          const adminEmail = currentUser.email;
-          const cred = await createUserWithEmailAndPassword(auth, email, senha);
+          const adminEmail=currentUser.email;
+          const cred=await createUserWithEmailAndPassword(auth,email,senha);
           await setDoc(doc(db,'users',cred.user.uid),{nome,email,role:'colaborador',criadoEm:Date.now()});
-          // reloga admin
           await signOut(auth);
-          await signInWithEmailAndPassword(auth, adminEmail, ADMIN_SENHA);
-          $('colabNome').value=''; $('colabEmail').value=''; $('colabSenha').value='';
+          await signInWithEmailAndPassword(auth,adminEmail,ADMIN_SENHA);
+          $('colabNome').value='';$('colabEmail').value='';$('colabSenha').value='';
           alert(`Colaborador "${nome}" cadastrado com sucesso!`);
-        } catch(err){
-          alert('Erro ao cadastrar: '+err.message);
-        } finally{ btn.disabled=false; btn.textContent='Cadastrar colaborador'; }
+        }catch(err){alert('Erro ao cadastrar: '+err.message);}
+        finally{btn.disabled=false;btn.textContent='Cadastrar colaborador';}
       });
     }
 
-    window.removeColab = async uid => {
+    window.removeColab = async uid=>{
       if(!confirm('Remover este colaborador e todas as obras dele?')) return;
-      // deletar obras subcollection manualmente (Firestore não faz cascade)
-      const obras = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
-      const oSnap = await obras.getDocs(collection(db,'users',uid,'obras'));
+      const oSnap=await getDocs(collection(db,'users',uid,'obras'));
       for(const o of oSnap.docs) await deleteDoc(doc(db,'users',uid,'obras',o.id));
       await deleteDoc(doc(db,'users',uid));
       delete allUsersData[uid];
-      if(adminUnsubMap[uid]){ adminUnsubMap[uid](); delete adminUnsubMap[uid]; }
-      renderAdminDashboard(); renderColabList();
+      if(adminUnsubMap[uid]){adminUnsubMap[uid]();delete adminUnsubMap[uid];}
+      if(adminSelectedUid===uid){adminSelectedUid=null;adminSelectedObraId=null;}
+      renderAdminStats();renderAdminColabSidebar();renderColabList();renderAdminObraDetail();
     };
+
+    $('adminToggleColab').addEventListener('click',()=>{const p=$('adminColabPanel');p.style.display=p.style.display==='none'?'block':'none';});
 
     // ════════════════════════════════════════════════════════════════════════
     //  COLABORADOR VIEW
     // ════════════════════════════════════════════════════════════════════════
     function initUserView(){
       showView('appView');
-      obras=[]; selectedObraId=null; rows=[];
+      obras=[];selectedObraId=null;rows=[];
       listenUserObras();
     }
 
     function listenUserObras(){
       if(unsubObras) unsubObras();
-      unsubObras = onSnapshot(collection(db,'users',currentUser.uid,'obras'), snap=>{
-        obras = snap.docs.map(d=>({id:d.id,...d.data()}));
-        if(!selectedObraId && obras.length) selectedObraId=obras[0].id;
-        if(selectedObraId){ const o=obras.find(x=>x.id===selectedObraId); if(o) applySelected(o); }
+      unsubObras=onSnapshot(collection(db,'users',currentUser.uid,'obras'),snap=>{
+        obras=snap.docs.map(d=>({id:d.id,...d.data()}));
+        if(!selectedObraId&&obras.length) selectedObraId=obras[0].id;
+        if(selectedObraId){const o=obras.find(x=>x.id===selectedObraId);if(o) applySelected(o);}
         renderAll();
       });
     }
 
-    async function saveObraFirestore(obra){
-      await setDoc(doc(db,'users',currentUser.uid,'obras',obra.id), obra);
-    }
+    async function saveObraFirestore(obra){ await setDoc(doc(db,'users',currentUser.uid,'obras',obra.id),obra); }
+    async function deleteObraFirestore(id){ await deleteDoc(doc(db,'users',currentUser.uid,'obras',id)); }
 
-    async function deleteObraFirestore(id){
-      await deleteDoc(doc(db,'users',currentUser.uid,'obras',id));
-    }
-
-    // ── colaborador: render ───────────────────────────────────────────────────
-    function applySelected(o){ rows=Array.isArray(o.itens)?o.itens:[]; sourceContrato=o; $('projName').value=o.nomeProjeto||o.nome||'Nova obra'; $('projClient').value=o.cliente||''; $('projScope').value=o.medicaoAtual||''; }
-    function currentObra(){ return obras.find(o=>o.id===selectedObraId); }
+    function applySelected(o){rows=Array.isArray(o.itens)?o.itens:[];sourceContrato=o;$('projName').value=o.nomeProjeto||o.nome||'Nova obra';$('projClient').value=o.cliente||'';$('projScope').value=o.medicaoAtual||'';}
+    function currentObra(){return obras.find(o=>o.id===selectedObraId);}
 
     function renderObrasBox(){
-      const box=$('obrasBox'); if(!box) return;
+      const box=$('obrasBox');if(!box)return;
       box.innerHTML=`<div class="form-group" style="margin-bottom:0"><label>Selecionar obra</label><select id="obraSelect" class="form-control">${obras.map(o=>`<option value="${o.id}" ${o.id===selectedObraId?'selected':''}>${esc(o.nome||'Obra')}</option>`).join('')}</select></div><div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn btn-sec" id="openObraBtn">Abrir</button><button class="btn btn-sec" id="replaceObraBtn">Atualizar</button><button class="btn btn-danger" id="deleteObraBtn">Remover</button></div>`;
-      $('obraSelect').onchange=e=>{ selectedObraId=e.target.value; const o=currentObra(); if(o){applySelected(o);renderAll();} };
-      $('openObraBtn').onclick=()=>{ const o=currentObra(); if(o){applySelected(o);renderAll();} };
+      $('obraSelect').onchange=e=>{selectedObraId=e.target.value;const o=currentObra();if(o){applySelected(o);renderAll();}};
+      $('openObraBtn').onclick=()=>{const o=currentObra();if(o){applySelected(o);renderAll();}};
       $('replaceObraBtn').onclick=()=>loadFromJsonOrExcel(true);
-      $('deleteObraBtn').onclick=async()=>{ if(!selectedObraId||!confirm('Remover obra?')) return; await deleteObraFirestore(selectedObraId); selectedObraId=null; };
+      $('deleteObraBtn').onclick=async()=>{if(!selectedObraId||!confirm('Remover obra?'))return;await deleteObraFirestore(selectedObraId);selectedObraId=null;};
     }
 
-    function renderTable(){ $('tbody').innerHTML=rows.map((r,i)=>`<tr data-i="${i}"><td contenteditable="true" data-k="item">${esc(r.item)}</td><td contenteditable="true" data-k="descricao">${esc(r.descricao)}</td><td contenteditable="true" data-k="valorContrato" style="text-align:right">${fmtMoney(r.valorContrato)}</td><td contenteditable="true" data-k="medicao" style="text-align:right">${fmtMoney(r.medicao)}</td><td contenteditable="true" data-k="acumulado" style="text-align:right">${fmtMoney(r.acumulado)}</td><td contenteditable="true" data-k="saldo" style="text-align:right">${fmtMoney(r.saldo)}</td><td contenteditable="true" data-k="percentualExecutado" style="text-align:right;font-weight:700">${Number(r.percentualExecutado||0).toFixed(2)}</td><td style="text-align:right"><button data-del="${i}" class="btn btn-danger" style="padding:.4rem;border-radius:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events:none"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button></td></tr>`).join(''); }
+    function renderTable(){$('tbody').innerHTML=rows.map((r,i)=>`<tr data-i="${i}"><td contenteditable="true" data-k="item">${esc(r.item)}</td><td contenteditable="true" data-k="descricao">${esc(r.descricao)}</td><td contenteditable="true" data-k="valorContrato" style="text-align:right">${fmtMoney(r.valorContrato)}</td><td contenteditable="true" data-k="medicao" style="text-align:right">${fmtMoney(r.medicao)}</td><td contenteditable="true" data-k="acumulado" style="text-align:right">${fmtMoney(r.acumulado)}</td><td contenteditable="true" data-k="saldo" style="text-align:right">${fmtMoney(r.saldo)}</td><td contenteditable="true" data-k="percentualExecutado" style="text-align:right;font-weight:700">${Number(r.percentualExecutado||0).toFixed(2)}</td><td style="text-align:right"><button data-del="${i}" class="btn btn-danger" style="padding:.4rem;border-radius:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events:none"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button></td></tr>`).join('');}
 
-    function updateChart(){ const ctx=$('sCurveChart').getContext('2d'); if(chartInstance) chartInstance.destroy(); const theme=document.documentElement.dataset.theme,gc=theme==='dark'?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)',tc=theme==='dark'?'#94a3b8':'#64748b'; chartInstance=new Chart(ctx,{type:'bar',data:{labels:rows.map(r=>String(r.item||'')),datasets:[{label:'% Executado',data:rows.map(r=>Number(r.percentualExecutado)||0),backgroundColor:'rgba(99,102,241,0.2)',borderColor:'#6366f1',borderWidth:1,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},x:{grid:{display:false},ticks:{color:tc}}},plugins:{legend:{labels:{color:tc}}}}}); }
+    function updateChart(){const ctx=$('sCurveChart').getContext('2d');if(chartInstance)chartInstance.destroy();const theme=document.documentElement.dataset.theme,gc=theme==='dark'?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)',tc=theme==='dark'?'#94a3b8':'#64748b';chartInstance=new Chart(ctx,{type:'bar',data:{labels:rows.map(r=>String(r.item||'')),datasets:[{label:'% Executado',data:rows.map(r=>Number(r.percentualExecutado)||0),backgroundColor:'rgba(99,102,241,0.2)',borderColor:'#6366f1',borderWidth:1,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},x:{grid:{display:false},ticks:{color:tc}}},plugins:{legend:{labels:{color:tc}}}}});}
 
-    function updateDashboard(){ const done=rows.filter(r=>Number(r.percentualExecutado)>=99.5).length; const rp=Number(sourceContrato?.resumo?.percentual); const tc=rows.reduce((a,r)=>a+(Number(r.valorContrato)||0),0); const ta=rows.reduce((a,r)=>a+(Number(r.acumulado)||0),0); const pct=!isNaN(rp)?rp:(tc>0?(ta/tc*100):0); $('stats').innerHTML=`<div class="stat-card"><span class="stat-label">Itens Totais</span><span class="stat-value">${rows.length}</span></div><div class="stat-card"><span class="stat-label">Concluídos</span><span class="stat-value" style="color:var(--success)">${done}</span></div><div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct.toFixed(2)}%</span></div><div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.2rem">${esc(sourceContrato?.medicaoAtual||'-')}</span></div>`; $('countAll').textContent=obras.length; $('countDone').textContent=done; $('countPct').textContent=pct.toFixed(2)+'%'; updateChart(); }
+    function updateDashboard(){const done=rows.filter(r=>Number(r.percentualExecutado)>=99.5).length;const rp=Number(sourceContrato?.resumo?.percentual);const tc=rows.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);const ta=rows.reduce((a,r)=>a+(Number(r.acumulado)||0),0);const pct=!isNaN(rp)?rp:(tc>0?(ta/tc*100):0);$('stats').innerHTML=`<div class="stat-card"><span class="stat-label">Itens Totais</span><span class="stat-value">${rows.length}</span></div><div class="stat-card"><span class="stat-label">Concluídos</span><span class="stat-value" style="color:var(--success)">${done}</span></div><div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct.toFixed(2)}%</span></div><div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.2rem">${esc(sourceContrato?.medicaoAtual||'-')}</span></div>`;$('countAll').textContent=obras.length;$('countDone').textContent=done;$('countPct').textContent=pct.toFixed(2)+'%';updateChart();}
 
-    function renderAll(){ renderObrasBox(); renderTable(); updateDashboard(); }
+    function renderAll(){renderObrasBox();renderTable();updateDashboard();}
 
     // ── Excel import ──────────────────────────────────────────────────────────
-    function normalizeImportedRows(list){ if(!Array.isArray(list)) return []; return list.map(item=>({item:item?.item??'',descricao:item?.descricao??item?.descricaoServico??item?.name??'',valorContrato:Number(item?.valorContrato??item?.valor_contrato??0)||0,medicao:Number(item?.medicao??0)||0,acumulado:Number(item?.acumulado??0)||0,saldo:Number(item?.saldo??0)||0,percentualExecutado:Number(item?.percentualExecutado??item?.percentual_executado??0)||0})); }
+    function normalizeImportedRows(list){if(!Array.isArray(list))return[];return list.map(item=>({item:item?.item??'',descricao:item?.descricao??item?.descricaoServico??item?.name??'',valorContrato:Number(item?.valorContrato??item?.valor_contrato??0)||0,medicao:Number(item?.medicao??0)||0,acumulado:Number(item?.acumulado??0)||0,saldo:Number(item?.saldo??0)||0,percentualExecutado:Number(item?.percentualExecutado??item?.percentual_executado??0)||0}));}
 
     async function readExcelFile(file){
-      if(!file) throw new Error('Nenhum arquivo fornecido.');
-      const buffer = await file.arrayBuffer();
-      const wb = XLSX.read(new Uint8Array(buffer),{type:'array',cellDates:false});
-      const target = wb.SheetNames.filter(n=>/^(BM|MED)\s*\d+/i.test(n)).sort((a,b)=>parseInt(a.match(/\d+/)?.[0]||0)-parseInt(b.match(/\d+/)?.[0]||0)).at(-1)||wb.SheetNames.at(-1);
-      if(!target) throw new Error('Nenhuma aba encontrada.');
+      if(!file)throw new Error('Nenhum arquivo fornecido.');
+      const buffer=await file.arrayBuffer();
+      const wb=XLSX.read(new Uint8Array(buffer),{type:'array',cellDates:false});
+      const target=wb.SheetNames.filter(n=>/^(BM|MED)\s*\d+/i.test(n)).sort((a,b)=>parseInt(a.match(/\d+/)?.[0]||0)-parseInt(b.match(/\d+/)?.[0]||0)).at(-1)||wb.SheetNames.at(-1);
+      if(!target)throw new Error('Nenhuma aba encontrada.');
       const ws=wb.Sheets[target];
       const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
       const RE={desc:/discrimina|descri|servico/,vc:/valor.{0,25}contrato|total.{0,25}contrato/,med:/no.{0,10}period|no.{0,10}mes|^medicao$|^realizado$|periodo/,acum:/acumulado/,saldo:/^saldo$/};
@@ -304,13 +417,13 @@
         items.push({item:itemStr,descricao,valorContrato:+vc.toFixed(2),medicao:+med.toFixed(2),acumulado:+acum.toFixed(2),saldo:+saldo.toFixed(2),percentualExecutado:pct});
       }
       const st=items.reduce((a,i)=>a+i.valorContrato,0),sa=items.reduce((a,i)=>a+i.acumulado,0);
-      return {nome:fileBaseName(file.name),nomeProjeto:wb.Props?.Title||fileBaseName(file.name)||'Nova obra',medicaoAtual:target,itens:items,resumo:{total:st,acumulado:sa,percentual:st>0?+(sa/st*100).toFixed(2):0}};
+      return{nome:fileBaseName(file.name),nomeProjeto:wb.Props?.Title||fileBaseName(file.name)||'Nova obra',medicaoAtual:target,itens:items,resumo:{total:st,acumulado:sa,percentual:st>0?+(sa/st*100).toFixed(2):0}};
     }
 
     function loadFromJsonOrExcel(replace=false){
       const input=document.createElement('input');input.type='file';input.accept='.json,.xlsx,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
       input.onchange=async e=>{
-        if(!e.target.files.length) return;
+        if(!e.target.files.length)return;
         const file=e.target.files[0];const ext=file.name.split('.').pop().toLowerCase();
         try{
           let obj,importedRows=[];
@@ -326,9 +439,9 @@
       };input.click();
     }
 
-    // ── eventos tabela ────────────────────────────────────────────────────────
+    // ── eventos tabela colaborador ────────────────────────────────────────────
     let saveTimeout=null;
-    function scheduleSave(){ clearTimeout(saveTimeout); saveTimeout=setTimeout(async()=>{ const o=currentObra(); if(o){o.itens=rows;await saveObraFirestore(o);} },1000); }
+    function scheduleSave(){clearTimeout(saveTimeout);saveTimeout=setTimeout(async()=>{const o=currentObra();if(o){o.itens=rows;await saveObraFirestore(o);}},1000);}
 
     $('tbody').addEventListener('input',e=>{const t=e.target,tr=t.closest('tr');if(!tr)return;const i=+tr.dataset.i,k=t.dataset.k;if(k){if(['valorContrato','medicao','acumulado','saldo','percentualExecutado'].includes(k))rows[i][k]=Number(t.textContent.replace(',','.').replace(/[^\d.-]/g,''))||0;else rows[i][k]=t.textContent.trim();updateDashboard();scheduleSave();}});
     $('tbody').addEventListener('focusout',e=>{const t=e.target,tr=t.closest('tr');if(!tr)return;const i=+tr.dataset.i,k=t.dataset.k;if(k&&['valorContrato','medicao','acumulado','saldo'].includes(k))t.textContent=fmtMoney(rows[i][k]);else if(k==='percentualExecutado')t.textContent=Number(rows[i][k]).toFixed(2);});
@@ -341,9 +454,6 @@
     $('toggleTheme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';if(rows.length)updateChart();};
     $('exportCsv').onclick=()=>{const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];const body=rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}"`).join(',')).join('\n');const blob=new Blob([fields.join(',')+'\n'+body],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='cronograma.csv';a.click();URL.revokeObjectURL(a.href);};
     $('saveJson').onclick=()=>{const o=currentObra();const name=($('projName').value.trim()||'projeto');const payload={obra:name,medicaoAtual:o?.medicaoAtual||'',itens:rows};const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name.replace(/[^a-zA-Z0-9\-_]/g,'-').toLowerCase()+'.json';a.click();URL.revokeObjectURL(a.href);};
-
-    // init admin toggle
-    $('adminToggleColab').addEventListener('click',()=>{const p=$('adminColabPanel');p.style.display=p.style.display==='none'?'block':'none';});
   </script>
   <style>
     :root{--bg:#f7f9fc;--surface:#fff;--surface-hover:#f1f5f9;--text:#0f172a;--text-muted:#64748b;--border:rgba(15,23,42,.1);--border-focus:#6366f1;--primary:#4f46e5;--primary-hover:#4338ca;--success:#10b981;--danger:#ef4444;--radius-sm:.5rem;--radius-md:.75rem;--radius-lg:1rem;--shadow-sm:0 1px 2px rgba(0,0,0,.05);--shadow-md:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px -1px rgba(0,0,0,.06);--shadow-lg:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -2px rgba(0,0,0,.05);--font:'Satoshi',system-ui,sans-serif;}
@@ -363,6 +473,15 @@
     .logo{width:48px;height:48px;background:linear-gradient(135deg,var(--primary),#818cf8);color:#fff;border-radius:var(--radius-md);display:grid;place-items:center;font-weight:900;font-size:1.25rem;box-shadow:var(--shadow-md)}
     .logo-large{width:64px;height:64px;font-size:1.5rem}
     .brand-text h1{font-size:1.5rem;font-weight:700;letter-spacing:-.02em}.brand-text p{color:var(--text-muted);font-size:.875rem}
+    /* admin layout */
+    .admin-layout{display:grid;grid-template-columns:220px 1fr;gap:1.5rem;align-items:start}
+    @media(max-width:900px){.admin-layout{grid-template-columns:1fr}}
+    .admin-sidebar{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1rem;position:sticky;top:1.5rem}
+    .admin-sidebar h3{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.75rem}
+    .colab-sidebar-item{padding:.75rem;border-radius:var(--radius-sm);cursor:pointer;border:1px solid transparent;margin-bottom:.375rem;transition:.15s}
+    .colab-sidebar-item:hover{background:var(--surface-hover)}
+    .colab-sidebar-item.active{background:rgba(99,102,241,.1);border-color:var(--primary);color:var(--primary)}
+    /* colaborador layout */
     .dashboard{display:grid;grid-template-columns:260px 1fr;gap:2rem}@media(max-width:1024px){.dashboard{grid-template-columns:1fr}}
     .panel{background:var(--surface);border-radius:var(--radius-lg);border:1px solid var(--border);box-shadow:var(--shadow-sm);padding:1.5rem;margin-bottom:1.5rem}
     .nav{display:flex;flex-direction:column;gap:.5rem;position:sticky;top:2rem}
@@ -387,7 +506,6 @@
     td[contenteditable="true"]{outline:none;cursor:text}td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px var(--primary);border-radius:4px}
     .flex-between{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem}.mt-4{margin-top:1rem}.mb-4{margin-bottom:1rem}
     .error-msg{color:var(--danger);font-size:.875rem;margin-top:.5rem;display:none}
-    /* admin */
     .obra-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)}
     .obra-card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.75rem}
     .obra-card-title{font-weight:700;font-size:1rem}
@@ -397,8 +515,6 @@
     .obra-progress-fill{height:100%;background:var(--primary);border-radius:999px;transition:width .4s}
     .obra-card-footer{display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.8125rem;color:var(--text-muted)}
     .colab-item{display:flex;justify-content:space-between;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:.5rem;background:var(--bg)}
-    .spinner{width:20px;height:20px;border:3px solid rgba(255,255,255,.3);border-radius:50%;border-top-color:#fff;animation:spin 1s ease-in-out infinite;display:none}
-    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
@@ -423,17 +539,17 @@
 <div id="adminView" style="display:none">
   <div class="container">
     <header class="header">
-      <div class="brand"><div class="logo">CA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Visão Geral — Painel do Chefe</p></div></div>
+      <div class="brand"><div class="logo">CA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Painel do Chefe — Visão Geral</p></div></div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap">
         <button class="btn btn-sec" id="adminToggleColab">👥 Gerenciar Colaboradores</button>
-        <button class="btn btn-sec" id="toggleThemeAdmin" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark'">Tema</button>
+        <button class="btn btn-sec" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark'">Tema</button>
         <button class="btn btn-sec" id="logoutBtnAdmin" style="color:var(--danger)">Sair</button>
       </div>
     </header>
 
-    <!-- painel colaboradores (oculto por padrão) -->
+    <!-- painel gerenciar colaboradores -->
     <div id="adminColabPanel" class="panel" style="display:none">
-      <div class="flex-between mb-4"><h2>👥 Colaboradores</h2></div>
+      <div class="flex-between mb-4"><h2>👥 Gerenciar Colaboradores</h2></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;flex-wrap:wrap">
         <div>
           <h3 style="font-size:.9rem;margin-bottom:1rem;color:var(--text-muted)">CADASTRAR NOVO COLABORADOR</h3>
@@ -451,10 +567,20 @@
       </div>
     </div>
 
+    <!-- stats gerais -->
     <div class="stats-grid" id="adminStats"></div>
-    <div class="panel">
-      <div class="flex-between mb-4"><h2>📋 Todas as Obras</h2></div>
-      <div id="adminObrasList"></div>
+
+    <!-- layout principal admin: sidebar colabs + detalhe -->
+    <div class="admin-layout">
+      <div class="admin-sidebar">
+        <h3>Colaboradores</h3>
+        <div id="adminColabSidebar"><p style="color:var(--text-muted);font-size:.8rem">Carregando...</p></div>
+      </div>
+      <div>
+        <div id="adminDetailPanel" class="panel">
+          <p style="color:var(--text-muted);padding:.5rem">Selecione um colaborador ao lado para ver as obras.</p>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -493,7 +619,7 @@
         <div class="panel"><div class="flex-between mb-4"><h2>Configurações do Projeto</h2></div><div class="form-grid"><div class="form-group" style="grid-column:1/-1"><label>Nome do Projeto</label><input type="text" id="projName" class="form-control" placeholder="Nome do projeto"></div><div class="form-group"><label>Cliente / Setor</label><input type="text" id="projClient" class="form-control" placeholder="Ex.: Diretoria de Obras"></div><div class="form-group"><label>Escopo / Fase</label><input type="text" id="projScope" class="form-control" placeholder="Ex.: BM 10"></div></div></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.5rem;margin-bottom:1.5rem">
           <div class="panel" style="margin:0"><h2 class="mb-4">Nova Atividade</h2><div class="form-grid" style="grid-template-columns:1fr;margin-bottom:0"><div class="form-group" style="margin-bottom:.5rem"><label>Atividade</label><input type="text" id="fName" class="form-control" placeholder="Ex.: Alvenaria"></div></div><button class="btn btn-primary mt-4" id="addRow" style="width:100%">Adicionar Atividade</button></div>
-          <div class="panel" style="margin:0"><h2 class="mb-4">Curva S - Progresso Físico</h2><div class="chart-container"><canvas id="sCurveChart"></canvas></div></div>
+          <div class="panel" style="margin:0"><h2 class="mb-4">Curva S — Progresso Físico</h2><div class="chart-container"><canvas id="sCurveChart"></canvas></div></div>
         </div>
         <div class="stats-grid" id="stats"></div>
         <div class="panel"><div class="flex-between"><h2>Índice / Itens Principais</h2><div><button class="btn btn-sec" id="fillSample" style="margin-right:.5rem">Limpar</button><button class="btn btn-sec" id="exportCsv">Exportar CSV</button></div></div><div class="table-container"><table><thead><tr><th>Item</th><th>Descrição</th><th style="text-align:right">Valor Contrato</th><th style="text-align:right">Medição</th><th style="text-align:right">Acumulado</th><th style="text-align:right">Saldo</th><th style="text-align:right">% Executada</th><th></th></tr></thead><tbody id="tbody"></tbody></table></div></div>
