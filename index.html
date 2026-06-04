@@ -11,7 +11,7 @@
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-    import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, deleteDoc, getDocs, updateDoc, query, where, getDocs as getDocsQ } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, deleteDoc, getDocs, updateDoc, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBc7jh4dai3OZIriKdFxguI44A73TRKYTI",
@@ -39,7 +39,7 @@
     let unsubObras = null, unsubAllObras = null;
     let obras = [], selectedObraId = null, rows = [], sourceContrato = null;
     let chartInstance = null, adminChartInstance = null;
-    let allUsersData = {};
+    let allUsersData = {};   // uid → {nome,email,role,blocked,obras:[]}
     let adminUnsubMap = {};
     let adminSelectedUid = null, adminSelectedObraId = null;
     let colabFormReady = false;
@@ -86,17 +86,15 @@
       colabFormReady=false;
     }
 
-    // busca doc desativado pelo email
     async function findDisabledDocByEmail(email){
-      const usersRef = collection(db,'users');
-      const q = query(usersRef, where('email','==',email), where('disabled','==',true));
+      const q = query(collection(db,'users'), where('email','==',email), where('disabled','==',true));
       const snap = await getDocs(q);
       if(snap.empty) return null;
       const d = snap.docs[0];
       return { uid: d.id, ...d.data() };
     }
 
-    // ══ ADMIN VIEW ═════════════════════════════════════════════════
+    // ══ ADMIN VIEW ══════════════════════════════════════════════════════
     function initAdminView(){
       showView('adminView');
       listenAllUsers();
@@ -116,6 +114,8 @@
         snap.docChanges().forEach(change => {
           const d = change.doc;
           const data = d.data();
+
+          // conta desativada (removida) → ignora para admin também
           if(data.disabled){
             if(allUsersData[d.id]){
               delete allUsersData[d.id];
@@ -128,8 +128,15 @@
             if(adminUnsubMap[d.id]){ adminUnsubMap[d.id](); delete adminUnsubMap[d.id]; }
             return;
           }
-          if(!allUsersData[d.id]) allUsersData[d.id]={nome:data.nome||data.email,email:data.email,role:data.role,obras:[]};
-          else { allUsersData[d.id].nome=data.nome||data.email; allUsersData[d.id].email=data.email; allUsersData[d.id].role=data.role; }
+
+          // conta ativa (mesmo que bloqueada) → admin visualiza normalmente
+          if(!allUsersData[d.id]) allUsersData[d.id]={nome:data.nome||data.email,email:data.email,role:data.role,blocked:!!data.blocked,obras:[]};
+          else {
+            allUsersData[d.id].nome    = data.nome||data.email;
+            allUsersData[d.id].email   = data.email;
+            allUsersData[d.id].role    = data.role;
+            allUsersData[d.id].blocked = !!data.blocked;
+          }
 
           if(data.role!=='admin' && !adminUnsubMap[d.id]){
             adminUnsubMap[d.id] = onSnapshot(collection(db,'users',d.id,'obras'), oSnap => {
@@ -149,8 +156,10 @@
       if(!colabs.length){ box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem">Nenhum colaborador ainda.</p>'; return; }
       box.innerHTML=colabs.map(([uid,u])=>{
         const n=(u.obras||[]).length, active=uid===adminSelectedUid;
-        return `<div class="colab-sidebar-item ${active?'active':''}" onclick="adminSelectColab('${uid}')">
-          <div style="font-weight:600;font-size:.875rem">${esc(u.nome)}</div>
+        const lockIcon = u.blocked ? '🔒 ' : '';
+        const blockedStyle = u.blocked ? 'opacity:.55' : '';
+        return `<div class="colab-sidebar-item ${active?'active':''}" style="${blockedStyle}" onclick="adminSelectColab('${uid}')">
+          <div style="font-weight:600;font-size:.875rem">${lockIcon}${esc(u.nome)}</div>
           <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n!==1?'s':''}</div>
         </div>`;
       }).join('');
@@ -169,7 +178,7 @@
       const obrasList=u.obras||[];
 
       let html=`<div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
-        <div style="font-weight:700;font-size:1.1rem">👤 ${esc(u.nome)}</div>
+        <div style="font-weight:700;font-size:1.1rem">👤 ${esc(u.nome)}${u.blocked?` <span style="font-size:.75rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.2rem .6rem;border-radius:999px;font-weight:600">🔒 Bloqueado</span>`:''}</div>
         <div class="form-group" style="margin:0;min-width:220px">
           <select id="adminObraSelect" class="form-control" onchange="adminSelectObra(this.value)">
             <option value="">-- Selecione uma obra --</option>
@@ -280,18 +289,60 @@
         <div class="stat-card"><span class="stat-label">Acumulado Geral</span><span class="stat-value" style="font-size:1.1rem">${fmtMoney(tac)}</span></div>`;
     }
 
+    // ── Lista de colaboradores com botões Bloquear / Desbloquear / Remover ──
     function renderColabList(){
       const box=$('colabList'); if(!box) return;
       const colabs=Object.entries(allUsersData).filter(([,u])=>u.role!=='admin');
       if(!colabs.length){box.innerHTML='<p style="color:var(--text-muted);font-size:.875rem">Nenhum colaborador cadastrado.</p>';return;}
-      box.innerHTML=colabs.map(([uid,u])=>`
-        <div class="colab-item">
-          <div><strong>${esc(u.nome)}</strong><br><small>${esc(u.email)}</small></div>
-          <button class="btn btn-danger" style="padding:.35rem .75rem;font-size:.75rem" onclick="removeColab('${uid}')">Remover</button>
-        </div>`).join('');
+      box.innerHTML=colabs.map(([uid,u])=>{
+        const bloqueado = u.blocked;
+        return `<div class="colab-item" style="${bloqueado?'opacity:.7':''}">
+          <div>
+            <strong>${esc(u.nome)}</strong>
+            ${bloqueado?'<span style="margin-left:.5rem;font-size:.7rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.1rem .4rem;border-radius:999px">🔒 Bloqueado</span>':''}
+            <br><small style="color:var(--text-muted)">${esc(u.email)}</small>
+          </div>
+          <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+            <button class="btn ${bloqueado?'btn-success':'btn-warning'}" style="padding:.3rem .65rem;font-size:.72rem" onclick="toggleBloqueio('${uid}',${bloqueado})">
+              ${bloqueado?'✅ Desbloquear':'🔒 Bloquear'}
+            </button>
+            <button class="btn btn-danger" style="padding:.3rem .65rem;font-size:.72rem" onclick="removeColab('${uid}')">Remover</button>
+          </div>
+        </div>`;
+      }).join('');
     }
 
-    // ── CADASTRO ──────────────────────────────────────────────────────────────
+    // ── Bloquear / Desbloquear ───────────────────────────────────────────────
+    window.toggleBloqueio = async (uid, isBlocked) => {
+      const novoEstado = !isBlocked;
+      const msg = novoEstado
+        ? 'Bloquear este colaborador? Ele não conseguirá mais fazer login até ser desbloqueado.'
+        : 'Desbloquear este colaborador? Ele poderá fazer login normalmente.';
+      if(!confirm(msg)) return;
+      try{
+        await updateDoc(doc(db,'users',uid),{ blocked: novoEstado });
+        allUsersData[uid].blocked = novoEstado;
+        renderColabList();
+        renderAdminColabSidebar();
+        if(adminSelectedUid===uid) renderAdminObraDetail();
+        alert(novoEstado ? 'Colaborador bloqueado com sucesso.' : 'Colaborador desbloqueado com sucesso.');
+      }catch(err){ alert('Erro: '+err.message); }
+    };
+
+    // ── Remover (desativa conta) ─────────────────────────────────────────────
+    window.removeColab = async uid => {
+      if(!confirm('Remover este colaborador? Ele perderá acesso ao sistema.')) return;
+      try{
+        await updateDoc(doc(db,'users',uid),{disabled:true});
+        delete allUsersData[uid];
+        if(adminUnsubMap[uid]){adminUnsubMap[uid]();delete adminUnsubMap[uid];}
+        if(adminSelectedUid===uid){adminSelectedUid=null;adminSelectedObraId=null;}
+        renderAdminStats(); renderAdminColabSidebar(); renderColabList(); renderAdminObraDetail();
+        alert('Colaborador removido com sucesso.');
+      }catch(err){ alert('Erro ao remover: '+err.message); }
+    };
+
+    // ── Cadastro ─────────────────────────────────────────────────────────────
     function setupAdminColabForm(){
       $('addColabForm').addEventListener('submit', async e=>{
         e.preventDefault();
@@ -307,10 +358,9 @@
         const adminEmail = currentUser.email;
 
         try{
-          // ─ tenta criar conta nova ───────────────────────────────────
           const cred = await createUserWithEmailAndPassword(auth, email, senha);
           await setDoc(doc(db,'users',cred.user.uid),{
-            nome, email, role:'colaborador', criadoEm:Date.now(), disabled:false
+            nome, email, role:'colaborador', criadoEm:Date.now(), disabled:false, blocked:false
           });
           await signOut(auth);
           await signInWithEmailAndPassword(auth, adminEmail, ADMIN_SENHA);
@@ -318,36 +368,29 @@
           alert(`Colaborador "${nome}" cadastrado com sucesso!`);
 
         }catch(err){
-
           if(err.code==='auth/email-already-in-use'){
-            // ─ e-mail já existe: verifica se há doc desativado com _tmpPwd ───
             try{
               const disabledDoc = await findDisabledDocByEmail(email);
-
               if(disabledDoc && disabledDoc._tmpPwd){
-                // reativa: faz login com a senha temporária salva, troca para a nova
                 const reativCred = await signInWithEmailAndPassword(auth, email, disabledDoc._tmpPwd);
                 await updatePassword(reativCred.user, senha);
                 await setDoc(doc(db,'users',reativCred.user.uid),{
-                  nome, email, role:'colaborador', criadoEm:Date.now(), disabled:false, _tmpPwd: null
+                  nome, email, role:'colaborador', criadoEm:Date.now(), disabled:false, blocked:false, _tmpPwd:null
                 },{merge:true});
                 await signOut(auth);
                 await signInWithEmailAndPassword(auth, adminEmail, ADMIN_SENHA);
                 $('colabNome').value=''; $('colabEmail').value=''; $('colabSenha').value='';
                 alert(`Colaborador "${nome}" reativado com sucesso e senha atualizada!`);
-
               } else {
-                // doc não tem _tmpPwd (cadastrado antes dessa versão): tenta login com a senha informada
                 const reativCred2 = await signInWithEmailAndPassword(auth, email, senha);
                 await setDoc(doc(db,'users',reativCred2.user.uid),{
-                  nome, email, role:'colaborador', criadoEm:Date.now(), disabled:false
+                  nome, email, role:'colaborador', criadoEm:Date.now(), disabled:false, blocked:false
                 },{merge:true});
                 await signOut(auth);
                 await signInWithEmailAndPassword(auth, adminEmail, ADMIN_SENHA);
                 $('colabNome').value=''; $('colabEmail').value=''; $('colabSenha').value='';
                 alert(`Colaborador "${nome}" reativado com sucesso!`);
               }
-
             }catch(err2){
               let msg = 'Erro ao reativar a conta.';
               if(err2.code==='auth/wrong-password'||err2.code==='auth/invalid-credential')
@@ -356,7 +399,6 @@
               try{ await signInWithEmailAndPassword(auth, adminEmail, ADMIN_SENHA); }catch(_){}
               msgEl.textContent=msg; msgEl.style.display='block';
             }
-
           } else if(err.code==='auth/weak-password'){
             msgEl.textContent='A senha deve ter pelo menos 6 caracteres.';
             msgEl.style.display='block';
@@ -373,46 +415,17 @@
       });
     }
 
-    // ── REMOÇÃO: salva _tmpPwd e marca disabled ─────────────────────────────
-    window.removeColab = async uid => {
-      if(!confirm('Remover este colaborador? Ele perderá acesso ao sistema.')) return;
-      try{
-        // gera uma senha temporária aleatória e atualiza o Auth para ela
-        // para que o admin possa reativar sem precisar da senha original
-        const tmpPwd = 'Tmp_' + Math.random().toString(36).slice(2,10) + Date.now();
-
-        // faz login como o colaborador para conseguir trocar a senha
-        const colabData = allUsersData[uid];
-        // não temos a senha atual aqui, então salvamos apenas o flag disabled
-        // a troca de senha ocorrerá via _tmpPwd armazenado no próximo cadastro
-        // Abordagem: usa a API REST do Firebase para forcar reset
-        const apiKey = firebaseConfig.apiKey;
-        // busca o _tmpPwd atual do doc (se já existir de uma remoção anterior)
-        const docSnap = await getDoc(doc(db,'users',uid));
-        const existingPwd = docSnap.exists() ? docSnap.data()._tmpPwd : null;
-
-        // salva a senha temporária no doc (usada para reativar depois)
-        // Como não temos a senha atual do colaborador aqui, usamos sendPasswordResetEmail
-        // via REST para obter um oobCode e fazer o reset programaticamente
-        // Isso não é possível sem backend. Solução viavel:
-        // Na hora do CADASTRO/REATIVAçãO, salvamos _tmpPwd no Firestore para uso futuro.
-        // Aqui na remoção apenas marcamos disabled:true.
-        // O _tmpPwd já deve ter sido salvo quando foi cadastrado originalmente.
-        await updateDoc(doc(db,'users',uid),{disabled:true});
-
-        delete allUsersData[uid];
-        if(adminUnsubMap[uid]){adminUnsubMap[uid]();delete adminUnsubMap[uid];}
-        if(adminSelectedUid===uid){adminSelectedUid=null;adminSelectedObraId=null;}
-        renderAdminStats(); renderAdminColabSidebar(); renderColabList(); renderAdminObraDetail();
-        alert('Colaborador removido com sucesso.');
-      }catch(err){ alert('Erro ao remover: '+err.message); }
-    };
-
-    // ══ COLABORADOR VIEW ═══════════════════════════════════════════
+    // ══ COLABORADOR VIEW ════════════════════════════════════════════════════
     function initUserView(){
       getDoc(doc(db,'users',currentUser.uid)).then(snap=>{
-        if(snap.exists()&&snap.data().disabled===true){
+        if(!snap.exists()){ cleanupListeners(); signOut(auth); return; }
+        const data = snap.data();
+        if(data.disabled===true){
           alert('Sua conta foi desativada. Entre em contato com o administrador.');
+          cleanupListeners(); signOut(auth); return;
+        }
+        if(data.blocked===true){
+          alert('Seu acesso está temporariamente bloqueado. Entre em contato com o administrador.');
           cleanupListeners(); signOut(auth); return;
         }
         showView('appView');
@@ -521,7 +534,7 @@
     $('saveJson').onclick=()=>{const o=currentObra();const name=($('projName').value.trim()||'projeto');const payload={obra:name,medicaoAtual:o?.medicaoAtual||'',itens:rows};const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name.replace(/[^a-zA-Z0-9\-_]/g,'-').toLowerCase()+'.json';a.click();URL.revokeObjectURL(a.href);};
   </script>
   <style>
-    :root{--bg:#f7f9fc;--surface:#fff;--surface-hover:#f1f5f9;--text:#0f172a;--text-muted:#64748b;--border:rgba(15,23,42,.1);--border-focus:#6366f1;--primary:#4f46e5;--primary-hover:#4338ca;--success:#10b981;--danger:#ef4444;--radius-sm:.5rem;--radius-md:.75rem;--radius-lg:1rem;--shadow-sm:0 1px 2px rgba(0,0,0,.05);--shadow-md:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px -1px rgba(0,0,0,.06);--shadow-lg:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -2px rgba(0,0,0,.05);--font:'Satoshi',system-ui,sans-serif;}
+    :root{--bg:#f7f9fc;--surface:#fff;--surface-hover:#f1f5f9;--text:#0f172a;--text-muted:#64748b;--border:rgba(15,23,42,.1);--border-focus:#6366f1;--primary:#4f46e5;--primary-hover:#4338ca;--success:#10b981;--danger:#ef4444;--warning:#f59e0b;--radius-sm:.5rem;--radius-md:.75rem;--radius-lg:1rem;--shadow-sm:0 1px 2px rgba(0,0,0,.05);--shadow-md:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px -1px rgba(0,0,0,.06);--shadow-lg:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -2px rgba(0,0,0,.05);--font:'Satoshi',system-ui,sans-serif;}
     [data-theme="dark"]{--bg:#0f172a;--surface:#1e293b;--surface-hover:#334155;--text:#f8fafc;--text-muted:#94a3b8;--border:rgba(255,255,255,.1);--border-focus:#818cf8;--primary:#6366f1;--primary-hover:#818cf8;}
     *{box-sizing:border-box;margin:0;padding:0}body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh;transition:background .2s}
     .login-wrapper{display:flex;min-height:100vh;align-items:center;justify-content:center;padding:1rem;background:linear-gradient(135deg,#f3e8ff,#eff6ff 45%,#ecfdf5)}
@@ -532,6 +545,9 @@
     .btn-primary{background:var(--primary);color:#fff;box-shadow:var(--shadow-sm)}.btn-primary:hover{background:var(--primary-hover);transform:translateY(-1px)}.btn-primary:disabled{opacity:.7;cursor:not-allowed;transform:none}
     .btn-sec{background:var(--surface);color:var(--text);border-color:var(--border)}.btn-sec:hover{background:var(--surface-hover)}
     .btn-danger{color:var(--danger);background:rgba(239,68,68,.1)}.btn-danger:hover{background:rgba(239,68,68,.2)}
+    .btn-warning{color:#92400e;background:rgba(245,158,11,.12)}.btn-warning:hover{background:rgba(245,158,11,.22)}
+    .btn-success{color:#065f46;background:rgba(16,185,129,.12)}.btn-success:hover{background:rgba(16,185,129,.22)}
+    [data-theme="dark"] .btn-warning{color:#fcd34d}.btn-warning{}.  [data-theme="dark"] .btn-success{color:#6ee7b7}
     .container{max-width:1440px;margin:0 auto;padding:2rem}
     .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;flex-wrap:wrap;gap:1rem}
     .brand{display:flex;align-items:center;gap:1rem}
@@ -577,7 +593,7 @@
     .obra-progress-bar{height:6px;background:var(--surface-hover);border-radius:999px;overflow:hidden;margin-bottom:.75rem}
     .obra-progress-fill{height:100%;background:var(--primary);border-radius:999px;transition:width .4s}
     .obra-card-footer{display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.8125rem;color:var(--text-muted)}
-    .colab-item{display:flex;justify-content:space-between;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:.5rem;background:var(--bg)}
+    .colab-item{display:flex;justify-content:space-between;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:.5rem;background:var(--bg);gap:.5rem;flex-wrap:wrap}
   </style>
 </head>
 <body>
@@ -615,7 +631,7 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem">
         <div>
           <h3 style="font-size:.9rem;margin-bottom:.5rem;color:var(--text-muted)">CADASTRAR / REATIVAR COLABORADOR</h3>
-          <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:1rem">Para reativar um colaborador removido, basta informar o mesmo e-mail e definir uma nova senha.</p>
+          <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:1rem">Para reativar um colaborador removido, informe o mesmo e-mail e defina uma nova senha.</p>
           <form id="addColabForm">
             <div class="form-group"><label>Nome</label><input type="text" id="colabNome" class="form-control" placeholder="Ex.: João Silva" required></div>
             <div class="form-group"><label>E-mail</label><input type="email" id="colabEmail" class="form-control" placeholder="joao@email.com" required></div>
