@@ -200,10 +200,9 @@
       if(!obra){ panel.innerHTML=html+'<p style="color:var(--text-muted)">Obra não encontrada.</p>'; return; }
 
       const itens   = Array.isArray(obra.itens) ? obra.itens : [];
-      const totalVC = itens.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
       const totalAcum = itens.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
       const totalMed  = itens.reduce((a,i)=>a+(Number(i.medicao)||0),0);
-      const vcAditivo = Number(obra.resumo?.valorContratoAditivo) || totalVC;
+      const vcAditivo = Number(obra.resumo?.valorContratoAditivo) || itens.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
       const acumTotal = Number(obra.resumo?.acumuladoTotal)       || totalAcum;
       const pct = calcPctGeral(obra.resumo, itens);
 
@@ -213,7 +212,6 @@
         <div class="stat-card compact"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="color:var(--success)">${fmtMoney(acumTotal)}</span></div>
         <div class="stat-card compact"><span class="stat-label">% Geral</span><span class="stat-value">${pct.toFixed(2)}%</span></div>
         <div class="stat-card compact"><span class="stat-label">Medição Atual</span><span class="stat-value">${esc(obra.medicaoAtual||'-')}</span></div>
-        <div class="stat-card compact"><span class="stat-label">Valor Contrato (itens)</span><span class="stat-value">${fmtMoney(totalVC)}</span></div>
         <div class="stat-card compact"><span class="stat-label">Acumulado (itens)</span><span class="stat-value">${fmtMoney(totalAcum)}</span></div>
         <div class="stat-card compact"><span class="stat-label">Medição</span><span class="stat-value">${fmtMoney(totalMed)}</span></div>
         <div class="stat-card compact"><span class="stat-label">Saldo</span><span class="stat-value">${fmtMoney(vcAditivo-acumTotal)}</span></div>
