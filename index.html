@@ -44,13 +44,6 @@
       return tvc > 0 ? +(tac / tvc * 100).toFixed(2) : 0;
     }
 
-    // ─── Valor CT Raiz = valorContratoAditivo - soma de todos os reajustes do cabeçalho ───
-    function calcValorCTRaiz(resumo){
-      const vca        = Number(resumo?.valorContratoAditivo) || 0;
-      const reajustes  = Number(resumo?.totalReajuste)        || 0;
-      return vca - reajustes;
-    }
-
     let currentUser = null, isAdmin = false;
     let unsubObras = null, unsubAllObras = null;
     let obras = [], selectedObraId = null, rows = [], sourceContrato = null;
@@ -213,15 +206,14 @@
       const vcAditivo = Number(obra.resumo?.valorContratoAditivo) || totalVC;
       const acumTotal = Number(obra.resumo?.acumuladoTotal)       || totalAcum;
       const pct = calcPctGeral(obra.resumo, itens);
-      const ctRaiz = calcValorCTRaiz(obra.resumo);
 
       html+=`
       <div class="admin-stats-grid">
-        <div class="stat-card compact"><span class="stat-label">Valor CT Raiz</span><span class="stat-value">${fmtMoney(ctRaiz > 0 ? ctRaiz : vcAditivo)}</span></div>
         <div class="stat-card compact"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value">${fmtMoney(vcAditivo)}</span></div>
         <div class="stat-card compact"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="color:var(--success)">${fmtMoney(acumTotal)}</span></div>
         <div class="stat-card compact"><span class="stat-label">% Geral</span><span class="stat-value">${pct.toFixed(2)}%</span></div>
         <div class="stat-card compact"><span class="stat-label">Medição Atual</span><span class="stat-value">${esc(obra.medicaoAtual||'-')}</span></div>
+        <div class="stat-card compact"><span class="stat-label">Valor Contrato (itens)</span><span class="stat-value">${fmtMoney(totalVC)}</span></div>
         <div class="stat-card compact"><span class="stat-label">Acumulado (itens)</span><span class="stat-value">${fmtMoney(totalAcum)}</span></div>
         <div class="stat-card compact"><span class="stat-label">Medição</span><span class="stat-value">${fmtMoney(totalMed)}</span></div>
         <div class="stat-card compact"><span class="stat-label">Saldo</span><span class="stat-value">${fmtMoney(vcAditivo-acumTotal)}</span></div>
@@ -277,7 +269,6 @@
       const vcAditivo = Number(obra.resumo?.valorContratoAditivo) || itens.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
       const acumTotal = Number(obra.resumo?.acumuladoTotal)       || itens.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
       const pct = calcPctGeral(obra.resumo, itens);
-      const ctRaiz = calcValorCTRaiz(obra.resumo);
       return `<div class="obra-card" style="cursor:pointer" onclick="adminSelectObra('${obra.id}')">
         <div class="obra-card-header">
           <div><div class="obra-card-title">${esc(obra.nome||'Sem nome')}</div>
@@ -286,7 +277,7 @@
         </div>
         <div class="obra-progress-bar"><div class="obra-progress-fill" style="width:${Math.min(100,pct)}%"></div></div>
         <div class="obra-card-footer">
-          <span>CT Raiz: ${fmtMoney(ctRaiz > 0 ? ctRaiz : vcAditivo)}</span><span>CT/Aditivo: ${fmtMoney(vcAditivo)}</span><span>Acumulado: ${fmtMoney(acumTotal)}</span>
+          <span>CT/Aditivo: ${fmtMoney(vcAditivo)}</span><span>Acumulado: ${fmtMoney(acumTotal)}</span><span>Saldo: ${fmtMoney(vcAditivo-acumTotal)}</span>
         </div>
       </div>`;
     }
@@ -483,11 +474,10 @@
       const vcAditivo = Number(o?.resumo?.valorContratoAditivo) || rows.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
       const acumTotal = Number(o?.resumo?.acumuladoTotal)       || rows.reduce((a,r)=>a+(Number(r.acumulado)||0),0);
       const pct = calcPctGeral(o?.resumo, rows);
-      const ctRaiz = calcValorCTRaiz(o?.resumo);
       $('stats').innerHTML=`
         <div class="stat-card">
-          <span class="stat-label">Valor CT Raiz</span>
-          <span class="stat-value" style="font-size:1rem">${fmtMoney(ctRaiz > 0 ? ctRaiz : vcAditivo)}</span>
+          <span class="stat-label">Valor CT / Aditivo</span>
+          <span class="stat-value" style="font-size:1rem">${fmtMoney(vcAditivo)}</span>
         </div>
         <div class="stat-card">
           <span class="stat-label">Acumulado Total</span>
@@ -501,7 +491,7 @@
           <span class="stat-label">Medição Atual</span>
           <span class="stat-value" style="font-size:1.2rem">${esc(o?.medicaoAtual||'-')}</span>
         </div>`;
-      $('countAll').textContent = fmtMoney(ctRaiz > 0 ? ctRaiz : vcAditivo);
+      $('countAll').textContent = fmtMoney(vcAditivo);
       $('countDone').textContent = fmtMoney(acumTotal);
       $('countPct').textContent  = pct.toFixed(2)+'%';
       updateChart();
@@ -514,27 +504,14 @@
     const RE_VCA = /valor\s*(ct|contrato)\s*[\/\-]?\s*(ta|aditiv|reajust|atualiz)?/i;
     const RE_ACUM_LABEL = /^acumulado$/i;
 
-    // ─── Extrai valorContratoAditivo, totalReajuste e acumuladoTotal do cabeçalho ───
-    // Regras para totalReajuste:
-    //   • Planilha tipo 7CIA: label "TOTAL REAJUSTE" na mesma linha do valorCT, valor na mesma posição (col L)
-    //   • Planilha tipo Alcina: tabela lateral com linhas REAJUSTE 1, REAJUSTE 2... — soma os valores numéricos
-    //     de células próximas cujo label contém "reajuste" (excluindo "% reajuste")
     function extractHeaderValues(data, dataStart){
       let valorContratoAditivo = 0;
       let acumuladoTotal = 0;
-      let totalReajuste = 0;
-
       const headerRows = data.slice(0, dataStart < 0 ? data.length : dataStart);
-
-      // ── Primeira passagem: busca compacta (label + valor na mesma linha / próxima linha) ──
       for(let r=0; r<headerRows.length; r++){
         const row = headerRows[r] || [];
         for(let c=0; c<row.length; c++){
           const cell = String(row[c]??'').trim();
-          if(!cell) continue;
-          const cellNorm = norm(cell);
-
-          // Valor CT / Aditivo / TA
           if(!valorContratoAditivo && RE_VCA.test(cell)){
             for(let cc=c+1; cc<Math.min(c+9, row.length); cc++){
               const v = Number(row[cc]);
@@ -548,8 +525,6 @@
               }
             }
           }
-
-          // Acumulado total (linha de totais no cabeçalho)
           if(!acumuladoTotal && RE_ACUM_LABEL.test(cell)){
             const nr = headerRows[r+1] || [];
             for(let cc=c; cc<Math.min(c+4, nr.length); cc++){
@@ -557,50 +532,9 @@
               if(v > 10000){ acumuladoTotal = v; break; }
             }
           }
-
-          // TOTAL REAJUSTE — label inline (ex.: 7CIA col L linha 6)
-          // Detecta "total reajuste" exato e pega o valor na mesma col, próxima linha
-          if(/total\s*reajuste/i.test(cell)){
-            // Valor na mesma linha, colunas à frente
-            for(let cc=c+1; cc<Math.min(c+5, row.length); cc++){
-              const v = Number(row[cc]);
-              if(!isNaN(v) && v > 0){ totalReajuste += v; break; }
-            }
-            // Valor na linha seguinte, mesma coluna
-            if(totalReajuste === 0){
-              const nr = headerRows[r+1] || [];
-              const v = Number(nr[c]);
-              if(!isNaN(v) && v > 0) totalReajuste += v;
-            }
-          }
         }
       }
-
-      // ── Segunda passagem: tabela lateral de composição (ex.: Alcina — col P labels, col Q valores) ──
-      // Percorre todo o cabeçalho buscando células com "reajuste" que NÃO sejam "% reajuste"
-      // e cujas células vizinhas (mesma linha, colunas +1 a +3) contenham valor numérico
-      if(totalReajuste === 0){
-        for(let r=0; r<headerRows.length; r++){
-          const row = headerRows[r] || [];
-          for(let c=0; c<row.length; c++){
-            const cell = String(row[c]??'').trim();
-            if(!cell) continue;
-            const cellNorm = norm(cell);
-            // Label com "reajuste" mas sem "%"
-            if(/reajuste/i.test(cell) && !/^\s*%/.test(cell) && !/total\s*reajuste/i.test(cell)){
-              for(let cc=c+1; cc<Math.min(c+4, row.length); cc++){
-                const v = Number(row[cc]);
-                if(!isNaN(v) && Math.abs(v) > 100){
-                  totalReajuste += v;   // pode ser negativo (supressão de reajuste)
-                  break;
-                }
-              }
-            }
-          }
-        }
-      }
-
-      return { valorContratoAditivo, acumuladoTotal, totalReajuste };
+      return { valorContratoAditivo, acumuladoTotal };
     }
 
     async function readExcelFile(file){
@@ -644,8 +578,7 @@
           acumulado: sa,
           percentual: vca > 0 ? +(acu/vca*100).toFixed(2) : 0,
           valorContratoAditivo: vca,
-          acumuladoTotal: acu,
-          totalReajuste: hv.totalReajuste   // ← NOVO: soma de todos os reajustes do cabeçalho
+          acumuladoTotal: acu
         }
       };
     }
@@ -681,7 +614,7 @@
     $('loadFile').onclick=()=>loadFromJsonOrExcel(false);
     $('addObraBtn').onclick=()=>loadFromJsonOrExcel(false);
     $('toggleTheme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';if(rows.length)updateChart();};
-    $('exportCsv').onclick=()=>{const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];const body=rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}"`).join(',')).join('\n');const blob=new Blob([fields.join(',')+'\\n'+body],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='cronograma.csv';a.click();URL.revokeObjectURL(a.href);};
+    $('exportCsv').onclick=()=>{const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];const body=rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}"`).join(',')).join('\n');const blob=new Blob([fields.join(',')+'\n'+body],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='cronograma.csv';a.click();URL.revokeObjectURL(a.href);};
     $('saveJson').onclick=()=>{const o=currentObra();const name=($('projName').value.trim()||'projeto');const payload={obra:name,medicaoAtual:o?.medicaoAtual||'',itens:rows};const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name.replace(/[^a-zA-Z0-9\-_]/g,'-').toLowerCase()+'.json';a.click();URL.revokeObjectURL(a.href);};
   </script>
   <style>
