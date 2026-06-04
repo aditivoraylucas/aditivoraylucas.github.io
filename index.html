@@ -35,6 +35,19 @@
     function norm(v){ return String(v??'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim(); }
     const isNum = v => v!=='' && !isNaN(Number(v)) && isFinite(Number(v));
 
+    // ── helper: calcula % geral sempre pelos valores do cabeçalho ──
+    // acumuladoTotal ÷ valorContratoAditivo × 100
+    // fallback para soma dos itens caso não tenha cabeçalho
+    function calcPctGeral(resumo, itens){
+      const vca = Number(resumo?.valorContratoAditivo) || 0;
+      const acu = Number(resumo?.acumuladoTotal)       || 0;
+      if(vca > 0 && acu > 0) return +(acu / vca * 100).toFixed(2);
+      // fallback: soma dos itens
+      const tvc = (itens||[]).reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
+      const tac = (itens||[]).reduce((a,i)=>a+(Number(i.acumulado)||0),0);
+      return tvc > 0 ? +(tac / tvc * 100).toFixed(2) : 0;
+    }
+
     let currentUser = null, isAdmin = false;
     let unsubObras = null, unsubAllObras = null;
     let obras = [], selectedObraId = null, rows = [], sourceContrato = null;
@@ -190,25 +203,25 @@
       const obra=obrasList.find(o=>o.id===adminSelectedObraId);
       if(!obra){ panel.innerHTML=html+'<p style="color:var(--text-muted)">Obra não encontrada.</p>'; return; }
 
-      const itens=Array.isArray(obra.itens)?obra.itens:[];
-      const totalVC=itens.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
-      const totalAcum=itens.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
-      const totalMed=itens.reduce((a,i)=>a+(Number(i.medicao)||0),0);
-      const pct=totalVC>0?(totalAcum/totalVC*100).toFixed(2):0;
-      const done=itens.filter(r=>Number(r.percentualExecutado)>=99.5).length;
-      const vcAditivo = obra.resumo?.valorContratoAditivo || totalVC;
-      const acumTotal = obra.resumo?.acumuladoTotal || totalAcum;
+      const itens   = Array.isArray(obra.itens) ? obra.itens : [];
+      const totalVC = itens.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
+      const totalAcum = itens.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
+      const totalMed  = itens.reduce((a,i)=>a+(Number(i.medicao)||0),0);
+      const vcAditivo = Number(obra.resumo?.valorContratoAditivo) || totalVC;
+      const acumTotal = Number(obra.resumo?.acumuladoTotal)       || totalAcum;
+      // % Geral = acumulado do cabeçalho ÷ valor contrato do cabeçalho
+      const pct = calcPctGeral(obra.resumo, itens);
 
       html+=`
       <div class="stats-grid" style="margin-bottom:1.5rem">
-        <div class="stat-card"><span class="stat-label">Valor CT/Aditivo</span><span class="stat-value" style="font-size:1rem">${fmtMoney(vcAditivo)}</span></div>
+        <div class="stat-card"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value" style="font-size:1rem">${fmtMoney(vcAditivo)}</span></div>
         <div class="stat-card"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="font-size:1rem;color:var(--success)">${fmtMoney(acumTotal)}</span></div>
-        <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct}%</span></div>
+        <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct.toFixed(2)}%</span></div>
         <div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.1rem">${esc(obra.medicaoAtual||'-')}</span></div>
-        <div class="stat-card"><span class="stat-label">Valor Contrato</span><span class="stat-value" style="font-size:1rem">${fmtMoney(totalVC)}</span></div>
-        <div class="stat-card"><span class="stat-label">Acumulado</span><span class="stat-value" style="font-size:1rem">${fmtMoney(totalAcum)}</span></div>
+        <div class="stat-card"><span class="stat-label">Valor Contrato (itens)</span><span class="stat-value" style="font-size:1rem">${fmtMoney(totalVC)}</span></div>
+        <div class="stat-card"><span class="stat-label">Acumulado (itens)</span><span class="stat-value" style="font-size:1rem">${fmtMoney(totalAcum)}</span></div>
         <div class="stat-card"><span class="stat-label">Medição</span><span class="stat-value" style="font-size:1rem">${fmtMoney(totalMed)}</span></div>
-        <div class="stat-card"><span class="stat-label">Saldo</span><span class="stat-value" style="font-size:1rem">${fmtMoney(totalVC-totalAcum)}</span></div>
+        <div class="stat-card"><span class="stat-label">Saldo</span><span class="stat-value" style="font-size:1rem">${fmtMoney(vcAditivo-acumTotal)}</span></div>
       </div>
       <div class="panel" style="margin-bottom:1.5rem">
         <h3 style="margin-bottom:1rem">Curva S — Progresso Físico</h3>
@@ -255,37 +268,37 @@
     window.adminSelectObra = obraId => { adminSelectedObraId=obraId||null; renderAdminObraDetail(); };
 
     function adminObraCardHTML(obra){
-      const itens=Array.isArray(obra.itens)?obra.itens:[];
-      const vc=itens.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
-      const ac=itens.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
-      const vcAditivo = obra.resumo?.valorContratoAditivo || vc;
-      const pct=vcAditivo>0?(ac/vcAditivo*100).toFixed(2):0;
+      const itens     = Array.isArray(obra.itens) ? obra.itens : [];
+      const vcAditivo = Number(obra.resumo?.valorContratoAditivo) || itens.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
+      const acumTotal = Number(obra.resumo?.acumuladoTotal)       || itens.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
+      // % = acumulado do cabeçalho ÷ valor contrato do cabeçalho
+      const pct = calcPctGeral(obra.resumo, itens);
       return `<div class="obra-card" style="cursor:pointer" onclick="adminSelectObra('${obra.id}')">
         <div class="obra-card-header">
           <div><div class="obra-card-title">${esc(obra.nome||'Sem nome')}</div>
           <div class="obra-card-sub">${itens.length} itens &nbsp;|&nbsp; Aba: ${esc(obra.medicaoAtual||'-')}</div></div>
-          <div class="obra-card-pct">${pct}%</div>
+          <div class="obra-card-pct">${pct.toFixed(2)}%</div>
         </div>
         <div class="obra-progress-bar"><div class="obra-progress-fill" style="width:${Math.min(100,pct)}%"></div></div>
         <div class="obra-card-footer">
-          <span>CT/Aditivo: ${fmtMoney(vcAditivo)}</span><span>Acumulado: ${fmtMoney(ac)}</span><span>Saldo: ${fmtMoney(vcAditivo-ac)}</span>
+          <span>CT/Aditivo: ${fmtMoney(vcAditivo)}</span><span>Acumulado: ${fmtMoney(acumTotal)}</span><span>Saldo: ${fmtMoney(vcAditivo-acumTotal)}</span>
         </div>
       </div>`;
     }
 
     function renderAdminStats(){
-      let tot=0,tit=0,tvc=0,tac=0;
+      let tot=0, tit=0, tvc=0, tac=0;
       Object.values(allUsersData).forEach(u=>{
         if(u.role==='admin') return;
         (u.obras||[]).forEach(o=>{
           tot++;
-          const it=Array.isArray(o.itens)?o.itens:[];
-          tit+=it.length;
-          tvc+=(o.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
-          tac+=(o.resumo?.acumuladoTotal)||it.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
+          const it = Array.isArray(o.itens) ? o.itens : [];
+          tit += it.length;
+          tvc += Number(o.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
+          tac += Number(o.resumo?.acumuladoTotal)       || it.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
         });
       });
-      const pg=tvc>0?(tac/tvc*100).toFixed(2):0;
+      const pg = tvc > 0 ? (tac/tvc*100).toFixed(2) : 0;
       $('adminStats').innerHTML=`
         <div class="stat-card"><span class="stat-label">Total de Obras</span><span class="stat-value">${tot}</span></div>
         <div class="stat-card"><span class="stat-label">Total de Itens</span><span class="stat-value">${tit}</span></div>
@@ -324,8 +337,7 @@
       try{
         await updateDoc(doc(db,'users',uid),{ blocked: novoEstado });
         allUsersData[uid].blocked = novoEstado;
-        renderColabList();
-        renderAdminColabSidebar();
+        renderColabList(); renderAdminColabSidebar();
         if(adminSelectedUid===uid) renderAdminObraDetail();
         alert(novoEstado ? 'Colaborador bloqueado com sucesso.' : 'Colaborador desbloqueado com sucesso.');
       }catch(err){ alert('Erro: '+err.message); }
@@ -463,12 +475,10 @@
 
     function updateDashboard(){
       const o = currentObra();
-      // Valor CT/Aditivo: vem do resumo extraído do cabeçalho da planilha
-      const vcAditivo = o?.resumo?.valorContratoAditivo || rows.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
-      // Acumulado Total: vem do resumo extraído do cabeçalho da planilha
-      const acumTotal = o?.resumo?.acumuladoTotal || rows.reduce((a,r)=>a+(Number(r.acumulado)||0),0);
-      const rp = Number(o?.resumo?.percentual);
-      const pct = !isNaN(rp) && rp>0 ? rp : (vcAditivo>0?(acumTotal/vcAditivo*100):0);
+      const vcAditivo = Number(o?.resumo?.valorContratoAditivo) || rows.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
+      const acumTotal = Number(o?.resumo?.acumuladoTotal)       || rows.reduce((a,r)=>a+(Number(r.acumulado)||0),0);
+      // % Geral = acumuladoTotal (cabeçalho) ÷ valorContratoAditivo (cabeçalho)
+      const pct = calcPctGeral(o?.resumo, rows);
       $('stats').innerHTML=`
         <div class="stat-card">
           <span class="stat-label">Valor CT / Aditivo</span>
@@ -478,8 +488,14 @@
           <span class="stat-label">Acumulado Total</span>
           <span class="stat-value" style="font-size:1rem;color:var(--success)">${fmtMoney(acumTotal)}</span>
         </div>
-        <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct.toFixed(2)}%</span></div>
-        <div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.2rem">${esc(o?.medicaoAtual||'-')}</span></div>`;
+        <div class="stat-card">
+          <span class="stat-label">% Geral</span>
+          <span class="stat-value">${pct.toFixed(2)}%</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Medição Atual</span>
+          <span class="stat-value" style="font-size:1.2rem">${esc(o?.medicaoAtual||'-')}</span>
+        </div>`;
       $('countAll').textContent = fmtMoney(vcAditivo);
       $('countDone').textContent = fmtMoney(acumTotal);
       $('countPct').textContent  = pct.toFixed(2)+'%';
@@ -491,13 +507,10 @@
     function normalizeImportedRows(list){if(!Array.isArray(list))return[];return list.map(item=>({item:item?.item??'',descricao:item?.descricao??item?.descricaoServico??item?.name??'',valorContrato:Number(item?.valorContrato??item?.valor_contrato??0)||0,medicao:Number(item?.medicao??0)||0,acumulado:Number(item?.acumulado??0)||0,saldo:Number(item?.saldo??0)||0,percentualExecutado:Number(item?.percentualExecutado??item?.percentual_executado??0)||0}));}
 
     // ─────────────────────────────────────────────────────────────────────
-    // REGRA 1 — Busca "Valor Contrato com Aditivos e Reajuste" em qualquer
-    //           linha do cabeçalho. O valor numérico está na mesma linha,
-    //           na primeira coluna à direita que contenha um número > 0.
-    // REGRA 2 — Busca label "Acumulado" na linha do resumo (antes dos dados).
-    //           O valor está na linha imediatamente abaixo, mesma coluna.
-    // Ambas as regras percorrem TODAS as linhas antes de dataStart,
-    // garantindo que funcionem independente do tamanho da planilha.
+    // REGRA 1 — Busca "Valor Contrato com Aditivos e Reajuste" no cabeçalho.
+    //           Valor numérico: mesma linha, primeira coluna à direita > 0.
+    // REGRA 2 — Busca label "Acumulado" no cabeçalho.
+    //           Valor numérico: linha imediatamente abaixo, mesma coluna.
     // ─────────────────────────────────────────────────────────────────────
     const RE_VCA = /valor.{0,40}(contrato|ct).{0,40}(aditiv|reajust|atualiz)/i;
     const RE_ACUM_LABEL = /^acumulado$/i;
@@ -506,24 +519,17 @@
       let valorContratoAditivo = 0;
       let acumuladoTotal = 0;
       const headerRows = data.slice(0, dataStart < 0 ? data.length : dataStart);
-
       for(let r=0; r<headerRows.length; r++){
         const row = headerRows[r] || [];
         for(let c=0; c<row.length; c++){
           const cell = String(row[c]??'').trim();
-
-          // REGRA 1: label "Valor Contrato com Aditivos e Reajuste"
           if(!valorContratoAditivo && RE_VCA.test(cell)){
-            // procura número na mesma linha a partir da próxima coluna
             for(let cc=c+1; cc<row.length; cc++){
               const v = Number(row[cc]);
               if(v > 0){ valorContratoAditivo = v; break; }
             }
           }
-
-          // REGRA 2: label "Acumulado" na seção de resumo (linha seguinte tem o valor)
           if(!acumuladoTotal && RE_ACUM_LABEL.test(cell)){
-            // o valor está na linha imediatamente abaixo, mesma coluna
             const nextRow = headerRows[r+1] || [];
             const v = Number(nextRow[c]);
             if(v > 0){ acumuladoTotal = v; }
@@ -559,23 +565,23 @@
         const pct=vc>0?+(acum/vc*100).toFixed(2):0;
         items.push({item:itemStr,descricao,valorContrato:+vc.toFixed(2),medicao:+med.toFixed(2),acumulado:+acum.toFixed(2),saldo:+saldo.toFixed(2),percentualExecutado:pct});
       }
-      const st=items.reduce((a,i)=>a+i.valorContrato,0);
-      const sa=items.reduce((a,i)=>a+i.acumulado,0);
-
-      // extrai valores do cabeçalho
+      const st = items.reduce((a,i)=>a+i.valorContrato,0);
+      const sa = items.reduce((a,i)=>a+i.acumulado,0);
       const hv = extractHeaderValues(data, dataStart);
-
+      const vca = hv.valorContratoAditivo || st;
+      const acu = hv.acumuladoTotal || sa;
       return{
         nome:fileBaseName(file.name),
         nomeProjeto:wb.Props?.Title||fileBaseName(file.name)||'Nova obra',
         medicaoAtual:target,
         itens:items,
         resumo:{
-          total:st,
-          acumulado:sa,
-          percentual:st>0?+(sa/st*100).toFixed(2):0,
-          valorContratoAditivo: hv.valorContratoAditivo || st,
-          acumuladoTotal: hv.acumuladoTotal || sa
+          total: st,
+          acumulado: sa,
+          // percentual calculado pelos valores do cabeçalho — fonte única de verdade
+          percentual: vca > 0 ? +(acu/vca*100).toFixed(2) : 0,
+          valorContratoAditivo: vca,
+          acumuladoTotal: acu
         }
       };
     }
