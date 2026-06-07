@@ -78,7 +78,7 @@
       try{
         await signInWithEmailAndPassword(auth, email, senha);
       } catch(err){
-        $('loginError').textContent = 'E-mail ou senha inv\u00e1lidos.';
+        $('loginError').textContent = 'E-mail ou senha inválidos.';
         $('loginError').style.display='block';
       } finally{ btn.disabled=false; btn.textContent='Entrar'; }
     });
@@ -103,18 +103,13 @@
       return { uid: d.id, ...d.data() };
     }
 
-    // Retorna op\u00e7\u00f5es de barra que evitam embolamento independente da qtd de itens
-    function chartBarOpts(n, isMobile) {
-      if (isMobile) {
-        return { maxBarThickness: 14, categoryPercentage: 0.85, barPercentage: 0.85 };
-      }
-      // PC: at\u00e9 20 itens usa barras mais largas; acima disso deixa chart.js distribuir
-      if (n <= 20) return { maxBarThickness: 36, categoryPercentage: 0.7, barPercentage: 0.8 };
-      if (n <= 40) return { maxBarThickness: 24, categoryPercentage: 0.8, barPercentage: 0.85 };
-      return { maxBarThickness: 16, categoryPercentage: 0.85, barPercentage: 0.9 };
+    function barThickness(n){
+      const isMobile = window.innerWidth <= 640;
+      if(isMobile) return Math.max(4, Math.min(10, Math.floor(160 / (n||1))));
+      return Math.max(8, Math.min(32, Math.floor(480 / (n||1))));
     }
 
-    // \u2550\u2550 ADMIN VIEW \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    // ══ ADMIN VIEW ═════════════════════════════════════════════════
     function initAdminView(){
       showView('adminView');
       listenAllUsers();
@@ -173,9 +168,9 @@
       if(adminSelectedUid && allUsersData[adminSelectedUid]){
         const u = allUsersData[adminSelectedUid];
         const n = (u.obras||[]).length;
-        const lockIcon = u.blocked ? '\uD83D\uDD12 ' : '';
+        const lockIcon = u.blocked ? '🔒 ' : '';
         box.innerHTML =
-          `<button class="btn btn-sec" onclick="adminDeselectColab()" style="width:100%;margin-bottom:.75rem;font-size:.8rem;justify-content:flex-start;gap:.4rem">\u2190 Todos</button>` +
+          `<button class="btn btn-sec" onclick="adminDeselectColab()" style="width:100%;margin-bottom:.75rem;font-size:.8rem;justify-content:flex-start;gap:.4rem">← Todos</button>` +
           `<div class="colab-sidebar-item active">
             <div style="font-weight:600;font-size:.875rem">${lockIcon}${esc(u.nome)}${u.blocked?' <span style="font-size:.7rem;color:var(--danger)">(Bloqueado)</span>':''}</div>
             <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n!==1?'s':''}</div>
@@ -185,7 +180,7 @@
 
       box.innerHTML=colabs.map(([uid,u])=>{
         const n=(u.obras||[]).length;
-        const lockIcon = u.blocked ? '\uD83D\uDD12 ' : '';
+        const lockIcon = u.blocked ? '🔒 ' : '';
         const blockedStyle = u.blocked ? 'opacity:.55' : '';
         return `<div class="colab-sidebar-item" style="${blockedStyle}" onclick="adminSelectColab('${uid}')">
           <div style="font-weight:600;font-size:.875rem">${lockIcon}${esc(u.nome)}</div>
@@ -212,7 +207,7 @@
       const obrasList=u.obras||[];
 
       let html=`<div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
-        <div style="font-weight:700;font-size:1.1rem">\uD83D\uDC64 ${esc(u.nome)}${u.blocked?` <span style="font-size:.75rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.2rem .6rem;border-radius:999px;font-weight:600">\uD83D\uDD12 Bloqueado</span>`:''}</div>
+        <div style="font-weight:700;font-size:1.1rem">👤 ${esc(u.nome)}${u.blocked?` <span style="font-size:.75rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.2rem .6rem;border-radius:999px;font-weight:600">🔒 Bloqueado</span>`:''}</div>
         <div class="form-group" style="margin:0;min-width:220px">
           <select id="adminObraSelect" class="form-control" onchange="adminSelectObra(this.value)">
             <option value="">-- Selecione uma obra --</option>
@@ -222,12 +217,12 @@
       </div>`;
 
       if(!adminSelectedObraId||!obrasList.length){
-        html += obrasList.length ? obrasList.map(adminObraCardHTML).join('') : '<p style="color:var(--text-muted)">Este colaborador n\u00e3o tem obras cadastradas.</p>';
+        html += obrasList.length ? obrasList.map(adminObraCardHTML).join('') : '<p style="color:var(--text-muted)">Este colaborador não tem obras cadastradas.</p>';
         panel.innerHTML=html; return;
       }
 
       const obra=obrasList.find(o=>o.id===adminSelectedObraId);
-      if(!obra){ panel.innerHTML=html+'<p style="color:var(--text-muted)">Obra n\u00e3o encontrada.</p>'; return; }
+      if(!obra){ panel.innerHTML=html+'<p style="color:var(--text-muted)">Obra não encontrada.</p>'; return; }
 
       const itens   = Array.isArray(obra.itens) ? obra.itens : [];
       const totalAcum = itens.reduce((a,i)=>a+(Number(i.acumulado)||0),0);
@@ -241,22 +236,22 @@
         <div class="stat-card compact"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value">${fmtMoney(vcAditivo)}</span></div>
         <div class="stat-card compact"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="color:var(--success)">${fmtMoney(acumTotal)}</span></div>
         <div class="stat-card compact"><span class="stat-label">% Geral</span><span class="stat-value">${pct.toFixed(2)}%</span></div>
-        <div class="stat-card compact"><span class="stat-label">Medi\u00e7\u00e3o Atual</span><span class="stat-value">${esc(obra.medicaoAtual||'-')}</span></div>
+        <div class="stat-card compact"><span class="stat-label">Medição Atual</span><span class="stat-value">${esc(obra.medicaoAtual||'-')}</span></div>
         <div class="stat-card compact"><span class="stat-label">Acumulado (itens)</span><span class="stat-value">${fmtMoney(totalAcum)}</span></div>
-        <div class="stat-card compact"><span class="stat-label">Medi\u00e7\u00e3o</span><span class="stat-value">${fmtMoney(totalMed)}</span></div>
+        <div class="stat-card compact"><span class="stat-label">Medição</span><span class="stat-value">${fmtMoney(totalMed)}</span></div>
         <div class="stat-card compact"><span class="stat-label">Saldo</span><span class="stat-value">${fmtMoney(vcAditivo-acumTotal)}</span></div>
       </div>
       <div class="panel" style="margin-bottom:1.5rem">
-        <h3 style="margin-bottom:1rem">Curva S \u2014 Progresso F\u00edsico</h3>
+        <h3 style="margin-bottom:1rem">Curva S — Progresso Físico</h3>
         <div class="chart-container"><canvas id="adminCurvaS"></canvas></div>
       </div>
       <div class="panel">
-        <h3 style="margin-bottom:1rem">\u00cdndice de Itens</h3>
+        <h3 style="margin-bottom:1rem">Índice de Itens</h3>
         <div class="table-container">
           <table><thead><tr>
-            <th class="th-sticky">Item</th><th class="th-sticky">Descri\u00e7\u00e3o</th>
+            <th class="th-sticky">Item</th><th class="th-sticky">Descrição</th>
             <th class="th-sticky" style="text-align:right">Valor Contrato</th>
-            <th class="th-sticky" style="text-align:right">Medi\u00e7\u00e3o</th>
+            <th class="th-sticky" style="text-align:right">Medição</th>
             <th class="th-sticky" style="text-align:right">Acumulado</th>
             <th class="th-sticky" style="text-align:right">Saldo</th>
             <th class="th-sticky" style="text-align:right">% Exec.</th>
@@ -280,12 +275,10 @@
         const theme=document.documentElement.dataset.theme;
         const gc=theme==='dark'?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)';
         const tc=theme==='dark'?'#94a3b8':'#64748b';
-        const isMobile = window.innerWidth <= 640;
-        const bo = chartBarOpts(itens.length, isMobile);
         adminChartInstance=new Chart(canvas.getContext('2d'),{
           type:'bar',
-          data:{labels:itens.map(r=>String(r.item||'')),datasets:[{label:'% Executado',data:itens.map(r=>Number(r.percentualExecutado)||0),backgroundColor:'rgba(99,102,241,0.2)',borderColor:'#6366f1',borderWidth:1,borderRadius:3,...bo}]},
-          options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},x:{grid:{display:false},ticks:{color:tc,font:{size:10},maxRotation:45,autoSkip:true}}},plugins:{legend:{labels:{color:tc}}}}
+          data:{labels:itens.map(r=>String(r.item||'')),datasets:[{label:'% Executado',data:itens.map(r=>Number(r.percentualExecutado)||0),backgroundColor:'rgba(99,102,241,0.2)',borderColor:'#6366f1',borderWidth:1,borderRadius:3,barThickness:barThickness(itens.length)}]},
+          options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},x:{grid:{display:false},ticks:{color:tc,font:{size:10}}}},plugins:{legend:{labels:{color:tc}}}}
         });
       });
     }
@@ -339,12 +332,12 @@
         return `<div class="colab-item" style="${bloqueado?'opacity:.7':''}">
           <div>
             <strong>${esc(u.nome)}</strong>
-            ${bloqueado?'<span style="margin-left:.5rem;font-size:.7rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.1rem .4rem;border-radius:999px">\uD83D\uDD12 Bloqueado</span>':''}
+            ${bloqueado?'<span style="margin-left:.5rem;font-size:.7rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.1rem .4rem;border-radius:999px">🔒 Bloqueado</span>':''}
             <br><small style="color:var(--text-muted)">${esc(u.email)}</small>
           </div>
           <div style="display:flex;gap:.4rem;flex-wrap:wrap">
             <button class="btn ${bloqueado?'btn-success':'btn-warning'}" style="padding:.3rem .65rem;font-size:.72rem" onclick="toggleBloqueio('${uid}',${bloqueado})">
-              ${bloqueado?'\u2705 Desbloquear':'\uD83D\uDD12 Bloquear'}
+              ${bloqueado?'✅ Desbloquear':'🔒 Bloquear'}
             </button>
             <button class="btn btn-danger" style="padding:.3rem .65rem;font-size:.72rem" onclick="removeColab('${uid}')">Remover</button>
           </div>
@@ -355,8 +348,8 @@
     window.toggleBloqueio = async (uid, isBlocked) => {
       const novoEstado = !isBlocked;
       const msg = novoEstado
-        ? 'Bloquear este colaborador? Ele n\u00e3o conseguir\u00e1 mais fazer login at\u00e9 ser desbloqueado.'
-        : 'Desbloquear este colaborador? Ele poder\u00e1 fazer login normalmente.';
+        ? 'Bloquear este colaborador? Ele não conseguirá mais fazer login até ser desbloqueado.'
+        : 'Desbloquear este colaborador? Ele poderá fazer login normalmente.';
       if(!confirm(msg)) return;
       try{
         await updateDoc(doc(db,'users',uid),{ blocked: novoEstado });
@@ -368,7 +361,7 @@
     };
 
     window.removeColab = async uid => {
-      if(!confirm('Remover este colaborador? Ele perder\u00e1 acesso ao sistema.')) return;
+      if(!confirm('Remover este colaborador? Ele perderá acesso ao sistema.')) return;
       try{
         await updateDoc(doc(db,'users',uid),{disabled:true});
         delete allUsersData[uid];
@@ -428,7 +421,7 @@
             }catch(err2){
               let msg = 'Erro ao reativar a conta.';
               if(err2.code==='auth/wrong-password'||err2.code==='auth/invalid-credential')
-                msg = 'N\u00e3o foi poss\u00edvel reativar automaticamente. Remova e recadastre com outro e-mail.';
+                msg = 'Não foi possível reativar automaticamente. Remova e recadastre com outro e-mail.';
               else msg = err2.message;
               try{ await signInWithEmailAndPassword(auth, adminEmail, ADMIN_SENHA); }catch(_){}
               msgEl.textContent=msg; msgEl.style.display='block';
@@ -437,7 +430,7 @@
             msgEl.textContent='A senha deve ter pelo menos 6 caracteres.';
             msgEl.style.display='block';
           } else if(err.code==='auth/invalid-email'){
-            msgEl.textContent='E-mail inv\u00e1lido.';
+            msgEl.textContent='E-mail inválido.';
             msgEl.style.display='block';
           } else {
             msgEl.textContent=err.message;
@@ -449,7 +442,7 @@
       });
     }
 
-    // \u2550\u2550 COLABORADOR VIEW \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+    // ══ COLABORADOR VIEW ═══════════════════════════════════════════════════
     function initUserView(){
       getDoc(doc(db,'users',currentUser.uid)).then(snap=>{
         if(!snap.exists()){ cleanupListeners(); signOut(auth); return; }
@@ -459,7 +452,7 @@
           cleanupListeners(); signOut(auth); return;
         }
         if(data.blocked===true){
-          alert('Seu acesso est\u00e1 temporariamente bloqueado. Entre em contato com o administrador.');
+          alert('Seu acesso está temporariamente bloqueado. Entre em contato com o administrador.');
           cleanupListeners(); signOut(auth); return;
         }
         showView('appView');
@@ -512,8 +505,6 @@
       const theme=document.documentElement.dataset.theme,
             gc=theme==='dark'?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)',
             tc=theme==='dark'?'#94a3b8':'#64748b';
-      const isMobile = window.innerWidth <= 640;
-      const bo = chartBarOpts(rows.length, isMobile);
       chartInstance=new Chart(ctx,{
         type:'bar',
         data:{labels:rows.map(r=>String(r.item||'')),datasets:[{
@@ -523,14 +514,14 @@
           borderColor:'#6366f1',
           borderWidth:1,
           borderRadius:3,
-          ...bo
+          barThickness: barThickness(rows.length)
         }]},
         options:{
           responsive:true,
           maintainAspectRatio:false,
           scales:{
             y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},
-            x:{grid:{display:false},ticks:{color:tc,font:{size:10},maxRotation:45,autoSkip:true}}
+            x:{grid:{display:false},ticks:{color:tc,font:{size:10}}}
           },
           plugins:{legend:{labels:{color:tc}}}
         }
@@ -556,7 +547,7 @@
           <span class="stat-value">${pct.toFixed(2)}%</span>
         </div>
         <div class="stat-card">
-          <span class="stat-label">Medi\u00e7\u00e3o Atual</span>
+          <span class="stat-label">Medição Atual</span>
           <span class="stat-value" style="font-size:1.2rem">${esc(o?.medicaoAtual||'-')}</span>
         </div>`;
       $('countAll').textContent = fmtMoney(vcAditivo);
@@ -659,7 +650,7 @@
         try{
           let obj,importedRows=[];
           if(ext==='xlsx'){obj=await readExcelFile(file);importedRows=normalizeImportedRows(obj.itens);}
-          else{const text=await file.text();obj=JSON.parse(text);if(Array.isArray(obj))importedRows=normalizeImportedRows(obj);else if(Array.isArray(obj.itens))importedRows=normalizeImportedRows(obj.itens);else throw new Error('Formato inv\u00e1lido');}
+          else{const text=await file.text();obj=JSON.parse(text);if(Array.isArray(obj))importedRows=normalizeImportedRows(obj);else if(Array.isArray(obj.itens))importedRows=normalizeImportedRows(obj.itens);else throw new Error('Formato inválido');}
           const obraNome=fileBaseName(file.name)||obj.nome||'Nova obra';
           const obraId=replace&&selectedObraId?selectedObraId:('obra_'+Date.now());
           const obra={id:obraId,nome:obraNome,nomeProjeto:obj.nomeProjeto||obj.obra||obraNome,cliente:obj.cliente||'',arquivoNome:file.name,origem:ext,medicaoAtual:obj.medicaoAtual||obj.nome||'',itens:importedRows,resumo:obj.resumo||{percentual:0}};
@@ -733,8 +724,7 @@
     .form-group label{font-size:.8125rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
     .form-control{padding:.625rem .875rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:inherit;font-size:.875rem;transition:.2s;outline:none;width:100%}
     .form-control:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(99,102,241,.15);background:var(--surface)}
-    /* PC: curva S ocupa largura total abaixo da Nova Atividade */
-    .chart-container{height:360px;width:100%;position:relative}
+    .chart-container{height:330px;width:100%;position:relative}
     .table-container{overflow-x:auto;margin-top:1rem;-webkit-overflow-scrolling:touch;border-radius:var(--radius-md)}
     .th-sticky{position:sticky;top:0;z-index:10;background:var(--surface);box-shadow:0 1px 0 var(--border)}
     .td-desc{white-space:normal !important;overflow-wrap:break-word;word-break:normal;min-width:120px;max-width:220px;line-height:1.4}
@@ -787,9 +777,7 @@
       th{padding:.55rem .5rem;font-size:.68rem}
       td{padding:.55rem .5rem;font-size:.72rem}
       .td-desc{min-width:90px;max-width:140px;font-size:.7rem}
-      /* Mobile: curva S mais alta e painel ocupa 100% */
-      .chart-container{height:270px}
-      .curva-s-panel{grid-column:1/-1 !important}
+      .chart-container{height:220px}
       .admin-colabpanel-grid{grid-template-columns:1fr !important}
       .admin-sidebar{position:static !important;max-height:none !important;overflow-y:visible !important}
       .nav{position:static !important;max-height:none !important;overflow-y:visible !important}
@@ -799,7 +787,7 @@
 </head>
 <body>
 
-<button id="btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Voltar ao in\u00edcio">\u2191</button>
+<button id="btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Voltar ao início">↑</button>
 <script>
   window.addEventListener('scroll',()=>{
     const b=document.getElementById('btnTopo');
@@ -816,7 +804,7 @@
     </div>
     <form id="loginForm">
       <div class="form-group"><label>E-mail</label><input type="email" id="loginEmail" class="form-control" placeholder="seu@email.com" required></div>
-      <div class="form-group"><label>Senha</label><input type="password" id="loginSenha" class="form-control" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" required></div>
+      <div class="form-group"><label>Senha</label><input type="password" id="loginSenha" class="form-control" placeholder="••••••••" required></div>
       <div id="loginError" class="error-msg"></div>
       <button type="submit" class="btn btn-primary" id="loginBtn" style="width:100%;padding:.875rem;margin-top:.75rem">Entrar</button>
     </form>
@@ -831,26 +819,26 @@
         <div class="logo">RA</div>
         <div class="brand-text">
           <h1>Cronograma PRO</h1>
-          <p>Vis\u00e3o Geral do Gestor</p>
+          <p>Visão Geral do Gestor</p>
         </div>
       </div>
       <div class="header-actions">
-        <button class="btn btn-sec" id="adminToggleColab">\uD83D\uDC65 Gerenciar Colaboradores</button>
+        <button class="btn btn-sec" id="adminToggleColab">👥 Gerenciar Colaboradores</button>
         <button class="btn btn-sec" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark'">Tema</button>
         <button class="btn btn-sec" id="logoutBtnAdmin" style="color:var(--danger)">Sair</button>
       </div>
     </header>
 
     <div id="adminColabPanel" class="panel" style="display:none">
-      <div class="flex-between mb-4"><h2>\uD83D\uDC65 Gerenciar Colaboradores</h2></div>
+      <div class="flex-between mb-4"><h2>👥 Gerenciar Colaboradores</h2></div>
       <div class="admin-colabpanel-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem">
         <div>
           <h3 style="font-size:.9rem;margin-bottom:.5rem;color:var(--text-muted)">CADASTRAR / REATIVAR COLABORADOR</h3>
           <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:1rem">Para reativar um colaborador removido, informe o mesmo e-mail e defina uma nova senha.</p>
           <form id="addColabForm">
-            <div class="form-group"><label>Nome</label><input type="text" id="colabNome" class="form-control" placeholder="Ex.: Jo\u00e3o Silva" required></div>
+            <div class="form-group"><label>Nome</label><input type="text" id="colabNome" class="form-control" placeholder="Ex.: João Silva" required></div>
             <div class="form-group"><label>E-mail</label><input type="email" id="colabEmail" class="form-control" placeholder="joao@email.com" required></div>
-            <div class="form-group"><label>Senha</label><input type="password" id="colabSenha" class="form-control" placeholder="m\u00ednimo 6 caracteres" minlength="6" required></div>
+            <div class="form-group"><label>Senha</label><input type="password" id="colabSenha" class="form-control" placeholder="mínimo 6 caracteres" minlength="6" required></div>
             <div id="colabMsgError" class="error-msg"></div>
             <button type="submit" class="btn btn-primary" id="addColabBtn" style="width:100%;margin-top:.5rem">Cadastrar colaborador</button>
           </form>
@@ -894,7 +882,7 @@
           <div class="nav-item"><span>Acumulado</span><span class="badge" id="countDone" style="color:var(--success);font-size:.65rem">R$ 0</span></div>
           <div class="nav-item"><span>Progresso</span><span class="badge" id="countPct">0%</span></div>
           <div class="panel mt-4" style="padding:1rem">
-            <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">A\u00c7\u00d5ES DE ARQUIVO</h3>
+            <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">AÇÕES DE ARQUIVO</h3>
             <div style="display:flex;flex-direction:column;gap:.5rem">
               <button class="btn btn-sec" id="loadFile" style="width:100%">Importar arquivo</button>
               <button class="btn btn-primary" id="saveJson" style="width:100%">Exportar JSON</button>
@@ -908,32 +896,20 @@
         </div>
       </aside>
       <main>
-        <div class="panel"><div class="flex-between mb-4"><h2>Configura\u00e7\u00f5es do Projeto</h2></div><div class="form-grid"><div class="form-group" style="grid-column:1/-1"><label>Nome do Projeto</label><input type="text" id="projName" class="form-control" placeholder="Nome do projeto"></div><div class="form-group"><label>Cliente / Setor</label><input type="text" id="projClient" class="form-control" placeholder="Ex.: Diretoria de Obras"></div><div class="form-group"><label>Escopo / Fase</label><input type="text" id="projScope" class="form-control" placeholder="Ex.: BM 10"></div></div></div>
-
-        <!-- Nova Atividade e Curva S: em PC ficam lado a lado (atividade menor + curva maior); no mobile empilham -->
-        <div style="display:grid;grid-template-columns:280px 1fr;gap:1.5rem;margin-bottom:1.5rem;align-items:start">
-          <div class="panel" style="margin:0">
-            <h2 class="mb-4">Nova Atividade</h2>
-            <div class="form-grid" style="grid-template-columns:1fr;margin-bottom:0">
-              <div class="form-group" style="margin-bottom:.5rem"><label>Atividade</label><input type="text" id="fName" class="form-control" placeholder="Ex.: Alvenaria"></div>
-            </div>
-            <button class="btn btn-primary mt-4" id="addRow" style="width:100%">Adicionar Atividade</button>
-          </div>
-          <div class="panel curva-s-panel" style="margin:0">
-            <h2 class="mb-4">Curva S \u2014 Progresso F\u00edsico</h2>
-            <div class="chart-container"><canvas id="sCurveChart"></canvas></div>
-          </div>
+        <div class="panel"><div class="flex-between mb-4"><h2>Configurações do Projeto</h2></div><div class="form-grid"><div class="form-group" style="grid-column:1/-1"><label>Nome do Projeto</label><input type="text" id="projName" class="form-control" placeholder="Nome do projeto"></div><div class="form-group"><label>Cliente / Setor</label><input type="text" id="projClient" class="form-control" placeholder="Ex.: Diretoria de Obras"></div><div class="form-group"><label>Escopo / Fase</label><input type="text" id="projScope" class="form-control" placeholder="Ex.: BM 10"></div></div></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.5rem;margin-bottom:1.5rem">
+          <div class="panel" style="margin:0"><h2 class="mb-4">Nova Atividade</h2><div class="form-grid" style="grid-template-columns:1fr;margin-bottom:0"><div class="form-group" style="margin-bottom:.5rem"><label>Atividade</label><input type="text" id="fName" class="form-control" placeholder="Ex.: Alvenaria"></div></div><button class="btn btn-primary mt-4" id="addRow" style="width:100%">Adicionar Atividade</button></div>
+          <div class="panel" style="margin:0"><h2 class="mb-4">Curva S — Progresso Físico</h2><div class="chart-container"><canvas id="sCurveChart"></canvas></div></div>
         </div>
-
         <div class="stats-grid" id="stats"></div>
         <div class="panel">
-          <div class="flex-between"><h2>\u00cdndice / Itens Principais</h2><div><button class="btn btn-sec" id="fillSample" style="margin-right:.5rem">Limpar</button><button class="btn btn-sec" id="exportCsv">Exportar CSV</button></div></div>
+          <div class="flex-between"><h2>Índice / Itens Principais</h2><div><button class="btn btn-sec" id="fillSample" style="margin-right:.5rem">Limpar</button><button class="btn btn-sec" id="exportCsv">Exportar CSV</button></div></div>
           <div class="table-container">
             <table><thead><tr>
               <th class="th-sticky">Item</th>
-              <th class="th-sticky">Descri\u00e7\u00e3o</th>
+              <th class="th-sticky">Descrição</th>
               <th class="th-sticky" style="text-align:right">Valor Contrato</th>
-              <th class="th-sticky" style="text-align:right">Medi\u00e7\u00e3o</th>
+              <th class="th-sticky" style="text-align:right">Medição</th>
               <th class="th-sticky" style="text-align:right">Acumulado</th>
               <th class="th-sticky" style="text-align:right">Saldo</th>
               <th class="th-sticky" style="text-align:right">% Executada</th>
