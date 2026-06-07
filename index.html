@@ -103,7 +103,6 @@
       return { uid: d.id, ...d.data() };
     }
 
-    // helper: retorna barThickness ideal conforme número de itens e tela
     function barThickness(n){
       const isMobile = window.innerWidth <= 640;
       if(isMobile) return Math.max(4, Math.min(10, Math.floor(160 / (n||1))));
@@ -248,8 +247,8 @@
       </div>
       <div class="panel">
         <h3 style="margin-bottom:1rem">Índice de Itens</h3>
-        <div class="table-container">
-          <table class="table-mobile-wrap"><thead><tr>
+        <div class="table-container table-scroll">
+          <table><thead><tr>
             <th>Item</th><th>Descrição</th>
             <th style="text-align:right">Valor Contrato</th>
             <th style="text-align:right">Medição</th>
@@ -726,11 +725,15 @@
     .form-control{padding:.625rem .875rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:inherit;font-size:.875rem;transition:.2s;outline:none;width:100%}
     .form-control:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(99,102,241,.15);background:var(--surface)}
     .chart-container{height:280px;width:100%;position:relative}
+    /* Wrapper da tabela: scroll horizontal sempre + scroll vertical com thead fixo */
     .table-container{overflow-x:auto;margin-top:1rem;-webkit-overflow-scrolling:touch;border-radius:var(--radius-md)}
-    /* Coluna descrição: quebra linha em todas as telas */
-    .td-desc{white-space:normal !important;word-break:break-word;min-width:120px;max-width:220px;line-height:1.4}
+    .table-scroll{max-height:420px;overflow-y:auto}
+    /* thead fica grudado no topo do container com scroll */
+    .table-scroll thead th{position:sticky;top:0;z-index:2;background:var(--surface);box-shadow:0 1px 0 var(--border)}
+    /* Coluna descrição: quebra apenas entre palavras, nunca no meio */
+    .td-desc{white-space:normal !important;overflow-wrap:break-word;word-break:normal;min-width:120px;max-width:220px;line-height:1.4}
     table{width:100%;border-collapse:separate;border-spacing:0;min-width:580px}
-    th{text-align:left;padding:1rem;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);border-bottom:1px solid var(--border);background:rgba(0,0,0,.02);position:sticky;top:0;z-index:1}
+    th{text-align:left;padding:1rem;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);border-bottom:1px solid var(--border);background:var(--surface)}
     td{padding:1rem;font-size:.875rem;border-bottom:1px solid var(--border);transition:background .2s;white-space:nowrap}
     tr:last-child td{border-bottom:none}tbody tr:hover td{background:var(--surface-hover)}
     td[contenteditable="true"]{outline:none;cursor:text}td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px var(--primary);border-radius:4px}
@@ -745,7 +748,6 @@
     .obra-progress-fill{height:100%;background:var(--primary);border-radius:999px;transition:width .4s}
     .obra-card-footer{display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.8125rem;color:var(--text-muted)}
     .colab-item{display:flex;justify-content:space-between;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:.5rem;background:var(--bg);gap:.5rem;flex-wrap:wrap}
-    /* Botão flutuante de início */
     #btnTopo{position:fixed;bottom:1.5rem;right:1.5rem;z-index:999;width:46px;height:46px;border-radius:50%;background:var(--primary);color:#fff;border:none;font-size:1.2rem;cursor:pointer;box-shadow:var(--shadow-md);opacity:0;transition:opacity .3s,transform .2s;display:flex;align-items:center;justify-content:center;pointer-events:none;}
     #btnTopo.visible{opacity:1;pointer-events:auto;}
     #btnTopo:hover{transform:translateY(-3px);background:var(--primary-hover)}
@@ -772,12 +774,12 @@
       .obra-card{padding:1rem}
       .obra-card-pct{font-size:1.2rem}
       .obra-card-footer{gap:.75rem;font-size:.75rem}
-      /* Tabela mobile: fonte menor, padding menor, min-width reduzido */
       table{min-width:480px}
       th{padding:.55rem .5rem;font-size:.68rem}
       td{padding:.55rem .5rem;font-size:.72rem}
       .td-desc{min-width:90px;max-width:140px;font-size:.7rem}
-      /* Gráfico menor no mobile para dar mais espaço */
+      /* Scroll vertical da tabela menor no mobile */
+      .table-scroll{max-height:320px}
       .chart-container{height:180px}
       .admin-colabpanel-grid{grid-template-columns:1fr !important}
       #btnTopo{bottom:1rem;right:1rem;width:42px;height:42px;font-size:1rem}
@@ -786,7 +788,6 @@
 </head>
 <body>
 
-<!-- Botão flutuante de início -->
 <button id="btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Voltar ao início">↑</button>
 <script>
   window.addEventListener('scroll',()=>{
@@ -902,7 +903,12 @@
           <div class="panel" style="margin:0"><h2 class="mb-4">Curva S — Progresso Físico</h2><div class="chart-container"><canvas id="sCurveChart"></canvas></div></div>
         </div>
         <div class="stats-grid" id="stats"></div>
-        <div class="panel"><div class="flex-between"><h2>Índice / Itens Principais</h2><div><button class="btn btn-sec" id="fillSample" style="margin-right:.5rem">Limpar</button><button class="btn btn-sec" id="exportCsv">Exportar CSV</button></div></div><div class="table-container"><table><thead><tr><th>Item</th><th>Descrição</th><th style="text-align:right">Valor Contrato</th><th style="text-align:right">Medição</th><th style="text-align:right">Acumulado</th><th style="text-align:right">Saldo</th><th style="text-align:right">% Executada</th><th></th></tr></thead><tbody id="tbody"></tbody></table></div></div>
+        <div class="panel">
+          <div class="flex-between"><h2>Índice / Itens Principais</h2><div><button class="btn btn-sec" id="fillSample" style="margin-right:.5rem">Limpar</button><button class="btn btn-sec" id="exportCsv">Exportar CSV</button></div></div>
+          <div class="table-container table-scroll">
+            <table><thead><tr><th>Item</th><th>Descrição</th><th style="text-align:right">Valor Contrato</th><th style="text-align:right">Medição</th><th style="text-align:right">Acumulado</th><th style="text-align:right">Saldo</th><th style="text-align:right">% Executada</th><th></th></tr></thead><tbody id="tbody"></tbody></table>
+          </div>
+        </div>
       </main>
     </div>
   </div>
