@@ -247,7 +247,7 @@
       </div>
       <div class="panel">
         <h3 style="margin-bottom:1rem">Índice de Itens</h3>
-        <div class="table-container table-scroll">
+        <div class="table-container">
           <table><thead><tr>
             <th>Item</th><th>Descrição</th>
             <th style="text-align:right">Valor Contrato</th>
@@ -724,12 +724,16 @@
     .form-group label{font-size:.8125rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
     .form-control{padding:.625rem .875rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:inherit;font-size:.875rem;transition:.2s;outline:none;width:100%}
     .form-control:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(99,102,241,.15);background:var(--surface)}
-    /* Gráfico um pouco maior */
     .chart-container{height:330px;width:100%;position:relative}
-    /* Wrapper da tabela: scroll horizontal sempre + scroll vertical com thead fixo */
+    /* Tabela: scroll horizontal, sem altura máxima — thead gruda no topo da página */
     .table-container{overflow-x:auto;margin-top:1rem;-webkit-overflow-scrolling:touch;border-radius:var(--radius-md)}
-    .table-scroll{max-height:420px;overflow-y:auto}
-    .table-scroll thead th{position:sticky;top:0;z-index:2;background:var(--surface);box-shadow:0 1px 0 var(--border)}
+    thead th{
+      position:sticky;
+      top:0;
+      z-index:10;
+      background:var(--surface);
+      box-shadow:0 1px 0 var(--border);
+    }
     /* Coluna descrição: quebra apenas entre palavras */
     .td-desc{white-space:normal !important;overflow-wrap:break-word;word-break:normal;min-width:120px;max-width:220px;line-height:1.4}
     table{width:100%;border-collapse:separate;border-spacing:0;min-width:580px}
@@ -760,11 +764,9 @@
     }
     @media(max-width:640px){
       .container{padding:1rem}
-      /* Header admin: brand em cima, botões embaixo */
       .header-admin-mobile{flex-wrap:wrap !important}
       .header-admin-mobile .brand{width:100%}
       .header-admin-mobile .header-actions{width:100%;justify-content:flex-end}
-      /* Header colaborador: mantém compacto em linha */
       .header{margin-bottom:1.25rem;gap:.5rem}
       .brand-text h1{font-size:1rem !important}
       .brand-text p{font-size:.72rem !important}
@@ -783,15 +785,12 @@
       th{padding:.55rem .5rem;font-size:.68rem}
       td{padding:.55rem .5rem;font-size:.72rem}
       .td-desc{min-width:90px;max-width:140px;font-size:.7rem}
-      /* Apenas a tabela (indice) mantém scroll vertical fixo no mobile */
-      .table-scroll{max-height:320px}
-      /* Gráfico ligeiramente maior no mobile também */
       .chart-container{height:220px}
       .admin-colabpanel-grid{grid-template-columns:1fr !important}
-      /* Sidebar e nav voltam ao fluxo normal (sem sticky/max-height) no mobile */
       .admin-sidebar{position:static !important;max-height:none !important;overflow-y:visible !important}
       .nav{position:static !important;max-height:none !important;overflow-y:visible !important}
       #btnTopo{bottom:1rem;right:1rem;width:42px;height:42px;font-size:1rem}
+      thead th{top:0}
     }
   </style>
 </head>
@@ -824,7 +823,6 @@
 <!-- ADMIN VIEW -->
 <div id="adminView" style="display:none">
   <div class="container">
-    <!-- header com classe especial para quebrar linha no mobile -->
     <header class="header header-admin-mobile">
       <div class="brand">
         <div class="logo">CA</div>
@@ -915,7 +913,7 @@
         <div class="stats-grid" id="stats"></div>
         <div class="panel">
           <div class="flex-between"><h2>Índice / Itens Principais</h2><div><button class="btn btn-sec" id="fillSample" style="margin-right:.5rem">Limpar</button><button class="btn btn-sec" id="exportCsv">Exportar CSV</button></div></div>
-          <div class="table-container table-scroll">
+          <div class="table-container">
             <table><thead><tr><th>Item</th><th>Descrição</th><th style="text-align:right">Valor Contrato</th><th style="text-align:right">Medição</th><th style="text-align:right">Acumulado</th><th style="text-align:right">Saldo</th><th style="text-align:right">% Executada</th><th></th></tr></thead><tbody id="tbody"></tbody></table>
           </div>
         </div>
