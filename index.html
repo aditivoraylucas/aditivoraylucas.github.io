@@ -247,14 +247,14 @@
       </div>
       <div class="panel">
         <h3 style="margin-bottom:1rem">Índice de Itens</h3>
-        <div class="table-container table-scroll">
+        <div class="table-container">
           <table><thead><tr>
-            <th>Item</th><th>Descrição</th>
-            <th style="text-align:right">Valor Contrato</th>
-            <th style="text-align:right">Medição</th>
-            <th style="text-align:right">Acumulado</th>
-            <th style="text-align:right">Saldo</th>
-            <th style="text-align:right">% Exec.</th>
+            <th class="th-sticky">Item</th><th class="th-sticky">Descrição</th>
+            <th class="th-sticky" style="text-align:right">Valor Contrato</th>
+            <th class="th-sticky" style="text-align:right">Medição</th>
+            <th class="th-sticky" style="text-align:right">Acumulado</th>
+            <th class="th-sticky" style="text-align:right">Saldo</th>
+            <th class="th-sticky" style="text-align:right">% Exec.</th>
           </tr></thead>
           <tbody>${itens.map(r=>`<tr>
             <td>${esc(r.item)}</td><td class="td-desc">${esc(r.descricao)}</td>
@@ -725,9 +725,10 @@
     .form-control{padding:.625rem .875rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:inherit;font-size:.875rem;transition:.2s;outline:none;width:100%}
     .form-control:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(99,102,241,.15);background:var(--surface)}
     .chart-container{height:330px;width:100%;position:relative}
+    /* Tabela: apenas scroll horizontal, lista completamente aberta verticalmente */
     .table-container{overflow-x:auto;margin-top:1rem;-webkit-overflow-scrolling:touch;border-radius:var(--radius-md)}
-    .table-scroll{max-height:420px;overflow-y:auto}
-    .table-scroll thead th{position:sticky;top:0;z-index:2;background:var(--surface);box-shadow:0 1px 0 var(--border)}
+    /* Thead sticky no topo da VIEWPORT (scroll da página) */
+    .th-sticky{position:sticky;top:0;z-index:10;background:var(--surface);box-shadow:0 1px 0 var(--border)}
     .td-desc{white-space:normal !important;overflow-wrap:break-word;word-break:normal;min-width:120px;max-width:220px;line-height:1.4}
     table{width:100%;border-collapse:separate;border-spacing:0;min-width:580px}
     th{text-align:left;padding:1rem;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);border-bottom:1px solid var(--border);background:var(--surface)}
@@ -778,7 +779,6 @@
       th{padding:.55rem .5rem;font-size:.68rem}
       td{padding:.55rem .5rem;font-size:.72rem}
       .td-desc{min-width:90px;max-width:140px;font-size:.7rem}
-      .table-scroll{max-height:320px}
       .chart-container{height:220px}
       .admin-colabpanel-grid{grid-template-columns:1fr !important}
       .admin-sidebar{position:static !important;max-height:none !important;overflow-y:visible !important}
@@ -906,8 +906,17 @@
         <div class="stats-grid" id="stats"></div>
         <div class="panel">
           <div class="flex-between"><h2>Índice / Itens Principais</h2><div><button class="btn btn-sec" id="fillSample" style="margin-right:.5rem">Limpar</button><button class="btn btn-sec" id="exportCsv">Exportar CSV</button></div></div>
-          <div class="table-container table-scroll">
-            <table><thead><tr><th>Item</th><th>Descrição</th><th style="text-align:right">Valor Contrato</th><th style="text-align:right">Medição</th><th style="text-align:right">Acumulado</th><th style="text-align:right">Saldo</th><th style="text-align:right">% Executada</th><th></th></tr></thead><tbody id="tbody"></tbody></table>
+          <div class="table-container">
+            <table><thead><tr>
+              <th class="th-sticky">Item</th>
+              <th class="th-sticky">Descrição</th>
+              <th class="th-sticky" style="text-align:right">Valor Contrato</th>
+              <th class="th-sticky" style="text-align:right">Medição</th>
+              <th class="th-sticky" style="text-align:right">Acumulado</th>
+              <th class="th-sticky" style="text-align:right">Saldo</th>
+              <th class="th-sticky" style="text-align:right">% Executada</th>
+              <th class="th-sticky"></th>
+            </tr></thead><tbody id="tbody"></tbody></table>
           </div>
         </div>
       </main>
