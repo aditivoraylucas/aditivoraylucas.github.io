@@ -59,12 +59,6 @@
       $(name).style.display = name==='loginView' ? 'flex' : 'block';
     }
 
-    // Botão flutuante de início
-    window.addEventListener('scroll', () => {
-      const btn = $('btnTopo');
-      if(btn) btn.style.opacity = window.scrollY > 200 ? '1' : '0';
-    });
-
     onAuthStateChanged(auth, async user => {
       currentUser = user;
       if(!user){ showView('loginView'); return; }
@@ -107,6 +101,13 @@
       if(snap.empty) return null;
       const d = snap.docs[0];
       return { uid: d.id, ...d.data() };
+    }
+
+    // helper: retorna barThickness ideal conforme número de itens e tela
+    function barThickness(n){
+      const isMobile = window.innerWidth <= 640;
+      if(isMobile) return Math.max(4, Math.min(10, Math.floor(160 / (n||1))));
+      return Math.max(8, Math.min(32, Math.floor(480 / (n||1))));
     }
 
     // ══ ADMIN VIEW ═════════════════════════════════════════════════
@@ -248,7 +249,7 @@
       <div class="panel">
         <h3 style="margin-bottom:1rem">Índice de Itens</h3>
         <div class="table-container">
-          <table><thead><tr>
+          <table class="table-mobile-wrap"><thead><tr>
             <th>Item</th><th>Descrição</th>
             <th style="text-align:right">Valor Contrato</th>
             <th style="text-align:right">Medição</th>
@@ -257,7 +258,7 @@
             <th style="text-align:right">% Exec.</th>
           </tr></thead>
           <tbody>${itens.map(r=>`<tr>
-            <td>${esc(r.item)}</td><td>${esc(r.descricao)}</td>
+            <td>${esc(r.item)}</td><td class="td-desc">${esc(r.descricao)}</td>
             <td style="text-align:right">${fmtMoney(r.valorContrato)}</td>
             <td style="text-align:right">${fmtMoney(r.medicao)}</td>
             <td style="text-align:right">${fmtMoney(r.acumulado)}</td>
@@ -277,8 +278,8 @@
         const tc=theme==='dark'?'#94a3b8':'#64748b';
         adminChartInstance=new Chart(canvas.getContext('2d'),{
           type:'bar',
-          data:{labels:itens.map(r=>String(r.item||'')),datasets:[{label:'% Executado',data:itens.map(r=>Number(r.percentualExecutado)||0),backgroundColor:'rgba(99,102,241,0.2)',borderColor:'#6366f1',borderWidth:1,borderRadius:4}]},
-          options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},x:{grid:{display:false},ticks:{color:tc}}},plugins:{legend:{labels:{color:tc}}}}
+          data:{labels:itens.map(r=>String(r.item||'')),datasets:[{label:'% Executado',data:itens.map(r=>Number(r.percentualExecutado)||0),backgroundColor:'rgba(99,102,241,0.2)',borderColor:'#6366f1',borderWidth:1,borderRadius:3,barThickness:barThickness(itens.length)}]},
+          options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},x:{grid:{display:false},ticks:{color:tc,font:{size:10}}}},plugins:{legend:{labels:{color:tc}}}}
         });
       });
     }
@@ -486,9 +487,47 @@
       $('deleteObraBtn').onclick=async()=>{if(!selectedObraId||!confirm('Remover obra?'))return;await deleteObraFirestore(selectedObraId);selectedObraId=null;};
     }
 
-    function renderTable(){$('tbody').innerHTML=rows.map((r,i)=>`<tr data-i="${i}"><td contenteditable="true" data-k="item">${esc(r.item)}</td><td contenteditable="true" data-k="descricao">${esc(r.descricao)}</td><td contenteditable="true" data-k="valorContrato" style="text-align:right">${fmtMoney(r.valorContrato)}</td><td contenteditable="true" data-k="medicao" style="text-align:right">${fmtMoney(r.medicao)}</td><td contenteditable="true" data-k="acumulado" style="text-align:right">${fmtMoney(r.acumulado)}</td><td contenteditable="true" data-k="saldo" style="text-align:right">${fmtMoney(r.saldo)}</td><td contenteditable="true" data-k="percentualExecutado" style="text-align:right;font-weight:700">${Number(r.percentualExecutado||0).toFixed(2)}</td><td style="text-align:right"><button data-del="${i}" class="btn btn-danger" style="padding:.4rem;border-radius:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events:none"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button></td></tr>`).join('');}
+    function renderTable(){
+      $('tbody').innerHTML=rows.map((r,i)=>`<tr data-i="${i}">
+        <td contenteditable="true" data-k="item">${esc(r.item)}</td>
+        <td contenteditable="true" data-k="descricao" class="td-desc">${esc(r.descricao)}</td>
+        <td contenteditable="true" data-k="valorContrato" style="text-align:right">${fmtMoney(r.valorContrato)}</td>
+        <td contenteditable="true" data-k="medicao" style="text-align:right">${fmtMoney(r.medicao)}</td>
+        <td contenteditable="true" data-k="acumulado" style="text-align:right">${fmtMoney(r.acumulado)}</td>
+        <td contenteditable="true" data-k="saldo" style="text-align:right">${fmtMoney(r.saldo)}</td>
+        <td contenteditable="true" data-k="percentualExecutado" style="text-align:right;font-weight:700">${Number(r.percentualExecutado||0).toFixed(2)}</td>
+        <td style="text-align:right"><button data-del="${i}" class="btn btn-danger" style="padding:.4rem;border-radius:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="pointer-events:none"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button></td>
+      </tr>`).join('');
+    }
 
-    function updateChart(){const ctx=$('sCurveChart').getContext('2d');if(chartInstance)chartInstance.destroy();const theme=document.documentElement.dataset.theme,gc=theme==='dark'?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)',tc=theme==='dark'?'#94a3b8':'#64748b';chartInstance=new Chart(ctx,{type:'bar',data:{labels:rows.map(r=>String(r.item||'')),datasets:[{label:'% Executado',data:rows.map(r=>Number(r.percentualExecutado)||0),backgroundColor:'rgba(99,102,241,0.2)',borderColor:'#6366f1',borderWidth:1,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},x:{grid:{display:false},ticks:{color:tc}}},plugins:{legend:{labels:{color:tc}}}}});}
+    function updateChart(){
+      const ctx=$('sCurveChart').getContext('2d');
+      if(chartInstance)chartInstance.destroy();
+      const theme=document.documentElement.dataset.theme,
+            gc=theme==='dark'?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)',
+            tc=theme==='dark'?'#94a3b8':'#64748b';
+      chartInstance=new Chart(ctx,{
+        type:'bar',
+        data:{labels:rows.map(r=>String(r.item||'')),datasets:[{
+          label:'% Executado',
+          data:rows.map(r=>Number(r.percentualExecutado)||0),
+          backgroundColor:'rgba(99,102,241,0.2)',
+          borderColor:'#6366f1',
+          borderWidth:1,
+          borderRadius:3,
+          barThickness: barThickness(rows.length)
+        }]},
+        options:{
+          responsive:true,
+          maintainAspectRatio:false,
+          scales:{
+            y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},
+            x:{grid:{display:false},ticks:{color:tc,font:{size:10}}}
+          },
+          plugins:{legend:{labels:{color:tc}}}
+        }
+      });
+    }
 
     function updateDashboard(){
       const o = currentObra();
@@ -688,9 +727,11 @@
     .form-control:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(99,102,241,.15);background:var(--surface)}
     .chart-container{height:280px;width:100%;position:relative}
     .table-container{overflow-x:auto;margin-top:1rem;-webkit-overflow-scrolling:touch;border-radius:var(--radius-md)}
-    table{width:100%;border-collapse:separate;border-spacing:0;min-width:780px}
+    /* Coluna descrição: quebra linha em todas as telas */
+    .td-desc{white-space:normal !important;word-break:break-word;min-width:120px;max-width:220px;line-height:1.4}
+    table{width:100%;border-collapse:separate;border-spacing:0;min-width:580px}
     th{text-align:left;padding:1rem;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);border-bottom:1px solid var(--border);background:rgba(0,0,0,.02);position:sticky;top:0;z-index:1}
-    td{padding:1rem;font-size:.875rem;border-bottom:1px solid var(--border);transition:background .2s}
+    td{padding:1rem;font-size:.875rem;border-bottom:1px solid var(--border);transition:background .2s;white-space:nowrap}
     tr:last-child td{border-bottom:none}tbody tr:hover td{background:var(--surface-hover)}
     td[contenteditable="true"]{outline:none;cursor:text}td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px var(--primary);border-radius:4px}
     .flex-between{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem}.mt-4{margin-top:1rem}.mb-4{margin-bottom:1rem}
@@ -731,8 +772,13 @@
       .obra-card{padding:1rem}
       .obra-card-pct{font-size:1.2rem}
       .obra-card-footer{gap:.75rem;font-size:.75rem}
-      table{min-width:700px}
-      th,td{padding:.75rem .65rem;font-size:.78rem;white-space:nowrap}
+      /* Tabela mobile: fonte menor, padding menor, min-width reduzido */
+      table{min-width:480px}
+      th{padding:.55rem .5rem;font-size:.68rem}
+      td{padding:.55rem .5rem;font-size:.72rem}
+      .td-desc{min-width:90px;max-width:140px;font-size:.7rem}
+      /* Gráfico menor no mobile para dar mais espaço */
+      .chart-container{height:180px}
       .admin-colabpanel-grid{grid-template-columns:1fr !important}
       #btnTopo{bottom:1rem;right:1rem;width:42px;height:42px;font-size:1rem}
     }
