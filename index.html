@@ -59,6 +59,12 @@
       $(name).style.display = name==='loginView' ? 'flex' : 'block';
     }
 
+    // Botão flutuante de início
+    window.addEventListener('scroll', () => {
+      const btn = $('btnTopo');
+      if(btn) btn.style.opacity = window.scrollY > 200 ? '1' : '0';
+    });
+
     onAuthStateChanged(auth, async user => {
       currentUser = user;
       if(!user){ showView('loginView'); return; }
@@ -158,11 +164,27 @@
       const box=$('adminColabSidebar'); if(!box) return;
       const colabs=Object.entries(allUsersData).filter(([,u])=>u.role!=='admin');
       if(!colabs.length){ box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem">Nenhum colaborador ainda.</p>'; return; }
+
+      // Se houver um colaborador selecionado, mostra apenas ele + botão voltar
+      if(adminSelectedUid && allUsersData[adminSelectedUid]){
+        const u = allUsersData[adminSelectedUid];
+        const n = (u.obras||[]).length;
+        const lockIcon = u.blocked ? '🔒 ' : '';
+        box.innerHTML =
+          `<button class="btn btn-sec" onclick="adminDeselectColab()" style="width:100%;margin-bottom:.75rem;font-size:.8rem;justify-content:flex-start;gap:.4rem">← Todos</button>` +
+          `<div class="colab-sidebar-item active">
+            <div style="font-weight:600;font-size:.875rem">${lockIcon}${esc(u.nome)}${u.blocked?' <span style="font-size:.7rem;color:var(--danger)">(Bloqueado)</span>':''}</div>
+            <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n!==1?'s':''}</div>
+          </div>`;
+        return;
+      }
+
+      // Nenhum selecionado: lista completa
       box.innerHTML=colabs.map(([uid,u])=>{
-        const n=(u.obras||[]).length, active=uid===adminSelectedUid;
+        const n=(u.obras||[]).length;
         const lockIcon = u.blocked ? '🔒 ' : '';
         const blockedStyle = u.blocked ? 'opacity:.55' : '';
-        return `<div class="colab-sidebar-item ${active?'active':''}" style="${blockedStyle}" onclick="adminSelectColab('${uid}')">
+        return `<div class="colab-sidebar-item" style="${blockedStyle}" onclick="adminSelectColab('${uid}')">
           <div style="font-weight:600;font-size:.875rem">${lockIcon}${esc(u.nome)}</div>
           <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n!==1?'s':''}</div>
         </div>`;
@@ -171,6 +193,11 @@
 
     window.adminSelectColab = uid => {
       adminSelectedUid=uid; adminSelectedObraId=null;
+      renderAdminColabSidebar(); renderAdminObraDetail();
+    };
+
+    window.adminDeselectColab = () => {
+      adminSelectedUid=null; adminSelectedObraId=null;
       renderAdminColabSidebar(); renderAdminObraDetail();
     };
 
@@ -649,7 +676,6 @@
     .stat-value{font-size:2rem;font-weight:900;line-height:1;color:var(--text)}.stat-label{font-size:.875rem;color:var(--text-muted);font-weight:500}
     .dashboard{display:grid;grid-template-columns:260px 1fr;gap:2rem}
     .panel{background:var(--surface);border-radius:var(--radius-lg);border:1px solid var(--border);box-shadow:var(--shadow-sm);padding:1.5rem;margin-bottom:1.5rem}
-    /* Sidebar do colaborador: scroll independente do restante da pagina */
     .nav{display:flex;flex-direction:column;gap:.5rem;position:sticky;top:2rem;max-height:calc(100vh - 4rem);overflow-y:auto;padding-right:.25rem}
     .nav-item{display:flex;justify-content:space-between;padding:.75rem 1rem;border-radius:var(--radius-sm);font-weight:500;color:var(--text-muted)}
     .nav-item.active{background:rgba(99,102,241,.1);color:var(--primary);font-weight:700}
@@ -678,6 +704,9 @@
     .obra-progress-fill{height:100%;background:var(--primary);border-radius:999px;transition:width .4s}
     .obra-card-footer{display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.8125rem;color:var(--text-muted)}
     .colab-item{display:flex;justify-content:space-between;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:.5rem;background:var(--bg);gap:.5rem;flex-wrap:wrap}
+    /* Botão flutuante de início */
+    #btnTopo{position:fixed;bottom:1.5rem;right:1.5rem;z-index:999;width:46px;height:46px;border-radius:50%;background:var(--primary);color:#fff;border:none;font-size:1.2rem;cursor:pointer;box-shadow:var(--shadow-md);opacity:0;transition:opacity .3s,transform .2s;display:flex;align-items:center;justify-content:center;}
+    #btnTopo:hover{transform:translateY(-3px);background:var(--primary-hover)}
     @media(max-width:1100px){
       .admin-layout{grid-template-columns:1fr}
       .admin-sidebar{position:static;max-height:none;overflow-y:visible}
@@ -704,10 +733,14 @@
       table{min-width:700px}
       th,td{padding:.75rem .65rem;font-size:.78rem;white-space:nowrap}
       .admin-colabpanel-grid{grid-template-columns:1fr !important}
+      #btnTopo{bottom:1rem;right:1rem;width:42px;height:42px;font-size:1rem}
     }
   </style>
 </head>
 <body>
+
+<!-- Botão flutuante de início -->
+<button id="btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Voltar ao início">↑</button>
 
 <!-- LOGIN -->
 <div id="loginView" class="login-wrapper">
