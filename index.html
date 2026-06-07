@@ -165,7 +165,6 @@
       const colabs=Object.entries(allUsersData).filter(([,u])=>u.role!=='admin');
       if(!colabs.length){ box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem">Nenhum colaborador ainda.</p>'; return; }
 
-      // Se houver um colaborador selecionado, mostra apenas ele + botão voltar
       if(adminSelectedUid && allUsersData[adminSelectedUid]){
         const u = allUsersData[adminSelectedUid];
         const n = (u.obras||[]).length;
@@ -179,7 +178,6 @@
         return;
       }
 
-      // Nenhum selecionado: lista completa
       box.innerHTML=colabs.map(([uid,u])=>{
         const n=(u.obras||[]).length;
         const lockIcon = u.blocked ? '🔒 ' : '';
@@ -656,11 +654,13 @@
     .btn-success{color:#065f46;background:rgba(16,185,129,.12)}.btn-success:hover{background:rgba(16,185,129,.22)}
     [data-theme="dark"] .btn-warning{color:#fcd34d}[data-theme="dark"] .btn-success{color:#6ee7b7}
     .container{max-width:1440px;margin:0 auto;padding:2rem}
-    .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;flex-wrap:wrap;gap:1rem}
-    .brand{display:flex;align-items:center;gap:1rem}
-    .logo{width:48px;height:48px;background:linear-gradient(135deg,var(--primary),#818cf8);color:#fff;border-radius:var(--radius-md);display:grid;place-items:center;font-weight:900;font-size:1.25rem;box-shadow:var(--shadow-md)}
+    .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;flex-wrap:nowrap;gap:.75rem}
+    .brand{display:flex;align-items:center;gap:1rem;min-width:0;flex-shrink:1}
+    .brand-text h1{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;white-space:nowrap}
+    .brand-text p{color:var(--text-muted);font-size:.875rem;white-space:nowrap}
+    .header-actions{display:flex;gap:.5rem;align-items:center;flex-shrink:0;flex-wrap:nowrap}
+    .logo{width:48px;height:48px;background:linear-gradient(135deg,var(--primary),#818cf8);color:#fff;border-radius:var(--radius-md);display:grid;place-items:center;font-weight:900;font-size:1.25rem;box-shadow:var(--shadow-md);flex-shrink:0}
     .logo-large{width:64px;height:64px;font-size:1.5rem}
-    .brand-text h1{font-size:1.5rem;font-weight:700;letter-spacing:-.02em}.brand-text p{color:var(--text-muted);font-size:.875rem}
     .admin-layout{display:grid;grid-template-columns:220px 1fr;gap:1.5rem;align-items:start}
     .admin-sidebar{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1rem;position:sticky;top:1.5rem;max-height:calc(100vh - 3rem);overflow-y:auto}
     .admin-sidebar h3{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.75rem}
@@ -705,7 +705,8 @@
     .obra-card-footer{display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.8125rem;color:var(--text-muted)}
     .colab-item{display:flex;justify-content:space-between;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:.5rem;background:var(--bg);gap:.5rem;flex-wrap:wrap}
     /* Botão flutuante de início */
-    #btnTopo{position:fixed;bottom:1.5rem;right:1.5rem;z-index:999;width:46px;height:46px;border-radius:50%;background:var(--primary);color:#fff;border:none;font-size:1.2rem;cursor:pointer;box-shadow:var(--shadow-md);opacity:0;transition:opacity .3s,transform .2s;display:flex;align-items:center;justify-content:center;}
+    #btnTopo{position:fixed;bottom:1.5rem;right:1.5rem;z-index:999;width:46px;height:46px;border-radius:50%;background:var(--primary);color:#fff;border:none;font-size:1.2rem;cursor:pointer;box-shadow:var(--shadow-md);opacity:0;transition:opacity .3s,transform .2s;display:flex;align-items:center;justify-content:center;pointer-events:none;}
+    #btnTopo.visible{opacity:1;pointer-events:auto;}
     #btnTopo:hover{transform:translateY(-3px);background:var(--primary-hover)}
     @media(max-width:1100px){
       .admin-layout{grid-template-columns:1fr}
@@ -716,10 +717,10 @@
     }
     @media(max-width:640px){
       .container{padding:1rem}
-      .header{margin-bottom:1.25rem}
-      .header .brand-text h1{font-size:1.15rem}
-      .header div[style*="flex"]{gap:.35rem}
-      .btn{padding:.5rem .85rem;font-size:.8rem}
+      .header{margin-bottom:1.25rem;gap:.5rem}
+      .brand-text h1{font-size:1rem !important}
+      .brand-text p{font-size:.72rem !important}
+      .btn{padding:.45rem .7rem;font-size:.75rem}
       .admin-stats-grid{grid-template-columns:repeat(2, minmax(0, 1fr));gap:.75rem;margin-bottom:1rem;}
       .stat-card.compact{min-height:88px;padding:.85rem}
       .stat-card.compact .stat-value{font-size:1rem}
@@ -741,6 +742,12 @@
 
 <!-- Botão flutuante de início -->
 <button id="btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Voltar ao início">↑</button>
+<script>
+  window.addEventListener('scroll',()=>{
+    const b=document.getElementById('btnTopo');
+    if(b) b.classList.toggle('visible', window.scrollY>200);
+  });
+</script>
 
 <!-- LOGIN -->
 <div id="loginView" class="login-wrapper">
@@ -762,8 +769,14 @@
 <div id="adminView" style="display:none">
   <div class="container">
     <header class="header">
-      <div class="brand"><div class="logo">CA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Painel do Chefe — Visão Geral</p></div></div>
-      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+      <div class="brand">
+        <div class="logo">CA</div>
+        <div class="brand-text">
+          <h1>Cronograma PRO</h1>
+          <p>Visão Geral do Gestor</p>
+        </div>
+      </div>
+      <div class="header-actions">
         <button class="btn btn-sec" id="adminToggleColab">👥 Gerenciar Colaboradores</button>
         <button class="btn btn-sec" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark'">Tema</button>
         <button class="btn btn-sec" id="logoutBtnAdmin" style="color:var(--danger)">Sair</button>
@@ -811,7 +824,7 @@
   <div class="container">
     <header class="header">
       <div class="brand"><div class="logo">CA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Minhas Obras</p></div></div>
-      <div style="display:flex;gap:.5rem">
+      <div class="header-actions">
         <button class="btn btn-sec" id="toggleTheme">Tema</button>
         <button class="btn btn-sec" id="logoutBtnUser" style="color:var(--danger)">Sair</button>
       </div>
