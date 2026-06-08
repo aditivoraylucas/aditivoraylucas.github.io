@@ -111,22 +111,12 @@
       const isMobile = window.innerWidth <= 640;
       const minBar   = isMobile ? 8  : 18;
       const maxBar   = isMobile ? 18 : 40;
-      // no mobile usamos a largura real disponível para calcular
       const space    = isMobile ? Math.max(160, window.innerWidth - 48) : 600;
       const thickness = Math.max(minBar, Math.min(maxBar, Math.floor(space / (n||1))));
-      // no mobile também permite scroll se houver muitos itens
       const minCanvasWidth = n > 0 ? Math.max(0, n * (thickness + 14)) : 0;
       return { thickness, minCanvasWidth };
     }
 
-    /**
-     * renderCurvaS — renderiza o gráfico de barras da Curva S de forma padronizada.
-     * @param {string}   canvasId    — id do elemento <canvas>
-     * @param {string}   scrollWrapId — id do wrapper que receberá overflow-x
-     * @param {Array}    itens       — array de itens com item e percentualExecutado
-     * @param {Chart|null} prevChart — instância anterior a destruir
-     * @returns {Chart}              — nova instância do Chart
-     */
     function renderCurvaS(canvasId, scrollWrapId, itens, prevChart){
       const canvas = $(canvasId);
       if(!canvas) return prevChart;
@@ -586,13 +576,11 @@
       $('countAll').textContent = fmtMoney(vcAditivo);
       $('countDone').textContent = fmtMoney(acumTotal);
       $('countPct').textContent  = pct.toFixed(2)+'%';
-      // usa função padronizada
       chartInstance = renderCurvaS('sCurveChart', 'sCurveScrollWrap', rows, chartInstance);
     }
 
     function renderAll(){renderObrasBox();renderTable();updateDashboard();}
 
-    // ── Nova Atividade: auto-calcula saldo e % ao digitar ──────────
     function setupNovaAtividade(){
       const recalc = () => {
         const vc  = parseMoney($('fValorContrato').value);
@@ -649,47 +637,132 @@
     }
 
     async function readExcelFile(file){
-      if(!file)throw new Error('Nenhum arquivo fornecido.');
-      const buffer=await file.arrayBuffer();
-      const wb=XLSX.read(new Uint8Array(buffer),{type:'array',cellDates:false});
-      const target=wb.SheetNames.filter(n=>/^(BM|MED)\s*\d+/i.test(n)).sort((a,b)=>parseInt(a.match(/\d+/)?.[0]||0)-parseInt(b.match(/\d+/)?.[0]||0)).at(-1)||wb.SheetNames.at(-1);
-      if(!target)throw new Error('Nenhuma aba encontrada.');
-      const ws=wb.Sheets[target];
-      const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
-      const RE={desc:/discrimina|descri|servico/,vc:/valor.{0,25}contrato|total.{0,25}contrato/,med:/no.{0,10}period|no.{0,10}mes|^medicao$|^realizado$|periodo/,acum:/acumulado/,saldo:/^saldo$/};
-      let cols={desc:-1,vc:-1,med:-1,acum:-1,saldo:-1},dataStart=-1;
-      for(let r=0;r<data.length;r++){
-        const row=data[r]||[];
-        if(/^\d+$/.test(String(row[0]??'').trim())){dataStart=r;break;}
-        for(let c=0;c<row.length;c++){const t=norm(row[c]);if(!t)continue;if(RE.desc.test(t))cols.desc=c;if(RE.vc.test(t))cols.vc=c;if(RE.med.test(t))cols.med=c;if(RE.acum.test(t))cols.acum=c;if(RE.saldo.test(t))cols.saldo=c;}
+      if(!file) throw new Error('Nenhum arquivo fornecido.');
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(new Uint8Array(buffer),{type:'array',cellDates:false});
+
+      // Escolhe aba BM/MED mais recente, ou última aba
+      const target = wb.SheetNames
+        .filter(n=>/^(BM|MED)\s*\d+/i.test(n))
+        .sort((a,b)=>parseInt(a.match(/\d+/)?.[0]||0)-parseInt(b.match(/\d+/)?.[0]||0))
+        .at(-1) || wb.SheetNames.at(-1);
+      if(!target) throw new Error('Nenhuma aba encontrada.');
+
+      const ws   = wb.Sheets[target];
+      const data = XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
+
+      // PASSO 1: encontra a primeira linha onde col[0] é número inteiro (1, 2, 3...)
+      let dataStart = -1;
+      for(let r=0; r<data.length; r++){
+        const cell = String(data[r]?.[0]??'').trim();
+        if(/^\d+$/.test(cell)){ dataStart = r; break; }
       }
-      if(cols.vc<0&&dataStart>=0){const fr=data[dataStart]||[];const nc=[];for(let c=1;c<fr.length;c++)if(isNum(fr[c]))nc.push(c);const vi=nc.findIndex(c=>Number(fr[c])>0);if(vi>=0){cols.vc=nc[vi];if(cols.med<0)cols.med=nc[vi+1]??cols.vc+1;if(cols.acum<0)cols.acum=nc[vi+2]??cols.vc+2;if(cols.saldo<0)cols.saldo=nc[vi+3]??cols.vc+3;}else{cols.vc=12;cols.med=13;cols.acum=14;cols.saldo=15;}}
-      const items=[];
-      for(let r=0;r<data.length;r++){
-        const row=data[r]||[];const itemStr=String(row[0]??'').trim();if(!/^\d+$/.test(itemStr))continue;
-        let descricao='';if(cols.desc>=0)descricao=String(row[cols.desc]??'').trim();
-        if(!descricao){const lim=cols.vc>0?cols.vc:10;for(let c=1;c<lim;c++){const v=String(row[c]??'').trim();if(v&&!isNum(row[c])){descricao=v;break;}}}
-        const vc=Number(row[cols.vc])||0,med=Number(row[cols.med])||0,acum=Number(row[cols.acum])||0;
-        let saldo=cols.saldo>=0?Number(row[cols.saldo]):0;if(!saldo&&vc>0)saldo=vc-acum;
-        const pct=vc>0?+(acum/vc*100).toFixed(2):0;
-        items.push({item:itemStr,descricao,valorContrato:+vc.toFixed(2),medicao:+med.toFixed(2),acumulado:+acum.toFixed(2),saldo:+saldo.toFixed(2),percentualExecutado:pct});
+      if(dataStart < 0) throw new Error('Não foi possível localizar os itens na planilha.');
+
+      // PASSO 2: varre TODAS as linhas acima de dataStart procurando cabeçalhos
+      // em qualquer linha e qualquer coluna — independente de células mescladas
+      const RE = {
+        desc:  /discrimina|descri[çc]|servico/i,
+        vc:    /valor.{0,30}contrato|total.{0,30}contrato/i,
+        med:   /no.{0,15}per[ií]odo|no.{0,10}mes|^medicao$|^realizado$|per[ií]odo/i,
+        acum:  /acumulado/i,
+        saldo: /^saldo$/i
+      };
+      const cols = {desc:-1, vc:-1, med:-1, acum:-1, saldo:-1};
+
+      for(let r=0; r<dataStart; r++){
+        const row = data[r] || [];
+        for(let c=0; c<row.length; c++){
+          const t = String(row[c]??'').trim()
+            .toLowerCase()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+          if(!t) continue;
+          if(cols.desc  < 0 && RE.desc .test(t)) cols.desc  = c;
+          if(cols.vc    < 0 && RE.vc   .test(t)) cols.vc    = c;
+          if(cols.med   < 0 && RE.med  .test(t)) cols.med   = c;
+          if(cols.acum  < 0 && RE.acum .test(t)) cols.acum  = c;
+          if(cols.saldo < 0 && RE.saldo.test(t)) cols.saldo = c;
+        }
       }
-      const st = items.reduce((a,i)=>a+i.valorContrato,0);
-      const sa = items.reduce((a,i)=>a+i.acumulado,0);
-      const hv = extractHeaderValues(data, dataStart);
+
+      // PASSO 3: fallback inteligente — se vc não foi encontrado,
+      // detecta pela primeira coluna numérica positiva da linha de dados
+      if(cols.vc < 0){
+        const fr = data[dataStart] || [];
+        const numCols = [];
+        for(let c=1; c<fr.length; c++){
+          const v = Number(fr[c]);
+          if(fr[c]!=='' && !isNaN(v) && isFinite(v)) numCols.push(c);
+        }
+        const vi = numCols.findIndex(c => Number(data[dataStart][c]) > 0);
+        if(vi >= 0){
+          cols.vc    = numCols[vi];
+          if(cols.med   < 0) cols.med   = numCols[vi+1] ?? cols.vc+1;
+          if(cols.acum  < 0) cols.acum  = numCols[vi+2] ?? cols.vc+2;
+          if(cols.saldo < 0) cols.saldo = numCols[vi+3] ?? cols.vc+3;
+        } else {
+          cols.vc=12; cols.med=13; cols.acum=14; cols.saldo=15;
+        }
+      } else {
+        // vc foi encontrado; completa os faltantes com colunas adjacentes
+        if(cols.med   < 0) cols.med   = cols.vc + 1;
+        if(cols.acum  < 0) cols.acum  = cols.vc + 2;
+        if(cols.saldo < 0) cols.saldo = cols.vc + 3;
+      }
+
+      // PASSO 4: lê os itens usando o mapeamento de colunas resolvido
+      const items = [];
+      for(let r=dataStart; r<data.length; r++){
+        const row     = data[r] || [];
+        const itemStr = String(row[0]??'').trim();
+        if(!/^\d+$/.test(itemStr)) continue;
+
+        let descricao = '';
+        if(cols.desc >= 0) descricao = String(row[cols.desc]??'').trim();
+        if(!descricao){
+          const lim = cols.vc > 0 ? cols.vc : 10;
+          for(let c=1; c<lim; c++){
+            const v = String(row[c]??'').trim();
+            if(v && isNaN(Number(v))){ descricao = v; break; }
+          }
+        }
+
+        const vc   = Number(row[cols.vc])   || 0;
+        const med  = Number(row[cols.med])  || 0;
+        const acum = Number(row[cols.acum]) || 0;
+        let saldo  = Number(row[cols.saldo])|| 0;
+        if(!saldo && vc > 0) saldo = vc - acum;
+        const pct  = vc > 0 ? +(acum / vc * 100).toFixed(2) : 0;
+
+        items.push({
+          item: itemStr,
+          descricao,
+          valorContrato: +vc.toFixed(2),
+          medicao:       +med.toFixed(2),
+          acumulado:     +acum.toFixed(2),
+          saldo:         +saldo.toFixed(2),
+          percentualExecutado: pct
+        });
+      }
+
+      // PASSO 5: extrai totais globais do cabeçalho (Valor CT/Aditivo, Acumulado Total)
+      const st  = items.reduce((a,i)=>a+i.valorContrato,0);
+      const sa  = items.reduce((a,i)=>a+i.acumulado,0);
+      const hv  = extractHeaderValues(data, dataStart);
       const vca = hv.valorContratoAditivo || st;
-      const acu = hv.acumuladoTotal || sa;
-      return{
-        nome:fileBaseName(file.name),
-        nomeProjeto:wb.Props?.Title||fileBaseName(file.name)||'Nova obra',
-        medicaoAtual:target,
-        itens:items,
-        resumo:{
-          total: st,
-          acumulado: sa,
-          percentual: vca > 0 ? +(acu/vca*100).toFixed(2) : 0,
+      const acu = hv.acumuladoTotal       || sa;
+
+      return {
+        nome:        fileBaseName(file.name),
+        nomeProjeto: wb.Props?.Title || fileBaseName(file.name) || 'Nova obra',
+        medicaoAtual: target,
+        itens: items,
+        resumo: {
+          total:                st,
+          acumulado:            sa,
+          percentual:           vca > 0 ? +(acu/vca*100).toFixed(2) : 0,
           valorContratoAditivo: vca,
-          acumuladoTotal: acu
+          acumuladoTotal:       acu
         }
       };
     }
@@ -742,7 +815,7 @@
     $('loadFile').onclick=()=>loadFromJsonOrExcel(false);
     $('addObraBtn').onclick=()=>loadFromJsonOrExcel(false);
     $('toggleTheme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';if(rows.length) chartInstance = renderCurvaS('sCurveChart','sCurveScrollWrap',rows,chartInstance);};
-    $('exportCsv').onclick=()=>{const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];const body=rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}"`).join(',')).join('\n');const blob=new Blob([fields.join(',')+'\n'+body],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='cronograma.csv';a.click();URL.revokeObjectURL(a.href);};
+    $('exportCsv').onclick=()=>{const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];const body=rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}`).join(',')).join('\n');const blob=new Blob([fields.join(',')+'\n'+body],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='cronograma.csv';a.click();URL.revokeObjectURL(a.href);};
     $('saveJson').onclick=()=>{const o=currentObra();const name=($('projName').value.trim()||'projeto');const payload={obra:name,medicaoAtual:o?.medicaoAtual||'',itens:rows};const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name.replace(/[^a-zA-Z0-9\-_]/g,'-').toLowerCase()+'.json';a.click();URL.revokeObjectURL(a.href);};
 
     setupNovaAtividade();
