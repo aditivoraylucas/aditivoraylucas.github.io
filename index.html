@@ -36,7 +36,6 @@ const baseName = n  => String(n||'').replace(/\.[^.]+$/,'');
 const money    = fmtMoney;
 const pct      = n  => `${Number(n||0).toFixed(2)}%`;
 
-/* Extensões reconhecidas como Excel/planilha */
 const EXCEL_EXTS = new Set(['xls','xlsx','xlsm','xlsb','xlam','xla','ods','csv']);
 
 const state = {
@@ -77,7 +76,18 @@ function scheduleSave(){
   state.saveTimer = setTimeout(async()=>{ const o=currentObra(); if(o){ o.itens=state.rows; await saveObra(o); } }, 1200);
 }
 
-/* ─── EXCEL ─── */
+/* ─────────────────────────────────────────────────────────────────────────────
+ * EXCEL
+ * ─────────────────────────────────────────────────────────────────────────────
+ * REGRA FUNDAMENTAL (imutável):
+ *   Ao identificar uma linha de ITEM PRINCIPAL (célula com número inteiro puro
+ *   na coluna de item: 1, 2, 3, ...),  TODOS os valores desse item são lidos
+ *   NA MESMA LINHA, cada um na sua coluna.
+ *   O mapeamento coluna→campo é feito UMA VEZ a partir dos cabeçalhos que
+ *   aparecem ACIMA da primeira linha de dados.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
 function detectSheet(wb){
   const matches = wb.SheetNames.filter(n => /^(BM|MED)\s*\d+/i.test(n));
   if(matches.length){
@@ -89,39 +99,95 @@ function detectSheet(wb){
   return wb.SheetNames.at(-1);
 }
 
-function detectColumns(headerRows){
+/*
+ * detectItemCol — encontra a coluna onde ficam os números de item (1, 2, 3...).
+ * Percorre as primeiras 30 linhas e retorna a coluna mais à esquerda (máx col 5)
+ * que contenha um inteiro puro.
+ */
+function detectItemCol(data){
+  for(let r=0; r<Math.min(30,data.length); r++){
+    const row=data[r]||[];
+    for(let c=0; c<Math.min(5,row.length); c++){
+      if(/^\d+$/.test(String(row[c]??'').trim())) return c;
+    }
+  }
+  return 0;
+}
+
+/*
+ * detectColumns — mapeia campos → índice de coluna a partir dos cabeçalhos.
+ *
+ * Estratégia em 3 camadas (aplicadas em ordem, da mais confiável para fallback):
+ *
+ * CAMADA 1 — Regex nos cabeçalhos (headerRows)
+ *   Varre todas as linhas acima da primeira linha de dados.
+ *   Para cada campo, guarda o índice da última coluna cujo texto bate no regex.
+ *   Isso cobre 95% dos casos.
+ *
+ * CAMADA 2 — Regex na própria linha do item (se o cabeçalho falhou)
+ *   Algumas planilhas repetem os rótulos inline ou usam células mescladas
+ *   que aparecem como texto na linha de dados. Tenta os mesmos regex
+ *   nas células não-numéricas da linha do item.
+ *   Limitado aos campos ainda não detectados.
+ *
+ * CAMADA 3 — Posição relativa das colunas numéricas na linha do item
+ *   (só para campos ainda -1 após camadas 1 e 2)
+ *   Na linha do item os números aparecem em ordem:
+ *     [desc texto] [vc] [med] [acum] [saldo]
+ *   Coleta todas as colunas numéricas > 0 (após a coluna de descrição)
+ *   e as atribui sequencialmente aos campos faltantes.
+ *   Isso garante que, independente da posição, os valores sejam lidos
+ *   da linha correta.
+ */
+function detectColumns(headerRows, itemRow, itemCol){
   const RE = {
-    desc:  /discrimina|descri[çc]ao|servic[oa]|servi[çc]/,
-    item:  /^(item|n[°º\.])$/,
-    vc:    /valor\s*(total\s*)?(do\s*)?(contrato|ct|contract)|vl\.?\s*(do\s*)?(contrato|ct)|vlr\.?\s*(do\s*)?(contrato|ct)/,
-    med:   /no[\s.]*(per[ií]odo|mes|m[eê]s)|^medic[aã]o$|^realizado$|periodo|esta.?medi/,
-    acum:  /acumulado/,
+    desc:  /discrimina|descri[çc]ao|servic[oa]|servi[çc]|especifica/,
+    vc:    /valor\s*(total\s*)?(do\s*)?(contrato|ct|contract)|vl\.?\s*(do\s*)?(contrato|ct)|vlr\.?\s*(do\s*)?(contrato|ct)|v\.?\s*contrato/,
+    med:   /no[\s.]*(per[ií]odo|mes|m[eê]s)|^medic[aã]o$|^realizado$|periodo|esta[\s.]*medi|med\.?\s*atual|\bmed\b/,
+    acum:  /acumulado|acum\.?/,
     saldo: /saldo/
   };
-  let cols = { desc:-1, item:-1, vc:-1, med:-1, acum:-1, saldo:-1 };
+  const cols = { desc:-1, vc:-1, med:-1, acum:-1, saldo:-1 };
+
+  // ── CAMADA 1: cabeçalhos ──
   for(const row of headerRows){
     for(let c=0; c<row.length; c++){
       const t = norm(row[c]); if(!t) continue;
-      if(RE.desc.test(t))  cols.desc  = c;
-      if(RE.item.test(t))  cols.item  = c;
-      if(RE.vc.test(t))    cols.vc    = c;
-      if(RE.med.test(t))   cols.med   = c;
-      if(RE.acum.test(t))  cols.acum  = c;
-      if(RE.saldo.test(t)) cols.saldo = c;
+      for(const [k, re] of Object.entries(RE)){
+        if(re.test(t)) cols[k] = c;
+      }
     }
   }
-  return cols;
-}
 
-function fallbackColumns(firstDataRow, cols){
-  const nums = [];
-  for(let c=1; c<firstDataRow.length; c++)
-    if(isNum(firstDataRow[c]) && Number(firstDataRow[c])>0) nums.push(c);
-  if(!nums.length) return cols;
-  if(cols.vc   <0) cols.vc   = nums[0]??-1;
-  if(cols.med  <0) cols.med  = nums[1]??-1;
-  if(cols.acum <0) cols.acum = nums[2]??-1;
-  if(cols.saldo<0) cols.saldo= nums[3]??-1;
+  // ── CAMADA 2: rótulos inline na linha do item ──
+  if(itemRow){
+    for(let c=0; c<itemRow.length; c++){
+      if(c === itemCol) continue;
+      const t = norm(itemRow[c]);
+      if(!t || isNum(itemRow[c])) continue;
+      for(const [k, re] of Object.entries(RE)){
+        if(cols[k] < 0 && re.test(t)) cols[k] = c;
+      }
+    }
+  }
+
+  // ── CAMADA 3: posição numérica relativa na linha do item ──
+  if(itemRow){
+    // Campos numéricos que ainda não foram mapeados
+    const missing = ['vc','med','acum','saldo'].filter(k => cols[k] < 0);
+    if(missing.length > 0){
+      // Colunas numéricas > 0 na linha, após a coluna do item e não usadas ainda
+      const usedCols = new Set(Object.values(cols).filter(v => v >= 0));
+      const numCols = [];
+      for(let c=itemCol+1; c<itemRow.length; c++){
+        if(!usedCols.has(c) && isNum(itemRow[c]) && Number(itemRow[c]) > 0)
+          numCols.push(c);
+      }
+      // Atribui em ordem: vc, med, acum, saldo
+      missing.forEach((k, i) => { if(numCols[i] !== undefined) cols[k] = numCols[i]; });
+    }
+  }
+
   return cols;
 }
 
@@ -240,22 +306,8 @@ function extractMetaFromHeaders(data, firstDataRowIdx){
   return { valorContratoAditivo:vca, acumuladoTotal:acu, contratada };
 }
 
-function detectItemCol(data){
-  for(let r=0; r<Math.min(30,data.length); r++){
-    const row=data[r]||[];
-    for(let c=0; c<Math.min(5,row.length); c++){
-      if(/^\d+$/.test(String(row[c]??'').trim())) return c;
-    }
-  }
-  return 0;
-}
-
 async function readExcelFile(file){
   const buffer=await file.arrayBuffer();
-  /*
-   * XLSX.read aceita qualquer formato suportado pela biblioteca:
-   * .xlsx, .xls, .xlsm, .xlsb, .ods, .csv — todos tratados da mesma forma.
-   */
   const wb=XLSX.read(new Uint8Array(buffer),{type:'array',cellDates:false,cellNF:false,cellText:false});
   const sheetName=detectSheet(wb);
   if(!sheetName) throw new Error('Nenhuma aba encontrada na planilha.');
@@ -263,70 +315,90 @@ async function readExcelFile(file){
   const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
   if(!data.length) throw new Error(`A aba "${sheetName}" está vazia.`);
 
-  const itemCol=detectItemCol(data);
-  let firstDataRowIdx=-1;
+  // Detecta coluna dos itens e primeira linha de dados
+  const itemCol = detectItemCol(data);
+  let firstDataRowIdx = -1;
   for(let r=0; r<data.length; r++){
-    if(/^\d+$/.test(String(data[r][itemCol]??'').trim())){ firstDataRowIdx=r; break; }
-  }
-
-  const headerRows=firstDataRowIdx>0 ? data.slice(0,firstDataRowIdx) : data.slice(0,Math.min(25,data.length));
-  let cols=detectColumns(headerRows);
-
-  if(firstDataRowIdx>=0){
-    if(cols.vc<0 || cols.acum<0){
-      cols=fallbackColumns(data[firstDataRowIdx]||[], cols);
-    }
-    if(cols.vc<0 && cols.med>0){
-      const fdr=data[firstDataRowIdx]||[];
-      for(let c=cols.med-1; c>=1; c--){
-        if(isNum(fdr[c]) && Number(fdr[c])>0){ cols.vc=c; break; }
-      }
+    if(/^\d+$/.test(String(data[r][itemCol]??'').trim())){
+      firstDataRowIdx = r; break;
     }
   }
 
-  const meta=extractMetaFromHeaders(data,firstDataRowIdx);
+  // Cabeçalhos = tudo acima da primeira linha de dados
+  const headerRows = firstDataRowIdx > 0
+    ? data.slice(0, firstDataRowIdx)
+    : data.slice(0, Math.min(25, data.length));
 
+  // Linha do primeiro item principal (usada para camadas 2 e 3 do detectColumns)
+  const firstItemRow = firstDataRowIdx >= 0 ? (data[firstDataRowIdx] || []) : [];
+
+  // Mapeamento final coluna→campo
+  const cols = detectColumns(headerRows, firstItemRow, itemCol);
+
+  const meta = extractMetaFromHeaders(data, firstDataRowIdx);
+
+  /*
+   * ── LEITURA DOS ITENS ────────────────────────────────────────────────────
+   * Regra absoluta:
+   *   Uma linha é item principal se e somente se data[r][itemCol] é inteiro puro.
+   *   Todos os campos (vc, med, acum, saldo, desc) são lidos NA MESMA LINHA,
+   *   nas colunas mapeadas por detectColumns.
+   *   NUNCA há herança de linha anterior.
+   */
   const items=[], warnings=[];
   for(let r=0; r<data.length; r++){
-    const row=data[r]||[];
-    const itemStr=String(row[itemCol]??'').trim();
+    const row = data[r]||[];
+    const itemStr = String(row[itemCol]??'').trim();
     if(!/^\d+$/.test(itemStr)) continue;
-    let descricao='';
-    if(cols.desc>=0) descricao=String(row[cols.desc]??'').trim();
+
+    // Descrição: coluna detectada ou primeira célula texto após o item
+    let descricao = '';
+    if(cols.desc >= 0) descricao = String(row[cols.desc]??'').trim();
     if(!descricao){
-      const lim=cols.vc>0?cols.vc:itemCol+10;
-      for(let c=itemCol+1;c<lim;c++){
-        const v=String(row[c]??'').trim();
-        if(v&&!isNum(row[c])){ descricao=v; break; }
+      const lim = cols.vc > 0 ? cols.vc : itemCol + 12;
+      for(let c=itemCol+1; c<lim; c++){
+        const v = String(row[c]??'').trim();
+        if(v && !isNum(row[c])){ descricao = v; break; }
       }
     }
-    const vc  =cols.vc   >=0 ? (Number(row[cols.vc])   || 0) : 0;
-    const med =cols.med  >=0 ? (Number(row[cols.med])  || 0) : 0;
-    const acum=cols.acum >=0 ? (Number(row[cols.acum]) || 0) : 0;
-    let saldo =cols.saldo>=0 ? (Number(row[cols.saldo]) || 0) : 0;
-    if(!saldo&&vc>0) saldo=vc-acum;
-    const p=vc>0?+(acum/vc*100).toFixed(2):0;
+
+    // Valores: SEMPRE da linha atual, coluna mapeada
+    const vc   = cols.vc   >= 0 ? (Number(row[cols.vc])   || 0) : 0;
+    const med  = cols.med  >= 0 ? (Number(row[cols.med])  || 0) : 0;
+    const acum = cols.acum >= 0 ? (Number(row[cols.acum]) || 0) : 0;
+    let saldo  = cols.saldo >= 0 ? (Number(row[cols.saldo]) || 0) : 0;
+    if(!saldo && vc > 0) saldo = vc - acum;
+    const p = vc > 0 ? +(acum/vc*100).toFixed(2) : 0;
+
     if(!descricao) warnings.push(`Item ${itemStr}: descrição não encontrada`);
-    if(!vc&&!acum) warnings.push(`Item ${itemStr}: valores zerados`);
-    items.push({ item:itemStr, descricao,
-      valorContrato:+vc.toFixed(2), medicao:+med.toFixed(2),
-      acumulado:+acum.toFixed(2), saldo:+saldo.toFixed(2), percentualExecutado:p });
+    if(!vc && !acum) warnings.push(`Item ${itemStr}: valores zerados`);
+
+    items.push({
+      item: itemStr, descricao,
+      valorContrato: +vc.toFixed(2),
+      medicao:       +med.toFixed(2),
+      acumulado:     +acum.toFixed(2),
+      saldo:         +saldo.toFixed(2),
+      percentualExecutado: p
+    });
   }
   if(!items.length) throw new Error(`Nenhum item numérico encontrado na aba "${sheetName}".`);
 
-  const sumVC  =items.reduce((a,i)=>a+i.valorContrato,0);
-  const sumAcum=items.reduce((a,i)=>a+i.acumulado,0);
-  const vca=meta.valorContratoAditivo||sumVC;
-  const acu=meta.acumuladoTotal>0?meta.acumuladoTotal:sumAcum;
+  const sumVC   = items.reduce((a,i)=>a+i.valorContrato,0);
+  const sumAcum = items.reduce((a,i)=>a+i.acumulado,0);
+  const vca = meta.valorContratoAditivo || sumVC;
+  const acu = meta.acumuladoTotal > 0 ? meta.acumuladoTotal : sumAcum;
   return {
-    nome:baseName(file.name),
-    nomeProjeto:wb.Props?.Title||baseName(file.name)||'Nova obra',
-    medicaoAtual:sheetName,
-    contratada:meta.contratada||'',
-    itens:items, warnings,
-    resumo:{ total:sumVC, acumulado:sumAcum,
-      percentual:vca>0?+(acu/vca*100).toFixed(2):0,
-      valorContratoAditivo:vca, acumuladoTotal:acu }
+    nome: baseName(file.name),
+    nomeProjeto: wb.Props?.Title || baseName(file.name) || 'Nova obra',
+    medicaoAtual: sheetName,
+    contratada: meta.contratada || '',
+    itens: items, warnings,
+    resumo:{
+      total: sumVC, acumulado: sumAcum,
+      percentual: vca>0 ? +(acu/vca*100).toFixed(2) : 0,
+      valorContratoAditivo: vca, acumuladoTotal: acu
+    }
   };
 }
 
@@ -346,16 +418,6 @@ function normalizeRows(list){
 async function importFile(replace=false){
   const input=document.createElement('input');
   input.type='file';
-  /*
-   * Aceita todos os formatos de planilha suportados pela SheetJS:
-   *   .xlsx  — Excel moderno
-   *   .xls   — Excel legado (97-2003)
-   *   .xlsm  — Excel com macros
-   *   .xlsb  — Excel binário
-   *   .ods   — LibreOffice / OpenDocument
-   *   .csv   — Texto separado por vírgula
-   *   .json  — Export interno do sistema
-   */
   input.accept=[
     '.xlsx','.xls','.xlsm','.xlsb','.xlam','.xla','.ods','.csv','.json',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -363,8 +425,7 @@ async function importFile(replace=false){
     'application/vnd.ms-excel.sheet.macroEnabled.12',
     'application/vnd.ms-excel.sheet.binary.macroEnabled.12',
     'application/vnd.oasis.opendocument.spreadsheet',
-    'text/csv',
-    'application/json'
+    'text/csv','application/json'
   ].join(',');
   input.onchange=async e=>{
     if(!e.target.files.length) return;
@@ -373,7 +434,6 @@ async function importFile(replace=false){
     try{
       let obj,rows=[];
       if(EXCEL_EXTS.has(ext)){
-        /* Todos os formatos de planilha passam pelo mesmo readExcelFile */
         obj=await readExcelFile(file);
         rows=normalizeRows(obj.itens);
         if(obj.warnings?.length) console.warn('[Import]',obj.warnings.slice(0,5).join('\n'));
@@ -384,7 +444,6 @@ async function importFile(replace=false){
         if(!rows.length&&!Array.isArray(obj)&&!Array.isArray(obj.itens))
           throw new Error('JSON inválido.');
       } else {
-        /* Tenta como planilha mesmo sem extensão reconhecida */
         obj=await readExcelFile(file);
         rows=normalizeRows(obj.itens);
       }
@@ -884,4 +943,64 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:
 .brand-text h1{font-size:1.25rem;font-weight:700;white-space:nowrap}
 .brand-text p{color:var(--text-muted);font-size:.8rem;white-space:nowrap}
 .header-actions{display:flex;gap:.5rem;align-items:center;flex-shrink:0}
-.user-chip{display:inline-flex;align-items:center;gap:.4rem;background:rgba(99,102,241,.1);color:var(--primary);border:1px solid rgba(99,102,241,.25);border-radius:999px;padding:.3rem .85rem;font-size:.
+.user-chip{display:inline-flex;align-items:center;gap:.4rem;background:rgba(99,102,241,.1);color:var(--primary);border:1px solid rgba(99,102,241,.25);border-radius:999px;padding:.3rem .85rem;font-size:.875rem;font-weight:600}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:1.5rem;box-shadow:var(--shadow-sm)}
+.panel+.panel{margin-top:1.25rem}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:1rem 1.25rem;display:flex;flex-direction:column;gap:.25rem;box-shadow:var(--shadow-sm)}
+.stat-card.compact{padding:.75rem 1rem}
+.stat-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+.stat-value{font-size:1.5rem;font-weight:700;color:var(--text)}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1.5rem}
+.admin-stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.75rem;margin-bottom:1.5rem}
+.form-group{display:flex;flex-direction:column;gap:.35rem}
+.form-group label{font-size:.8rem;font-weight:600;color:var(--text-muted)}
+.form-control{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:.5rem .75rem;font-size:.875rem;font-family:inherit;color:var(--text);width:100%;transition:border-color .15s}
+.form-control:focus{outline:none;border-color:var(--border-focus)}
+.table-container{overflow-x:auto;border-radius:var(--radius-sm);border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:.8rem}
+th,td{padding:.55rem .85rem;border-bottom:1px solid var(--border);white-space:nowrap}
+th{background:var(--bg);font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);position:sticky;top:0;z-index:1}
+.th-sticky{position:sticky;top:0;background:var(--bg);z-index:1}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--surface-hover)}
+.td-desc{max-width:260px;overflow:hidden;text-overflow:ellipsis}
+.chart-container{position:relative;height:220px}
+.chart-scroll-wrap{overflow-x:auto}
+.obra-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:1rem 1.25rem;box-shadow:var(--shadow-sm);transition:box-shadow .2s}
+.obra-card:hover{box-shadow:var(--shadow-md)}
+.obra-card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.5rem}
+.obra-card-title{font-weight:700;font-size:.9rem}
+.obra-card-sub{font-size:.72rem;color:var(--text-muted);margin-top:.1rem}
+.obra-card-pct{font-size:1.1rem;font-weight:700;color:var(--primary)}
+.obra-progress-bar{height:6px;background:var(--border);border-radius:999px;margin:.5rem 0}
+.obra-progress-fill{height:100%;background:var(--primary);border-radius:999px;transition:width .4s}
+.obra-card-footer{display:flex;justify-content:space-between;font-size:.72rem;color:var(--text-muted);flex-wrap:wrap;gap:.25rem}
+.obras-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem}
+.admin-layout{display:grid;grid-template-columns:220px 1fr;gap:1.5rem;align-items:start}
+.colab-sidebar-item{padding:.6rem .75rem;border-radius:var(--radius-sm);cursor:pointer;transition:background .15s;border:1px solid transparent}
+.colab-sidebar-item:hover,.colab-sidebar-item.active{background:rgba(99,102,241,.08);border-color:rgba(99,102,241,.2)}
+.colab-item{display:flex;justify-content:space-between;align-items:center;gap:.75rem;padding:.75rem;border:1px solid var(--border);border-radius:var(--radius-sm);flex-wrap:wrap}
+.section-title{font-size:1rem;font-weight:700;margin-bottom:.75rem}
+.add-form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.75rem;align-items:end}
+.btnTopo{position:fixed;bottom:1.5rem;right:1.5rem;z-index:100;width:2.5rem;height:2.5rem;border-radius:50%;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .3s;font-size:1.1rem;padding:0}
+.btnTopo.visible{opacity:1;pointer-events:all}
+@media(max-width:900px){
+  .app-shell{grid-template-columns:1fr;grid-template-rows:auto auto 1fr}
+  .app-aside{grid-column:1;grid-row:2;border-right:none;border-bottom:1px solid var(--border);padding:.75rem}
+  .app-main{grid-column:1;grid-row:3;padding:1rem}
+  .admin-layout{grid-template-columns:1fr}
+}
+@media(max-width:640px){
+  .app-topbar{padding:.75rem 1rem;flex-wrap:wrap}
+  .brand-text h1{font-size:1rem}
+  .app-main{padding:.75rem}
+  .stat-value{font-size:1.1rem}
+}
+</style>
+</head>
+<body>
+<div id="loginView" style="display:flex">
+  <div class="login-wrapper" style="width:100%">
+    <div class="login-card">
+      <div class="brand-login">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><rect width="48" height="48" rx="12" fill="#4f46e5"/><path d="M14 34V18l10-6 10 6v16" stro
