@@ -122,15 +122,83 @@ function fallbackColumns(firstDataRow, cols){
   return cols;
 }
 
+/*
+ * ─── DETECÇÃO DE VALOR DE CONTRATO ───────────────────────────────────────────
+ * Prioridade (ordem exata conforme solicitado):
+ *   1. VALOR CT /TA
+ *   2. VALOR DE CONTRATO
+ *   3. VALOR DE CONTRATO ATUALIZADO
+ *   4. VALOR DE CONTRATO COM ADITIVO
+ *   5. VALOR DE CONTRATO COM REAJUSTE
+ *   6. VALOR DE CONTRATO COM REAJUSTE E ADITIVO
+ *
+ * Busca em todas as direções:
+ *   - mesma linha (colunas à direita)
+ *   - linhas abaixo (mesma coluna e vizinhas)
+ *   - label pode estar em qualquer linha/coluna do cabeçalho
+ */
+function findValorContrato(rows){
+  // Cada entrada: [prioridade, regex]  — menor prioridade = mais específico = preferido
+  const PATTERNS = [
+    [1, /valor\s*ct\s*[\/\\]\s*ta/i],
+    [2, /^valor\s+de\s+contrato$/i],
+    [3, /valor\s+de\s+contrato\s+atualizado/i],
+    [4, /valor\s+de\s+contrato\s+com\s+aditivo/i],
+    [5, /valor\s+de\s+contrato\s+com\s+reajuste(?!\s+e)/i],
+    [6, /valor\s+de\s+contrato\s+com\s+reajuste\s+e\s+aditivo/i],
+  ];
+
+  // Candidatos encontrados: { prioridade, valor }
+  const candidates = [];
+
+  function tryGetValue(rows, r, c){
+    // tenta pegar número na mesma linha (colunas à direita) ou linhas abaixo
+    const row = rows[r] || [];
+    for(let cc = c+1; cc < Math.min(c+16, row.length); cc++){
+      const v = Number(row[cc]); if(v > 100){ return v; }
+    }
+    for(let rr = r+1; rr <= r+5 && rr < rows.length; rr++){
+      const v = Number(rows[rr]?.[c]); if(v > 100){ return v; }
+      // também coluna vizinha
+      for(const cc of [c-1, c+1, c+2]){
+        if(cc < 0) continue;
+        const v2 = Number(rows[rr]?.[cc]); if(v2 > 100){ return v2; }
+      }
+    }
+    return 0;
+  }
+
+  for(let r = 0; r < rows.length; r++){
+    const row = rows[r] || [];
+    for(let c = 0; c < row.length; c++){
+      const cell = String(row[c] ?? '').trim();
+      if(!cell) continue;
+      for(const [pri, re] of PATTERNS){
+        if(re.test(cell)){
+          const v = tryGetValue(rows, r, c);
+          if(v > 100) candidates.push({ pri, v });
+        }
+      }
+    }
+  }
+
+  if(!candidates.length) return 0;
+  // Ordena: menor prioridade primeiro (mais específico), depois maior valor entre empates
+  candidates.sort((a,b) => a.pri - b.pri || b.v - a.v);
+  return candidates[0].v;
+}
+
 function extractMetaFromHeaders(data, firstDataRowIdx){
-  const RE_VCA  = /valor\s*(ct|contrato|total)[\s\/\-]*(aditiv|reajust|atualiz|ta)?/i;
   const RE_ACUM = /acumulado/i;
   const RE_MED  = /esta.?medi|medi.?atual/i;
-  const RE_SALDO= /saldo/i;
   const RE_CONT = /contratada/i;
-  let vca=0, acu=0, contratada='';
+  let acu=0, contratada='';
   const rows = firstDataRowIdx>0 ? data.slice(0,firstDataRowIdx) : data.slice(0,Math.min(50,data.length));
 
+  // ── Valor de Contrato com prioridade ordenada ──
+  const vca = findValorContrato(rows);
+
+  // ── Acumulado ──
   let acumColHeader = -1, acumRowHeader = -1;
   for(let r=0; r<rows.length; r++){
     const row = rows[r]||[];
@@ -138,11 +206,10 @@ function extractMetaFromHeaders(data, firstDataRowIdx){
     for(let c=0; c<row.length; c++){
       const t=norm(row[c]); if(!t) continue;
       if(RE_ACUM.test(t)){ hasAcum=true; acumC=c; }
-      if(RE_MED.test(t)||RE_SALDO.test(t)) hasMedOrSaldo=true;
+      if(RE_MED.test(t)||/saldo/i.test(t)) hasMedOrSaldo=true;
     }
     if(hasAcum && hasMedOrSaldo){ acumColHeader=acumC; acumRowHeader=r; break; }
   }
-
   if(acumColHeader>=0 && acumRowHeader>=0){
     for(let rr=acumRowHeader+1; rr<=acumRowHeader+5 && rr<rows.length; rr++){
       const v=Number(rows[rr]?.[acumColHeader]);
@@ -159,7 +226,6 @@ function extractMetaFromHeaders(data, firstDataRowIdx){
       }
     }
   }
-
   if(!acu){
     for(let r=0; r<rows.length; r++){
       const row=rows[r]||[];
@@ -181,18 +247,11 @@ function extractMetaFromHeaders(data, firstDataRowIdx){
     }
   }
 
+  // ── Contratada ──
   for(let r=0; r<rows.length; r++){
     const row=rows[r]||[];
     for(let c=0; c<row.length; c++){
       const cell=String(row[c]??'').trim(); if(!cell) continue;
-      if(RE_VCA.test(cell)){
-        for(let cc=c+1; cc<Math.min(c+12,row.length); cc++){
-          const v=Number(row[cc]); if(v>5000){ vca=v; break; }
-        }
-        if(!vca && r+1<rows.length){
-          const v=Number(rows[r+1]?.[c]); if(v>5000) vca=v;
-        }
-      }
       if(RE_CONT.test(cell)){
         const after=cell.replace(/^.*contratada\s*:/i,'').trim();
         if(after && after.length>1) contratada=after;
@@ -218,14 +277,63 @@ function detectItemCol(data){
   return 0;
 }
 
+/*
+ * ─── OUTLINE / AGRUPAMENTO ────────────────────────────────────────────────────
+ * Se a planilha tiver estrutura de outline (níveis de agrupamento) ativa,
+ * lemos SEMPRE do nível mais profundo (mais detalhado) para evitar dados
+ * incompletos de linhas de resumo/totalizadores colapsados.
+ *
+ * A biblioteca SheetJS expõe os row outlines via ws['!rows'][r].level (0-7).
+ * Linhas sem definição de row têm level 0 (nível raiz).
+ * Linhas com maior level = maior detalhamento = devem ser lidas.
+ *
+ * Estratégia:
+ *   1. Detectar o level máximo presente nas linhas de dados.
+ *   2. Considerar apenas linhas cujo level >= maxLevel (mais profundas).
+ *   3. Se nenhum outline existir (todos level 0), comportamento normal.
+ */
+function getOutlineLevels(ws, totalRows){
+  const levels = [];
+  const rowsMeta = ws['!rows'] || [];
+  for(let r=0; r<totalRows; r++){
+    const rm = rowsMeta[r];
+    // level: 0 = raiz; hidden via outline collapse = rm?.hidden
+    levels.push({ level: rm?.level ?? 0, hidden: rm?.hidden ?? false });
+  }
+  return levels;
+}
+
+function resolveActiveRows(data, ws){
+  const outlineLevels = getOutlineLevels(ws, data.length);
+  const maxLevel = Math.max(...outlineLevels.map(r => r.level));
+
+  // Se não há outline estruturado (maxLevel === 0), retorna todas as linhas normalmente
+  if(maxLevel === 0) return data.map((_,i) => i);
+
+  // Com outline ativo: incluir apenas linhas do nível mais profundo
+  // (e linhas de cabeçalho level 0 que estejam antes dos dados)
+  const activeIndices = [];
+  for(let i=0; i<data.length; i++){
+    const { level } = outlineLevels[i];
+    if(level >= maxLevel) activeIndices.push(i);
+    else if(level === 0) activeIndices.push(i); // cabeçalho / títulos de seção nível raiz
+  }
+  return activeIndices;
+}
+
 async function readExcelFile(file){
   const buffer=await file.arrayBuffer();
   const wb=XLSX.read(new Uint8Array(buffer),{type:'array',cellDates:false,cellNF:false,cellText:false});
   const sheetName=detectSheet(wb);
   if(!sheetName) throw new Error('Nenhuma aba encontrada na planilha.');
   const ws=wb.Sheets[sheetName];
-  const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
-  if(!data.length) throw new Error(`A aba "${sheetName}" está vazia.`);
+  const rawData=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
+  if(!rawData.length) throw new Error(`A aba "${sheetName}" está vazia.`);
+
+  // ── Resolver linhas ativas (respeitar outline/agrupamento) ──
+  const activeIndices = resolveActiveRows(rawData, ws);
+  // Reconstruir data filtrada pelas linhas ativas
+  const data = activeIndices.map(i => rawData[i]);
 
   const itemCol=detectItemCol(data);
   let firstDataRowIdx=-1;
@@ -575,7 +683,8 @@ function renderAdminDetail(){
            <td style="text-align:right">${money(r.medicao)}</td>
            <td style="text-align:right">${money(r.acumulado)}</td>
            <td style="text-align:right">${money(r.saldo)}</td>
-           <td style="text-align:right;font-weight:700;color:${Number(r.percentualExecutado)>=99.5?'var(--success)':'var(--text)'}">${Number(r.percentualExecutado||0).toFixed(2)}%</td>
+           <td style="text-align:right;font-weight:700;color:${Number(r.percentualExecutado)>=99.5?'var(--success)':'var(--text)'}">
+             ${Number(r.percentualExecutado||0).toFixed(2)}%</td>
          </tr>`).join('')}</tbody>
        </table></div>
      </div>`;
@@ -756,7 +865,6 @@ async function init(){
     state.admin=data.role==='admin';
     if(data.disabled===true||data.blocked===true){ cleanup(); await signOut(auth); return; }
     // ── NOME DO USUÁRIO NA TOPBAR ──
-    // Prioridade: nome salvo no Firestore > parte antes do @ do email
     state.userName = data.nome || (user.email ? user.email.split('@')[0] : '');
     const nameEl = $('userNameDisplay');
     if(nameEl) nameEl.textContent = state.userName.toUpperCase();
@@ -944,121 +1052,4 @@ td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px
           <h3 style="font-size:.9rem;margin-bottom:.75rem;color:var(--text-muted)">CADASTRAR COLABORADOR</h3>
           <form id="addColabForm">
             <div class="form-group"><label>Nome</label><input type="text" id="colabNome" class="form-control" required></div>
-            <div class="form-group"><label>E-mail</label><input type="email" id="colabEmail" class="form-control" required></div>
-            <div class="form-group"><label>Senha</label><input type="password" id="colabSenha" class="form-control" minlength="6" required></div>
-            <div id="colabMsgError" class="error-msg"></div>
-            <button type="submit" class="btn btn-primary" id="addColabBtn" style="width:100%;margin-top:.5rem">Cadastrar colaborador</button>
-          </form>
-        </div>
-        <div>
-          <h3 style="font-size:.9rem;margin-bottom:1rem;color:var(--text-muted)">COLABORADORES ATIVOS</h3>
-          <div id="colabList"></div>
-        </div>
-      </div>
-    </div>
-    <div class="stats-grid" id="adminStats"></div>
-    <div class="admin-layout">
-      <div class="admin-sidebar"><h3>Colaboradores</h3><div id="adminColabSidebar"></div></div>
-      <div><div id="adminDetailPanel" class="panel"></div></div>
-    </div>
-  </div>
-</div>
-
-<!-- USER -->
-<div id="appView" style="display:none">
-  <div class="app-shell">
-    <header class="app-topbar">
-      <div class="brand"><div class="logo">RA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Minhas Obras</p></div></div>
-      <div class="header-actions">
-        <!-- NOME DO USUÁRIO LOGADO -->
-        <span class="user-chip">👤 <span id="userNameDisplay"></span></span>
-        <button class="btn btn-sec" id="toggleTheme">🌙 Tema</button>
-        <button class="btn btn-sec" id="logoutBtnUser" style="color:var(--danger)">Sair</button>
-      </div>
-    </header>
-    <aside class="app-aside">
-      <div class="nav">
-        <div class="nav-item active"><span>Dashboard</span><span class="badge" id="countAll">R$ 0</span></div>
-        <div class="nav-item"><span>Acumulado</span><span class="badge" id="countDone" style="color:var(--success)">R$ 0</span></div>
-        <div class="nav-item"><span>Progresso</span><span class="badge" id="countPct">0%</span></div>
-      </div>
-      <div class="panel-aside">
-        <h3 style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.75rem">AÇÕES DE ARQUIVO</h3>
-        <div style="display:flex;flex-direction:column;gap:.4rem">
-          <button class="btn btn-sec" id="loadFile" style="width:100%">📂 Importar arquivo</button>
-          <button class="btn btn-primary" id="saveJson" style="width:100%">⬇️ Exportar JSON</button>
-        </div>
-      </div>
-      <div class="panel-aside">
-        <h3 style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.75rem">OBRAS SALVAS</h3>
-        <div id="obrasBox"></div>
-        <div style="margin-top:.75rem"><button class="btn btn-primary" id="addObraBtn" style="width:100%">➕ Nova obra</button></div>
-      </div>
-    </aside>
-    <main class="app-main">
-      <!-- 1. CONFIGURAÇÕES DO PROJETO -->
-      <div class="panel">
-        <h2 style="margin-bottom:1rem">Configurações do Projeto</h2>
-        <div class="form-grid">
-          <div class="form-group" style="grid-column:1/-1"><label>Nome do Projeto</label><input type="text" id="projName" class="form-control"></div>
-          <div class="form-group"><label>Contratada</label><input type="text" id="projContratada" class="form-control" placeholder="Extraído automaticamente da planilha"></div>
-          <div class="form-group"><label>Medição / Fase</label><input type="text" id="projScope" class="form-control"></div>
-        </div>
-      </div>
-
-      <!-- 2. NOVA ATIVIDADE (entre Config e Curva S) -->
-      <div class="panel">
-        <h2 style="margin-bottom:1rem">➕ Nova Atividade</h2>
-        <div class="nova-ativ-grid">
-          <div class="form-group"><label>Nº Item</label><input type="text" id="fItem" class="form-control"></div>
-          <div class="form-group"><label>Descrição</label><input type="text" id="fName" class="form-control"></div>
-          <div class="form-group"><label>Valor Contrato (R$)</label><input type="text" id="fValorContrato" class="form-control" inputmode="decimal"></div>
-          <div class="form-group"><label>Medição (R$)</label><input type="text" id="fMedicao" class="form-control" inputmode="decimal"></div>
-          <div class="form-group"><label>Acumulado (R$)</label><input type="text" id="fAcumulado" class="form-control" inputmode="decimal"></div>
-          <div class="form-group"><label>Saldo (R$)</label><input type="text" id="fSaldo" class="form-control" readonly></div>
-          <div class="form-group"><label>% Executada</label><input type="text" id="fPct" class="form-control" readonly></div>
-          <div class="form-group" style="display:flex;align-items:flex-end">
-            <button class="btn btn-primary" id="addRow" style="width:100%">Adicionar ao Índice</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 3. CURVA S -->
-      <div class="panel" style="margin-bottom:1.5rem">
-        <h2 style="margin-bottom:1rem">Curva S — Progresso Físico</h2>
-        <div class="chart-scroll-wrap" id="sCurveScrollWrap"><div class="chart-container"><canvas id="sCurveChart"></canvas></div></div>
-      </div>
-
-      <!-- 4. STATS -->
-      <div class="stats-grid" id="stats"></div>
-
-      <!-- 5. ÍNDICE -->
-      <div class="panel">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem">
-          <h2>Índice / Itens Principais</h2>
-          <div style="display:flex;gap:.5rem">
-            <button class="btn btn-sec" id="fillSample">🗑 Limpar</button>
-            <button class="btn btn-sec" id="exportCsv">📊 Exportar CSV</button>
-          </div>
-        </div>
-        <div class="table-container">
-          <table>
-            <thead><tr>
-              <th class="th-sticky">Item</th>
-              <th class="th-sticky">Descrição</th>
-              <th class="th-sticky" style="text-align:right">Valor Contrato</th>
-              <th class="th-sticky" style="text-align:right">Medição</th>
-              <th class="th-sticky" style="text-align:right">Acumulado</th>
-              <th class="th-sticky" style="text-align:right">Saldo</th>
-              <th class="th-sticky" style="text-align:right">% Executada</th>
-              <th class="th-sticky"></th>
-            </tr></thead>
-            <tbody id="tbody"></tbody>
-          </table>
-        </div>
-      </div>
-    </main>
-  </div>
-</div>
-</body>
-</html>
+            <div class="form-group"><label>E-mail</label><input ty
