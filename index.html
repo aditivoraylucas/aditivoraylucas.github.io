@@ -94,44 +94,25 @@ function detectSheet(wb){
   return wb.SheetNames.at(-1);
 }
 
-/*
-  ESTRATÉGIA v5:
-  Varre TODAS as linhas de cabeçalho (antes da 1ª linha de dados) célula a célula.
-  Para cada campo procurado, registra a ÚLTIMA coluna encontrada — assim
-  "Valor Total do Contrato Atualizado Reajuste 2" vence sobre "Reajuste 1",
-  e "Acumulado" da seção MEDIÇÃO (mais à direita) vence sobre outros "Acumulado".
-  O mesmo vale para "No período / Medição".
-  Colunas de Saldo e % Executado também são pegas pelo último match.
-*/
 function detectColumns(headerRows){
   const RE = {
-    desc:  /discrimina|descri[çc]ao|servic[oa]|servi[çc]/,
-    item:  /^(item|n[°º\.])$/,
-    // Valor Total do Contrato (com ou sem reajuste) — pegamos a última ocorrência
+    desc:  /discrimina|descri[\u00e7c]ao|servic[oa]|servi[\u00e7c]/,
+    item:  /^(item|n[\u00b0\u00ba\.])$/,
     vc:    /valor\s*total\s*(do\s*)?(contrato|ct)|(total\s*(do\s*)?contrato)/,
-    // Medição "No período" ou "No mês"
-    med:   /no[\s.]*(per[ií]odo|mes|m[eê]s)|^medic[aã]o$|^realizado$|periodo/,
-    // Acumulado — pegamos a última (que será da seção MEDIÇÃO)
+    med:   /no[\s.]*(per[i\u00ed]odo|mes|m[e\u00ea]s)|^medic[a\u00e3]o$|^realizado$|periodo/,
     acum:  /acumulado/,
-    // Saldo — última ocorrência
-    saldo: /^saldo$/,
-    // % executado
-    pct:   /%\s*(exec|realiz)|executad[ao]|percentual/
+    saldo: /^saldo$/
   };
-
-  // cols guarda SEMPRE a ÚLTIMA coluna encontrada para cada campo
-  let cols = { desc:-1, item:-1, vc:-1, med:-1, acum:-1, saldo:-1, pct:-1 };
-
+  let cols = { desc:-1, item:-1, vc:-1, med:-1, acum:-1, saldo:-1 };
   for(const row of headerRows){
     for(let c=0; c<row.length; c++){
       const t = norm(row[c]); if(!t) continue;
-      if(RE.desc.test(t))  cols.desc  = c;   // última desc
+      if(RE.desc.test(t))  cols.desc  = c;
       if(RE.item.test(t))  cols.item  = c;
-      if(RE.vc.test(t))    cols.vc    = c;   // última = maior reajuste
-      if(RE.med.test(t))   cols.med   = c;   // última = seção MEDIÇÃO
-      if(RE.acum.test(t))  cols.acum  = c;   // última = seção MEDIÇÃO
-      if(RE.saldo.test(t)) cols.saldo = c;   // último saldo
-      if(RE.pct.test(t))   cols.pct   = c;
+      if(RE.vc.test(t))    cols.vc    = c;
+      if(RE.med.test(t))   cols.med   = c;
+      if(RE.acum.test(t))  cols.acum  = c;
+      if(RE.saldo.test(t)) cols.saldo = c;
     }
   }
   return cols;
@@ -172,10 +153,6 @@ function extractResumoFromHeaders(data, firstDataRowIdx){
   return { valorContratoAditivo: vca, acumuladoTotal: acu };
 }
 
-/*
-  Detecta em qual coluna ficam os itens (números inteiros como 1, 2, 3…).
-  Normalmente é a col 0 ou col 1 (planilhas com logo/brasão na col A).
-*/
 function detectItemCol(data, startSearch = 0){
   for(let r = startSearch; r < Math.min(startSearch + 30, data.length); r++){
     const row = data[r] || [];
@@ -194,36 +171,27 @@ async function readExcelFile(file){
 
   const ws   = wb.Sheets[sheetName];
   const data = XLSX.utils.sheet_to_json(ws, { header:1, defval:'', raw:true });
-  if(!data.length) throw new Error(`A aba "${sheetName}" está vazia.`);
+  if(!data.length) throw new Error(`A aba "${sheetName}" est\u00e1 vazia.`);
 
-  // Descobre a coluna dos itens (pode ser col B em planilhas com brasão na col A)
   const itemCol = detectItemCol(data);
 
-  // Primeira linha de dados: primeira linha onde itemCol tem número inteiro
   let firstDataRowIdx = -1;
   for(let r=0; r<data.length; r++){
     if(/^\d+$/.test(String(data[r][itemCol]??'').trim())){ firstDataRowIdx = r; break; }
   }
 
-  // Linhas de cabeçalho = tudo antes da 1ª linha de dados
   const headerRows = firstDataRowIdx > 0
     ? data.slice(0, firstDataRowIdx)
     : data.slice(0, Math.min(25, data.length));
 
-  // Detecta colunas varrendo TODO o cabeçalho (pega a última ocorrência de cada campo)
   let cols = detectColumns(headerRows);
 
-  // Se col de descrição não foi achada, tenta a primeira célula de texto após itemCol
-  // (será resolvido item a item abaixo)
-
-  // Fallback numérico se colunas críticas ainda faltam
   if(firstDataRowIdx >= 0 && (cols.vc < 0 || cols.acum < 0)){
     cols = fallbackColumns(data[firstDataRowIdx] || [], cols);
   }
 
   const resumoHeader = extractResumoFromHeaders(data, firstDataRowIdx);
 
-  // Lê os itens
   const items = [];
   const warnings = [];
   for(let r=0; r<data.length; r++){
@@ -231,7 +199,6 @@ async function readExcelFile(file){
     const itemStr = String(row[itemCol]??'').trim();
     if(!/^\d+$/.test(itemStr)) continue;
 
-    // Descrição: coluna detectada, ou primeira célula de texto entre itemCol+1 e vc
     let descricao = '';
     if(cols.desc >= 0) descricao = String(row[cols.desc]??'').trim();
     if(!descricao){
@@ -247,12 +214,12 @@ async function readExcelFile(file){
     const acum = cols.acum  >= 0 ? (Number(row[cols.acum])  || 0) : 0;
     let saldo  = cols.saldo >= 0 ? (Number(row[cols.saldo]) || 0) : 0;
     if(!saldo && vc > 0) saldo = vc - acum;
-    // % executado: usa coluna detectada, senão calcula
-    let p = cols.pct >= 0 ? (Number(row[cols.pct]) || 0) : 0;
-    if(!p && vc > 0) p = +(acum/vc*100).toFixed(2);
 
-    if(!descricao) warnings.push(`Item ${itemStr}: descrição não encontrada`);
-    if(!vc && !acum) warnings.push(`Item ${itemStr}: valores zerados — verifique a aba "${sheetName}"`);
+    // % executada: SEMPRE calculado — nunca lido da planilha
+    const p = vc > 0 ? +(acum / vc * 100).toFixed(2) : 0;
+
+    if(!descricao) warnings.push(`Item ${itemStr}: descri\u00e7\u00e3o n\u00e3o encontrada`);
+    if(!vc && !acum) warnings.push(`Item ${itemStr}: valores zerados \u2014 verifique a aba "${sheetName}"`);
 
     items.push({
       item: itemStr,
@@ -261,14 +228,14 @@ async function readExcelFile(file){
       medicao:       +med.toFixed(2),
       acumulado:     +acum.toFixed(2),
       saldo:         +saldo.toFixed(2),
-      percentualExecutado: +p.toFixed(2)
+      percentualExecutado: p
     });
   }
 
   if(!items.length){
     throw new Error(
-      `Nenhum item numérico encontrado na aba "${sheetName}".\n` +
-      `Verifique se a coluna com os números dos itens (1, 2, 3…) está nas primeiras 5 colunas.`
+      `Nenhum item num\u00e9rico encontrado na aba "${sheetName}".\n` +
+      `Verifique se a coluna com os n\u00fameros dos itens (1, 2, 3\u2026) est\u00e1 nas primeiras 5 colunas.`
     );
   }
 
@@ -322,14 +289,14 @@ async function importFile(replace = false){
         if(obj.warnings?.length){
           const preview = obj.warnings.slice(0,5).join('\n');
           const extra   = obj.warnings.length > 5 ? `\n...e mais ${obj.warnings.length-5} aviso(s).` : '';
-          console.warn('[Importação] Avisos:\n' + preview + extra);
+          console.warn('[Importa\u00e7\u00e3o] Avisos:\n' + preview + extra);
         }
       } else {
         const text = await file.text();
         obj  = JSON.parse(text);
         rows = Array.isArray(obj) ? normalizeRows(obj) : normalizeRows(obj.itens);
         if(!rows.length && !Array.isArray(obj) && !Array.isArray(obj.itens))
-          throw new Error('Formato JSON inválido. Esperado array ou objeto com campo "itens".');
+          throw new Error('Formato JSON inv\u00e1lido. Esperado array ou objeto com campo "itens".');
       }
 
       const obraId   = replace && state.selectedObraId ? state.selectedObraId : ('obra_' + Date.now());
@@ -347,10 +314,10 @@ async function importFile(replace = false){
       };
       await saveObra(obra);
       state.selectedObraId = obraId;
-      showToast(`✅ ${rows.length} itens importados da aba "${obj.medicaoAtual || ext}"`);
+      showToast(`\u2705 ${rows.length} itens importados da aba "${obj.medicaoAtual || ext}"`);
     } catch(err){
-      showToast('❌ ' + err.message, true);
-      console.error('[Importação]', err);
+      showToast('\u274c ' + err.message, true);
+      console.error('[Importa\u00e7\u00e3o]', err);
     }
   };
   input.click();
@@ -434,7 +401,7 @@ function updateDashboard(){
     `<div class="stat-card"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value" style="font-size:1rem">${money(vc)}</span></div>
      <div class="stat-card"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="font-size:1rem;color:var(--success)">${money(ac)}</span></div>
      <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
-     <div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.2rem">${esc(o?.medicaoAtual||'-')}</span></div>`;
+     <div class="stat-card"><span class="stat-label">Medi\u00e7\u00e3o Atual</span><span class="stat-value" style="font-size:1.2rem">${esc(o?.medicaoAtual||'-')}</span></div>`;
   if($('countAll'))  $('countAll').textContent  = money(vc);
   if($('countDone')) $('countDone').textContent = money(ac);
   if($('countPct'))  $('countPct').textContent  = pct(p);
@@ -492,7 +459,7 @@ function renderColabList(){
          <br><small style="color:var(--text-muted)">${esc(u.email)}</small>
        </div>
        <div style="display:flex;gap:.4rem;flex-wrap:wrap">
-         <button class="btn ${u.blocked?'btn-success':'btn-warning'}" style="padding:.3rem .65rem;font-size:.72rem" onclick="toggleBloqueio('${uid}',${u.blocked})">${u.blocked?'✅ Desbloquear':'🔒 Bloquear'}</button>
+         <button class="btn ${u.blocked?'btn-success':'btn-warning'}" style="padding:.3rem .65rem;font-size:.72rem" onclick="toggleBloqueio('${uid}',${u.blocked})">${u.blocked?'\u2705 Desbloquear':'\ud83d\udd12 Bloquear'}</button>
          <button class="btn btn-danger" style="padding:.3rem .65rem;font-size:.72rem" onclick="removeColab('${uid}')">Remover</button>
        </div>
      </div>`).join('');
@@ -505,16 +472,16 @@ function renderAdminSidebar(){
     const u = state.allUsers[state.adminSelectedUid];
     const n = (u.obras||[]).length;
     box.innerHTML =
-      `<button class="btn btn-sec" onclick="adminDeselectColab()" style="width:100%;margin-bottom:.75rem;font-size:.8rem">← Todos</button>
+      `<button class="btn btn-sec" onclick="adminDeselectColab()" style="width:100%;margin-bottom:.75rem;font-size:.8rem">\u2190 Todos</button>
        <div class="colab-sidebar-item active">
-         <div style="font-weight:600;font-size:.875rem">${u.blocked?'🔒 ':''}${esc(u.nome)}</div>
+         <div style="font-weight:600;font-size:.875rem">${u.blocked?'\ud83d\udd12 ':''}${esc(u.nome)}</div>
          <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n!==1?'s':''}</div>
        </div>`;
     return;
   }
   box.innerHTML = colabs.map(([uid,u])=>
     `<div class="colab-sidebar-item" style="${u.blocked?'opacity:.55':''}" onclick="adminSelectColab('${uid}')">
-       <div style="font-weight:600;font-size:.875rem">${u.blocked?'🔒 ':''}${esc(u.nome)}</div>
+       <div style="font-weight:600;font-size:.875rem">${u.blocked?'\ud83d\udd12 ':''}${esc(u.nome)}</div>
        <div style="font-size:.75rem;color:var(--text-muted)">${(u.obras||[]).length} obra${(u.obras||[]).length!==1?'s':''}</div>
      </div>`).join('');
 }
@@ -541,7 +508,7 @@ function renderAdminDetail(){
   if(!u){ panel.innerHTML=''; return; }
   const obrasList = u.obras || [];
   let html = `<div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
-    <div style="font-weight:700;font-size:1.1rem">👤 ${esc(u.nome)}${u.blocked?' <span style="font-size:.75rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.2rem .6rem;border-radius:999px">🔒 Bloqueado</span>':''}</div>
+    <div style="font-weight:700;font-size:1.1rem">\ud83d\udc64 ${esc(u.nome)}${u.blocked?' <span style="font-size:.75rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.2rem .6rem;border-radius:999px">\ud83d\udd12 Bloqueado</span>':''}</div>
     <div class="form-group" style="margin:0;min-width:220px">
       <select id="adminObraSelect" class="form-control" onchange="adminSelectObra(this.value)">
         <option value="">-- Selecione uma obra --</option>
@@ -549,11 +516,11 @@ function renderAdminDetail(){
       </select>
     </div></div>`;
   if(!state.adminSelectedObraId || !obrasList.length){
-    panel.innerHTML = html + (obrasList.length ? obrasList.map(adminObraCardHTML).join('') : '<p style="color:var(--text-muted)">Este colaborador não tem obras cadastradas.</p>');
+    panel.innerHTML = html + (obrasList.length ? obrasList.map(adminObraCardHTML).join('') : '<p style="color:var(--text-muted)">Este colaborador n\u00e3o tem obras cadastradas.</p>');
     return;
   }
   const obra = obrasList.find(o=>o.id===state.adminSelectedObraId);
-  if(!obra){ panel.innerHTML = html + '<p style="color:var(--text-muted)">Obra não encontrada.</p>'; return; }
+  if(!obra){ panel.innerHTML = html + '<p style="color:var(--text-muted)">Obra n\u00e3o encontrada.</p>'; return; }
   const it   = Array.isArray(obra.itens) ? obra.itens : [];
   const vc   = Number(obra.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
   const ac   = Number(obra.resumo?.acumuladoTotal)       || it.reduce((a,i)=>a+Number(i.acumulado||0),0);
@@ -565,22 +532,22 @@ function renderAdminDetail(){
        <div class="stat-card compact"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value">${money(vc)}</span></div>
        <div class="stat-card compact"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="color:var(--success)">${money(ac)}</span></div>
        <div class="stat-card compact"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
-       <div class="stat-card compact"><span class="stat-label">Medição Atual</span><span class="stat-value">${esc(obra.medicaoAtual||'-')}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Medi\u00e7\u00e3o Atual</span><span class="stat-value">${esc(obra.medicaoAtual||'-')}</span></div>
        <div class="stat-card compact"><span class="stat-label">Acumulado (itens)</span><span class="stat-value">${money(tAcu)}</span></div>
-       <div class="stat-card compact"><span class="stat-label">Medição</span><span class="stat-value">${money(tMed)}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Medi\u00e7\u00e3o</span><span class="stat-value">${money(tMed)}</span></div>
        <div class="stat-card compact"><span class="stat-label">Saldo</span><span class="stat-value">${money(vc-ac)}</span></div>
      </div>
      <div class="panel" style="margin-bottom:1.5rem">
-       <h3 style="margin-bottom:1rem">Curva S — Progresso Físico</h3>
+       <h3 style="margin-bottom:1rem">Curva S \u2014 Progresso F\u00edsico</h3>
        <div class="chart-scroll-wrap" id="adminCurvaSwrap"><div class="chart-container"><canvas id="adminCurvaS"></canvas></div></div>
      </div>
      <div class="panel">
-       <h3 style="margin-bottom:1rem">Índice de Itens</h3>
+       <h3 style="margin-bottom:1rem">\u00cdndice de Itens</h3>
        <div class="table-container"><table>
          <thead><tr>
-           <th class="th-sticky">Item</th><th class="th-sticky">Descrição</th>
+           <th class="th-sticky">Item</th><th class="th-sticky">Descri\u00e7\u00e3o</th>
            <th class="th-sticky" style="text-align:right">Valor Contrato</th>
-           <th class="th-sticky" style="text-align:right">Medição</th>
+           <th class="th-sticky" style="text-align:right">Medi\u00e7\u00e3o</th>
            <th class="th-sticky" style="text-align:right">Acumulado</th>
            <th class="th-sticky" style="text-align:right">Saldo</th>
            <th class="th-sticky" style="text-align:right">% Exec.</th>
@@ -660,7 +627,7 @@ function setupColabForm(){
       await signOut(auth);
       await signInWithEmailAndPassword(auth, adminEmail, ADMIN_SENHA);
       $('colabNome').value=''; $('colabEmail').value=''; $('colabSenha').value='';
-      showToast(`✅ Colaborador "${nome}" cadastrado com sucesso!`);
+      showToast(`\u2705 Colaborador "${nome}" cadastrado com sucesso!`);
     }catch(err){
       msgEl.textContent = err?.message || 'Erro ao cadastrar.';
       msgEl.style.display = 'block';
@@ -682,7 +649,7 @@ function setupNovaAtividade(){
   $('addRow').onclick = () => {
     const item = $('fItem').value.trim();
     const desc = $('fName').value.trim();
-    if(!item && !desc){ showToast('⚠️ Preencha ao menos o item ou a descrição.', true); return; }
+    if(!item && !desc){ showToast('\u26a0\ufe0f Preencha ao menos o item ou a descri\u00e7\u00e3o.', true); return; }
     const vc   = parseMoney($('fValorContrato').value);
     const med  = parseMoney($('fMedicao').value);
     const acu  = parseMoney($('fAcumulado').value);
@@ -692,7 +659,7 @@ function setupNovaAtividade(){
     const o = currentObra(); if(o){ o.itens = state.rows; saveObra(o); }
     renderAll();
     $('fItem').value=''; $('fName').value=''; $('fValorContrato').value=''; $('fMedicao').value=''; $('fAcumulado').value=''; $('fSaldo').value=''; $('fPct').value='';
-    showToast('✅ Item adicionado.');
+    showToast('\u2705 Item adicionado.');
   };
 }
 
@@ -705,7 +672,7 @@ function bindEvents(){
     const btn   = $('loginBtn');
     btn.disabled=true; btn.textContent='Entrando...'; $('loginError').style.display='none';
     try{ await signInWithEmailAndPassword(auth, email, senha); }
-    catch{ $('loginError').textContent='E-mail ou senha inválidos.'; $('loginError').style.display='block'; }
+    catch{ $('loginError').textContent='E-mail ou senha inv\u00e1lidos.'; $('loginError').style.display='block'; }
     finally{ btn.disabled=false; btn.textContent='Entrar'; }
   });
   $('logoutBtnAdmin').addEventListener('click', ()=>{ cleanup(); signOut(auth); });
@@ -774,7 +741,7 @@ window.removeColab = async uid => {
   if(state.adminSubs[uid]){ state.adminSubs[uid](); delete state.adminSubs[uid]; }
   if(state.adminSelectedUid===uid){ state.adminSelectedUid=null; state.adminSelectedObraId=null; }
   renderAdminViews(); renderAdminDetail();
-  showToast('✅ Colaborador removido.');
+  showToast('\u2705 Colaborador removido.');
 };
 
 /* ─── INIT ─── */
@@ -955,7 +922,7 @@ td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px
 </style>
 </head>
 <body>
-<button id="btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Voltar ao início">↑</button>
+<button id="btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Voltar ao in\u00edcio">\u2191</button>
 
 <!-- LOGIN -->
 <div id="loginView" class="login-wrapper">
@@ -967,7 +934,7 @@ td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px
     </div>
     <form id="loginForm">
       <div class="form-group"><label>E-mail</label><input type="email" id="loginEmail" class="form-control" placeholder="seu@email.com" required></div>
-      <div class="form-group"><label>Senha</label><input type="password" id="loginSenha" class="form-control" placeholder="••••••••" required></div>
+      <div class="form-group"><label>Senha</label><input type="password" id="loginSenha" class="form-control" placeholder="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" required></div>
       <div id="loginError" class="error-msg"></div>
       <button type="submit" class="btn btn-primary" id="loginBtn" style="width:100%;padding:.875rem;margin-top:.75rem">Entrar</button>
     </form>
@@ -978,9 +945,9 @@ td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px
 <div id="adminView" style="display:none">
   <div class="container">
     <header class="header">
-      <div class="brand"><div class="logo">RA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Visão Geral do Gestor</p></div></div>
+      <div class="brand"><div class="logo">RA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Vis\u00e3o Geral do Gestor</p></div></div>
       <div class="header-actions">
-        <button class="btn btn-sec" id="adminToggleColab">👥 Gerenciar Colaboradores</button>
+        <button class="btn btn-sec" id="adminToggleColab">\ud83d\udc65 Gerenciar Colaboradores</button>
         <button class="btn btn-sec" id="logoutBtnAdmin" style="color:var(--danger)">Sair</button>
       </div>
     </header>
@@ -1016,7 +983,7 @@ td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px
     <header class="header">
       <div class="brand"><div class="logo">RA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Minhas Obras</p></div></div>
       <div class="header-actions">
-        <button class="btn btn-sec" id="toggleTheme">🌙 Tema</button>
+        <button class="btn btn-sec" id="toggleTheme">\ud83c\udf19 Tema</button>
         <button class="btn btn-sec" id="logoutBtnUser" style="color:var(--danger)">Sair</button>
       </div>
     </header>
@@ -1028,60 +995,60 @@ td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px
           <div class="nav-item"><span>Progresso</span><span class="badge" id="countPct">0%</span></div>
         </div>
         <div class="panel" style="padding:1rem;margin-top:1rem">
-          <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">AÇÕES DE ARQUIVO</h3>
+          <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">A\u00c7\u00d5ES DE ARQUIVO</h3>
           <div style="display:flex;flex-direction:column;gap:.5rem">
-            <button class="btn btn-sec" id="loadFile" style="width:100%">📂 Importar arquivo</button>
-            <button class="btn btn-primary" id="saveJson" style="width:100%">⬇️ Exportar JSON</button>
+            <button class="btn btn-sec" id="loadFile" style="width:100%">\ud83d\udcc2 Importar arquivo</button>
+            <button class="btn btn-primary" id="saveJson" style="width:100%">\u2b07\ufe0f Exportar JSON</button>
           </div>
         </div>
         <div class="panel" style="padding:1rem">
           <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">OBRAS SALVAS</h3>
           <div id="obrasBox"></div>
-          <div style="margin-top:1rem"><button class="btn btn-primary" id="addObraBtn" style="width:100%">➕ Adicionar nova obra</button></div>
+          <div style="margin-top:1rem"><button class="btn btn-primary" id="addObraBtn" style="width:100%">\u2795 Adicionar nova obra</button></div>
         </div>
         <div class="panel" style="padding:1rem">
           <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">NOVA ATIVIDADE</h3>
           <div style="display:flex;flex-direction:column;gap:.5rem">
-            <div class="form-group"><label>Nº Item</label><input type="text" id="fItem" class="form-control"></div>
-            <div class="form-group"><label>Descrição</label><input type="text" id="fName" class="form-control"></div>
+            <div class="form-group"><label>N\u00ba Item</label><input type="text" id="fItem" class="form-control"></div>
+            <div class="form-group"><label>Descri\u00e7\u00e3o</label><input type="text" id="fName" class="form-control"></div>
             <div class="form-group"><label>Valor Contrato (R$)</label><input type="text" id="fValorContrato" class="form-control" inputmode="decimal"></div>
-            <div class="form-group"><label>Medição (R$)</label><input type="text" id="fMedicao" class="form-control" inputmode="decimal"></div>
+            <div class="form-group"><label>Medi\u00e7\u00e3o (R$)</label><input type="text" id="fMedicao" class="form-control" inputmode="decimal"></div>
             <div class="form-group"><label>Acumulado (R$)</label><input type="text" id="fAcumulado" class="form-control" inputmode="decimal"></div>
             <div class="form-group"><label>Saldo (R$)</label><input type="text" id="fSaldo" class="form-control" readonly></div>
             <div class="form-group"><label>% Executada</label><input type="text" id="fPct" class="form-control" readonly></div>
-            <button class="btn btn-primary" id="addRow" style="width:100%">➕ Adicionar ao Índice</button>
+            <button class="btn btn-primary" id="addRow" style="width:100%">\u2795 Adicionar ao \u00cdndice</button>
           </div>
         </div>
       </aside>
       <main>
         <div class="panel">
-          <h2 style="margin-bottom:1rem">Configurações do Projeto</h2>
+          <h2 style="margin-bottom:1rem">Configura\u00e7\u00f5es do Projeto</h2>
           <div class="form-grid">
             <div class="form-group" style="grid-column:1/-1"><label>Nome do Projeto</label><input type="text" id="projName" class="form-control"></div>
             <div class="form-group"><label>Cliente / Setor</label><input type="text" id="projClient" class="form-control"></div>
-            <div class="form-group"><label>Medição / Fase</label><input type="text" id="projScope" class="form-control"></div>
+            <div class="form-group"><label>Medi\u00e7\u00e3o / Fase</label><input type="text" id="projScope" class="form-control"></div>
           </div>
         </div>
         <div class="panel" style="margin-bottom:1.5rem">
-          <h2 style="margin-bottom:1rem">Curva S — Progresso Físico</h2>
+          <h2 style="margin-bottom:1rem">Curva S \u2014 Progresso F\u00edsico</h2>
           <div class="chart-scroll-wrap" id="sCurveScrollWrap"><div class="chart-container"><canvas id="sCurveChart"></canvas></div></div>
         </div>
         <div class="stats-grid" id="stats"></div>
         <div class="panel">
           <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem">
-            <h2>Índice / Itens Principais</h2>
+            <h2>\u00cdndice / Itens Principais</h2>
             <div style="display:flex;gap:.5rem">
-              <button class="btn btn-sec" id="fillSample">🗑 Limpar</button>
-              <button class="btn btn-sec" id="exportCsv">📊 Exportar CSV</button>
+              <button class="btn btn-sec" id="fillSample">\ud83d\uddd1 Limpar</button>
+              <button class="btn btn-sec" id="exportCsv">\ud83d\udcca Exportar CSV</button>
             </div>
           </div>
           <div class="table-container">
             <table>
               <thead><tr>
                 <th class="th-sticky">Item</th>
-                <th class="th-sticky">Descrição</th>
+                <th class="th-sticky">Descri\u00e7\u00e3o</th>
                 <th class="th-sticky" style="text-align:right">Valor Contrato</th>
-                <th class="th-sticky" style="text-align:right">Medição</th>
+                <th class="th-sticky" style="text-align:right">Medi\u00e7\u00e3o</th>
                 <th class="th-sticky" style="text-align:right">Acumulado</th>
                 <th class="th-sticky" style="text-align:right">Saldo</th>
                 <th class="th-sticky" style="text-align:right">% Executada</th>
