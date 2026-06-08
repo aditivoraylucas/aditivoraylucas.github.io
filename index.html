@@ -11,9 +11,8 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, deleteDoc, getDocs, updateDoc, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-/* ─── CONFIG ─── */
 const firebaseConfig = {
   apiKey: "AIzaSyBc7jh4dai3OZIriKdFxguI44A73TRKYTI",
   authDomain: "cronograma-pro-ray.firebaseapp.com",
@@ -23,13 +22,10 @@ const firebaseConfig = {
   appId: "1:358433192984:web:5af60313307f9bfadc176d"
 };
 const ADMIN_SENHA = "35343535";
-
-/* ─── INIT ─── */
 const app  = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db   = getFirestore(app);
 
-/* ─── UTILS ─── */
 const $        = id => document.getElementById(id);
 const fmtMoney = v  => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v)||0);
 const esc      = s  => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -40,7 +36,6 @@ const baseName = n  => String(n||'').replace(/\.[^.]+$/,'');
 const money    = fmtMoney;
 const pct      = n  => `${Number(n||0).toFixed(2)}%`;
 
-/* ─── STATE ─── */
 const state = {
   user: null, admin: false,
   obras: [], selectedObraId: null, rows: [],
@@ -51,7 +46,6 @@ const state = {
   saveTimer: null, colabFormReady: false
 };
 
-/* ─── HELPERS ─── */
 function currentObra(){ return state.obras.find(o => o.id === state.selectedObraId); }
 function cleanup(){
   if(state.unsubUserObras) state.unsubUserObras();
@@ -73,7 +67,6 @@ function calcPctGeral(resumo, itens){
   return tv > 0 ? +(ta/tv*100).toFixed(2) : 0;
 }
 
-/* ─── FIRESTORE ─── */
 async function saveObra(obra){ await setDoc(doc(db,'users',state.user.uid,'obras',obra.id), obra); }
 async function deleteObra(id){ await deleteDoc(doc(db,'users',state.user.uid,'obras',id)); }
 function scheduleSave(){
@@ -81,7 +74,7 @@ function scheduleSave(){
   state.saveTimer = setTimeout(async()=>{ const o=currentObra(); if(o){ o.itens=state.rows; await saveObra(o); } }, 1200);
 }
 
-/* ─── EXCEL READER (v5) ─── */
+/* ─── EXCEL READER ─── */
 function detectSheet(wb){
   const matches = wb.SheetNames.filter(n => /^(BM|MED)\s*\d+/i.test(n));
   if(matches.length){
@@ -130,33 +123,79 @@ function fallbackColumns(firstDataRow, cols){
   return cols;
 }
 
-function extractResumoFromHeaders(data, firstDataRowIdx){
-  const RE_VCA  = /valor\s*(ct|contrato)\s*[\/\-]?\s*(ta|aditiv|reajust|atualiz)?/i;
-  const RE_ACUM = /^acumulado$/i;
-  let vca = 0, acu = 0;
-  const rows = firstDataRowIdx < 0 ? data : data.slice(0, firstDataRowIdx);
-  for(const row of rows){
+/**
+ * AJUSTE 1 — Extração robusta de Valor CT/Aditivo, Acumulado Total e CONTRATADA.
+ * Estratégia para acumulado:
+ *   a) Procura célula com texto "acumulado" (parcial) no cabeçalho.
+ *   b) Olha na mesma linha para direita E na linha seguinte abaixo na mesma coluna.
+ *   c) Pega o primeiro valor numérico > 0 encontrado.
+ *   d) Se não achar nada no cabeçalho, usa a SOMA dos acumulados dos itens (fallback).
+ */
+function extractMetaFromHeaders(data, firstDataRowIdx){
+  const RE_VCA  = /valor\s*(ct|contrato|total)[\s\/\-]*(aditiv|reajust|atualiz|ta)?/i;
+  const RE_ACUM = /acumulado/i;
+  const RE_CONT = /contratada/i;
+  let vca = 0, acu = 0, contratada = '';
+  const rows = firstDataRowIdx > 0 ? data.slice(0, firstDataRowIdx) : data.slice(0, Math.min(40, data.length));
+
+  for(let r=0; r<rows.length; r++){
+    const row = rows[r] || [];
     for(let c=0; c<row.length; c++){
       const cell = String(row[c]??'').trim();
+      if(!cell) continue;
+
+      // CONTRATADA — busca "CONTRATADA: Nome da Empresa" na mesma célula ou na próxima
+      if(RE_CONT.test(cell)){
+        // tenta extrair após os ":"
+        const afterColon = cell.replace(/^.*contratada\s*:/i,'').trim();
+        if(afterColon && afterColon.length > 1) contratada = afterColon;
+        else {
+          // procura nas colunas seguintes da mesma linha
+          for(let cc=c+1; cc<Math.min(c+6,row.length); cc++){
+            const v = String(row[cc]??'').trim();
+            if(v && !isNum(v)){ contratada = v; break; }
+            if(v && isNum(v)) break; // se for número, para
+          }
+        }
+      }
+
+      // VALOR CT / ADITIVO
       if(RE_VCA.test(cell)){
         for(let cc=c+1; cc<Math.min(c+12,row.length); cc++){
           const v = Number(row[cc]); if(v > 5000){ vca = v; break; }
         }
+        if(!vca && r+1 < rows.length){
+          const v = Number(rows[r+1]?.[c]); if(v > 5000) vca = v;
+        }
       }
-      if(RE_ACUM.test(cell)){
-        for(let cc=c+1; cc<Math.min(c+6,row.length); cc++){
+
+      // ACUMULADO TOTAL — lógica robusta
+      if(RE_ACUM.test(cell) && !acu){
+        // 1) tenta na mesma linha, colunas à direita
+        for(let cc=c+1; cc<Math.min(c+8,row.length); cc++){
           const v = Number(row[cc]); if(v > 0){ acu = v; break; }
+        }
+        // 2) tenta na linha seguinte, mesma coluna
+        if(!acu && r+1 < rows.length){
+          const v = Number(rows[r+1]?.[c]); if(v > 0) acu = v;
+        }
+        // 3) tenta na linha seguinte, colunas adjacentes
+        if(!acu && r+1 < rows.length){
+          const nextRow = rows[r+1] || [];
+          for(let cc=Math.max(0,c-2); cc<Math.min(c+8,nextRow.length); cc++){
+            const v = Number(nextRow[cc]); if(v > 0){ acu = v; break; }
+          }
         }
       }
     }
   }
-  return { valorContratoAditivo: vca, acumuladoTotal: acu };
+  return { valorContratoAditivo: vca, acumuladoTotal: acu, contratada };
 }
 
-function detectItemCol(data, startSearch = 0){
-  for(let r = startSearch; r < Math.min(startSearch + 30, data.length); r++){
+function detectItemCol(data){
+  for(let r=0; r<Math.min(30,data.length); r++){
     const row = data[r] || [];
-    for(let c = 0; c < Math.min(5, row.length); c++){
+    for(let c=0; c<Math.min(5,row.length); c++){
       if(/^\d+$/.test(String(row[c]??'').trim())) return c;
     }
   }
@@ -174,7 +213,6 @@ async function readExcelFile(file){
   if(!data.length) throw new Error(`A aba "${sheetName}" está vazia.`);
 
   const itemCol = detectItemCol(data);
-
   let firstDataRowIdx = -1;
   for(let r=0; r<data.length; r++){
     if(/^\d+$/.test(String(data[r][itemCol]??'').trim())){ firstDataRowIdx = r; break; }
@@ -185,12 +223,12 @@ async function readExcelFile(file){
     : data.slice(0, Math.min(25, data.length));
 
   let cols = detectColumns(headerRows);
-
   if(firstDataRowIdx >= 0 && (cols.vc < 0 || cols.acum < 0)){
     cols = fallbackColumns(data[firstDataRowIdx] || [], cols);
   }
 
-  const resumoHeader = extractResumoFromHeaders(data, firstDataRowIdx);
+  // extrai metadados do cabeçalho
+  const meta = extractMetaFromHeaders(data, firstDataRowIdx);
 
   const items = [];
   const warnings = [];
@@ -203,7 +241,7 @@ async function readExcelFile(file){
     if(cols.desc >= 0) descricao = String(row[cols.desc]??'').trim();
     if(!descricao){
       const lim = cols.vc > 0 ? cols.vc : itemCol + 10;
-      for(let c = itemCol+1; c < lim; c++){
+      for(let c=itemCol+1; c<lim; c++){
         const v = String(row[c]??'').trim();
         if(v && !isNum(row[c])){ descricao = v; break; }
       }
@@ -215,47 +253,43 @@ async function readExcelFile(file){
     let saldo  = cols.saldo >= 0 ? (Number(row[cols.saldo]) || 0) : 0;
     if(!saldo && vc > 0) saldo = vc - acum;
 
-    // % executada: SEMPRE calculado — nunca lido da planilha
+    // % executada SEMPRE calculada
     const p = vc > 0 ? +(acum / vc * 100).toFixed(2) : 0;
 
     if(!descricao) warnings.push(`Item ${itemStr}: descrição não encontrada`);
     if(!vc && !acum) warnings.push(`Item ${itemStr}: valores zerados — verifique a aba "${sheetName}"`);
 
     items.push({
-      item: itemStr,
-      descricao,
-      valorContrato: +vc.toFixed(2),
-      medicao:       +med.toFixed(2),
-      acumulado:     +acum.toFixed(2),
-      saldo:         +saldo.toFixed(2),
+      item: itemStr, descricao,
+      valorContrato: +vc.toFixed(2), medicao: +med.toFixed(2),
+      acumulado: +acum.toFixed(2), saldo: +saldo.toFixed(2),
       percentualExecutado: p
     });
   }
 
-  if(!items.length){
-    throw new Error(
-      `Nenhum item numérico encontrado na aba "${sheetName}".\n` +
-      `Verifique se a coluna com os números dos itens (1, 2, 3…) está nas primeiras 5 colunas.`
-    );
-  }
+  if(!items.length) throw new Error(
+    `Nenhum item numérico encontrado na aba "${sheetName}".\n` +
+    `Verifique se a coluna com os números dos itens (1, 2, 3…) está nas primeiras 5 colunas.`
+  );
 
   const sumVC   = items.reduce((a,i)=>a+i.valorContrato,0);
   const sumAcum = items.reduce((a,i)=>a+i.acumulado,0);
-  const vca     = resumoHeader.valorContratoAditivo || sumVC;
-  const acu     = resumoHeader.acumuladoTotal       || sumAcum;
+
+  // AJUSTE 1: se não achou acumulado no cabeçalho, usa soma dos itens (sempre correto)
+  const vca = meta.valorContratoAditivo || sumVC;
+  const acu = meta.acumuladoTotal > 0 ? meta.acumuladoTotal : sumAcum;
 
   return {
     nome:        baseName(file.name),
     nomeProjeto: wb.Props?.Title || baseName(file.name) || 'Nova obra',
     medicaoAtual: sheetName,
-    itens:   items,
-    warnings,
+    contratada:  meta.contratada || '',
+    itens: items, warnings,
     resumo: {
-      total:     sumVC,
-      acumulado: sumAcum,
+      total: sumVC, acumulado: sumAcum,
       percentual: vca > 0 ? +(acu/vca*100).toFixed(2) : 0,
       valorContratoAditivo: vca,
-      acumuladoTotal:       acu
+      acumuladoTotal: acu
     }
   };
 }
@@ -264,10 +298,10 @@ function normalizeRows(list){
   return Array.isArray(list) ? list.map(item=>({
     item:       item?.item ?? '',
     descricao:  item?.descricao ?? item?.descricaoServico ?? item?.name ?? '',
-    valorContrato:       Number(item?.valorContrato       ?? item?.valor_contrato       ?? 0) || 0,
-    medicao:             Number(item?.medicao             ?? 0) || 0,
-    acumulado:           Number(item?.acumulado           ?? 0) || 0,
-    saldo:               Number(item?.saldo               ?? 0) || 0,
+    valorContrato:       Number(item?.valorContrato ?? item?.valor_contrato ?? 0) || 0,
+    medicao:             Number(item?.medicao ?? 0) || 0,
+    acumulado:           Number(item?.acumulado ?? 0) || 0,
+    saldo:               Number(item?.saldo ?? 0) || 0,
     percentualExecutado: Number(item?.percentualExecutado ?? item?.percentual_executado ?? 0) || 0
   })) : [];
 }
@@ -298,14 +332,13 @@ async function importFile(replace = false){
         if(!rows.length && !Array.isArray(obj) && !Array.isArray(obj.itens))
           throw new Error('Formato JSON inválido. Esperado array ou objeto com campo "itens".');
       }
-
       const obraId   = replace && state.selectedObraId ? state.selectedObraId : ('obra_' + Date.now());
       const obraNome = baseName(file.name) || obj.nome || 'Nova obra';
       const obra = {
         id: obraId,
         nome:         obraNome,
         nomeProjeto:  obj.nomeProjeto || obj.obra || obraNome,
-        cliente:      obj.cliente || '',
+        contratada:   obj.contratada || '',
         arquivoNome:  file.name,
         origem:       ext,
         medicaoAtual: obj.medicaoAtual || '',
@@ -326,11 +359,7 @@ async function importFile(replace = false){
 /* ─── TOAST ─── */
 function showToast(msg, isError = false){
   let t = $('toast');
-  if(!t){
-    t = document.createElement('div');
-    t.id = 'toast';
-    document.body.appendChild(t);
-  }
+  if(!t){ t = document.createElement('div'); t.id='toast'; document.body.appendChild(t); }
   t.textContent = msg;
   t.className   = 'toast' + (isError ? ' toast-error' : '');
   t.style.opacity = '1';
@@ -374,9 +403,9 @@ function renderCurvaS(canvasId, wrapId, itens, prev){
 /* ─── RENDER: USER ─── */
 function applySelected(o){
   state.rows = Array.isArray(o.itens) ? o.itens : [];
-  $('projName').value  = o.nomeProjeto || o.nome || 'Nova obra';
-  $('projClient').value = o.cliente || '';
-  $('projScope').value  = o.medicaoAtual || '';
+  $('projName').value      = o.nomeProjeto || o.nome || 'Nova obra';
+  $('projContratada').value = o.contratada || '';
+  $('projScope').value     = o.medicaoAtual || '';
 }
 function renderTable(){
   const tbody = $('tbody'); if(!tbody) return;
@@ -701,6 +730,12 @@ function bindEvents(){
     const blob  = new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name.replace(/[^a-zA-Z0-9\-_]/g,'-').toLowerCase()+'.json'; a.click(); URL.revokeObjectURL(a.href);
   };
+  // salva contratada ao editar campo
+  $('projContratada').addEventListener('input', () => {
+    const o = currentObra(); if(!o) return;
+    o.contratada = $('projContratada').value.trim();
+    scheduleSave();
+  });
   $('tbody').addEventListener('input', e => {
     const t=e.target, tr=t.closest('tr'); if(!tr) return;
     const i=+tr.dataset.i, k=t.dataset.k; if(!k) return;
@@ -724,7 +759,6 @@ function bindEvents(){
   window.addEventListener('scroll',()=>{ const b=$('btnTopo'); if(b) b.classList.toggle('visible', window.scrollY>200); });
 }
 
-/* ─── GLOBAL CALLBACKS (admin) ─── */
 window.adminSelectColab   = uid  => { state.adminSelectedUid=uid; state.adminSelectedObraId=null; renderAdminSidebar(); renderAdminDetail(); };
 window.adminDeselectColab = ()   => { state.adminSelectedUid=null; state.adminSelectedObraId=null; renderAdminSidebar(); renderAdminDetail(); };
 window.adminSelectObra    = id   => { state.adminSelectedObraId=id||null; renderAdminDetail(); };
@@ -744,7 +778,6 @@ window.removeColab = async uid => {
   showToast('✅ Colaborador removido.');
 };
 
-/* ─── INIT ─── */
 async function init(){
   bindEvents();
   setupNovaAtividade();
@@ -767,7 +800,6 @@ async function init(){
     }
   });
 }
-
 init();
 </script>
 <style>
@@ -782,6 +814,7 @@ init();
   --shadow-md:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px -1px rgba(0,0,0,.06);
   --shadow-lg:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -2px rgba(0,0,0,.05);
   --font:'Satoshi',system-ui,sans-serif;
+  --aside-w:270px;
 }
 [data-theme="dark"]{
   --bg:#0f172a;--surface:#1e293b;--surface-hover:#334155;
@@ -790,19 +823,17 @@ init();
   --primary:#6366f1;--primary-hover:#818cf8;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh;transition:background .2s}
+html,body{height:100%}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.5;transition:background .2s}
 
-/* TOAST */
 .toast{position:fixed;bottom:5rem;left:50%;transform:translateX(-50%);background:#1e293b;color:#f8fafc;padding:.7rem 1.4rem;border-radius:var(--radius-md);font-size:.875rem;font-weight:600;box-shadow:var(--shadow-lg);z-index:9999;max-width:90vw;text-align:center;transition:opacity .4s;}
 .toast-error{background:#7f1d1d;color:#fecaca;}
 
-/* LOGIN */
 .login-wrapper{display:flex;min-height:100vh;align-items:center;justify-content:center;padding:1rem;background:linear-gradient(135deg,#f3e8ff,#eff6ff 45%,#ecfdf5)}
 [data-theme="dark"] .login-wrapper{background:linear-gradient(135deg,#1e1b4b,#172554 45%,#064e3b)}
 .login-card{background:var(--surface);width:100%;max-width:400px;padding:2.5rem;border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);border:1px solid var(--border)}
 .brand-login{display:flex;flex-direction:column;align-items:center;gap:1rem;margin-bottom:2rem;text-align:center}
 
-/* BUTTONS */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;padding:.625rem 1.25rem;border-radius:var(--radius-sm);font-weight:600;font-size:.875rem;font-family:inherit;cursor:pointer;transition:all .2s;border:1px solid transparent}
 .btn-primary{background:var(--primary);color:#fff;box-shadow:var(--shadow-sm)}
 .btn-primary:hover{background:var(--primary-hover)}
@@ -811,17 +842,52 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:
 .btn-warning{color:#92400e;background:rgba(245,158,11,.12)}
 .btn-success{color:#065f46;background:rgba(16,185,129,.12)}
 
-/* LAYOUT */
-.container{max-width:1440px;margin:0 auto;padding:2rem}
-.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;gap:.75rem}
+/* ── LAYOUT GERAL ── */
+.app-shell{
+  display:grid;
+  grid-template-columns:var(--aside-w) 1fr;
+  grid-template-rows:auto 1fr;
+  height:100vh;
+  overflow:hidden;
+}
+.app-topbar{
+  grid-column:1/-1;
+  display:flex;justify-content:space-between;align-items:center;
+  padding:.875rem 2rem;
+  background:var(--surface);
+  border-bottom:1px solid var(--border);
+  gap:.75rem;
+  z-index:20;
+}
+/* AJUSTE 2 — aside com scroll próprio, main com scroll próprio */
+.app-aside{
+  grid-column:1;
+  grid-row:2;
+  overflow-y:auto;
+  background:var(--surface);
+  border-right:1px solid var(--border);
+  padding:1rem;
+  display:flex;
+  flex-direction:column;
+  gap:.75rem;
+}
+.app-main{
+  grid-column:2;
+  grid-row:2;
+  overflow-y:auto;
+  padding:1.5rem 2rem;
+}
+
 .brand{display:flex;align-items:center;gap:1rem;min-width:0}
-.brand-text h1{font-size:1.5rem;font-weight:700;white-space:nowrap}
-.brand-text p{color:var(--text-muted);font-size:.875rem;white-space:nowrap}
+.brand-text h1{font-size:1.25rem;font-weight:700;white-space:nowrap}
+.brand-text p{color:var(--text-muted);font-size:.8rem;white-space:nowrap}
 .header-actions{display:flex;gap:.5rem;align-items:center;flex-shrink:0}
-.logo{width:48px;height:48px;background:linear-gradient(135deg,var(--primary),#818cf8);color:#fff;border-radius:var(--radius-md);display:grid;place-items:center;font-weight:900;font-size:1rem}
+.logo{width:40px;height:40px;background:linear-gradient(135deg,var(--primary),#818cf8);color:#fff;border-radius:var(--radius-md);display:grid;place-items:center;font-weight:900;font-size:.9rem;flex-shrink:0}
 .logo-large{width:64px;height:64px;font-size:1.5rem}
 
-/* ADMIN */
+/* admin layout (não usa app-shell) */
+.container{max-width:1440px;margin:0 auto;padding:2rem}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;gap:.75rem}
 .admin-layout{display:grid;grid-template-columns:220px 1fr;gap:1.5rem;align-items:start}
 .admin-sidebar{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1rem;position:sticky;top:1.5rem;max-height:calc(100vh - 3rem);overflow-y:auto}
 .admin-sidebar h3{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.75rem}
@@ -833,29 +899,27 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:
 .stat-card.compact .stat-value{font-size:1.2rem;line-height:1.1}
 .stat-card.compact .stat-label{font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
 
-/* STATS */
 .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:1.5rem}
 .stat-card{background:var(--surface);padding:1.25rem;border-radius:var(--radius-lg);border:1px solid var(--border);display:flex;flex-direction:column;gap:.25rem;box-shadow:var(--shadow-sm)}
 .stat-value{font-size:2rem;font-weight:900;line-height:1;color:var(--text)}
 .stat-label{font-size:.875rem;color:var(--text-muted);font-weight:500}
 
-/* DASHBOARD */
-.dashboard{display:grid;grid-template-columns:260px 1fr;gap:2rem}
-.panel{background:var(--surface);border-radius:var(--radius-lg);border:1px solid var(--border);box-shadow:var(--shadow-sm);padding:1.5rem;margin-bottom:1.5rem}
-.nav{display:flex;flex-direction:column;gap:.5rem;position:sticky;top:2rem;max-height:calc(100vh - 4rem);overflow-y:auto;padding-right:.25rem}
-.nav-item{display:flex;justify-content:space-between;padding:.75rem 1rem;border-radius:var(--radius-sm);font-weight:500;color:var(--text-muted)}
+/* nav lateral (sem sticky — aside já rola) */
+.nav{display:flex;flex-direction:column;gap:.25rem}
+.nav-item{display:flex;justify-content:space-between;padding:.65rem .875rem;border-radius:var(--radius-sm);font-weight:500;color:var(--text-muted);font-size:.875rem}
 .nav-item.active{background:rgba(99,102,241,.1);color:var(--primary);font-weight:700}
-.badge{background:var(--surface-hover);padding:.125rem .5rem;border-radius:999px;font-size:.75rem;border:1px solid var(--border);white-space:nowrap}
+.badge{background:var(--surface-hover);padding:.125rem .5rem;border-radius:999px;font-size:.72rem;border:1px solid var(--border);white-space:nowrap}
 .nav-item.active .badge{background:#fff;color:var(--primary);border-color:transparent}
 
-/* FORMS */
+.panel{background:var(--surface);border-radius:var(--radius-lg);border:1px solid var(--border);box-shadow:var(--shadow-sm);padding:1.5rem;margin-bottom:1.5rem}
+.panel-aside{background:var(--bg);border-radius:var(--radius-md);border:1px solid var(--border);padding:.875rem}
+
 .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem}
-.form-group{display:flex;flex-direction:column;gap:.375rem;margin-bottom:1rem}
+.form-group{display:flex;flex-direction:column;gap:.375rem;margin-bottom:.75rem}
 .form-group label{font-size:.8125rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
 .form-control{padding:.625rem .875rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:inherit;font-size:.875rem;transition:.2s;outline:none;width:100%}
 .form-control:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(99,102,241,.15);background:var(--surface)}
 
-/* TABLE */
 .chart-scroll-wrap{width:100%;overflow-x:hidden;-webkit-overflow-scrolling:touch}
 .chart-container{height:300px;width:100%;position:relative}
 .table-container{overflow-x:auto;margin-top:1rem;-webkit-overflow-scrolling:touch;border-radius:var(--radius-md)}
@@ -869,7 +933,6 @@ tbody tr:hover td{background:var(--surface-hover)}
 td[contenteditable="true"]{outline:none;cursor:text}
 td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px var(--primary);border-radius:4px}
 
-/* MISC */
 .error-msg{color:var(--danger);font-size:.875rem;margin-top:.5rem;display:none;padding:.5rem;background:rgba(239,68,68,.08);border-radius:var(--radius-sm)}
 .obra-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)}
 .obra-card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.75rem}
@@ -881,17 +944,19 @@ td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px
 .obra-card-footer{display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.8125rem;color:var(--text-muted)}
 .colab-item{display:flex;justify-content:space-between;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:.5rem;background:var(--bg);gap:.5rem;flex-wrap:wrap}
 
-/* BACK TO TOP */
 #btnTopo{position:fixed;bottom:1.5rem;right:1.5rem;z-index:999;width:46px;height:46px;border-radius:50%;background:var(--primary);color:#fff;border:none;font-size:1.2rem;cursor:pointer;box-shadow:var(--shadow-md);opacity:0;transition:opacity .3s,transform .2s;display:flex;align-items:center;justify-content:center;pointer-events:none;}
 #btnTopo.visible{opacity:1;pointer-events:auto;}
 
-/* RESPONSIVE */
 @media(max-width:1100px){
   .admin-layout{grid-template-columns:1fr}
   .admin-sidebar{position:static;max-height:none;overflow-y:visible}
   .admin-stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .dashboard{grid-template-columns:1fr}
-  .nav{position:static;max-height:none;overflow-y:visible}
+}
+@media(max-width:768px){
+  .app-shell{grid-template-columns:1fr;grid-template-rows:auto auto 1fr;height:auto;overflow:visible}
+  .app-topbar{grid-column:1;padding:.75rem 1rem}
+  .app-aside{grid-column:1;grid-row:2;overflow-y:visible;border-right:none;border-bottom:1px solid var(--border)}
+  .app-main{grid-column:1;grid-row:3;overflow-y:visible;padding:1rem}
 }
 @media(max-width:640px){
   .container{padding:1rem}
@@ -915,14 +980,12 @@ td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px
   .td-desc{min-width:90px;max-width:140px;font-size:.7rem}
   .chart-container{height:240px}
   .chart-scroll-wrap{overflow-x:auto !important}
-  .admin-sidebar{position:static !important;max-height:none !important;overflow-y:visible !important}
-  .nav{position:static !important;max-height:none !important;overflow-y:visible !important}
   #btnTopo{bottom:1rem;right:1rem;width:42px;height:42px;font-size:1rem}
 }
 </style>
 </head>
 <body>
-<button id="btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Voltar ao início">↑</button>
+<button id="btnTopo" onclick="document.querySelector('.app-main')?.scrollTo({top:0,behavior:'smooth'})||window.scrollTo({top:0,behavior:'smooth'})" title="Voltar ao início">↑</button>
 
 <!-- LOGIN -->
 <div id="loginView" class="login-wrapper">
@@ -977,90 +1040,105 @@ td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px
   </div>
 </div>
 
-<!-- USER / COLAB VIEW -->
+<!-- USER / COLAB VIEW — app-shell com dois painéis independentes -->
 <div id="appView" style="display:none">
-  <div class="container">
-    <header class="header">
-      <div class="brand"><div class="logo">RA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Minhas Obras</p></div></div>
+  <div class="app-shell">
+
+    <!-- TOPBAR fixa -->
+    <header class="app-topbar">
+      <div class="brand">
+        <div class="logo">RA</div>
+        <div class="brand-text"><h1>Cronograma PRO</h1><p>Minhas Obras</p></div>
+      </div>
       <div class="header-actions">
         <button class="btn btn-sec" id="toggleTheme">🌙 Tema</button>
         <button class="btn btn-sec" id="logoutBtnUser" style="color:var(--danger)">Sair</button>
       </div>
     </header>
-    <div class="dashboard">
-      <aside>
-        <div class="nav">
-          <div class="nav-item active"><span>Dashboard</span><span class="badge" id="countAll">R$ 0</span></div>
-          <div class="nav-item"><span>Acumulado</span><span class="badge" id="countDone" style="color:var(--success)">R$ 0</span></div>
-          <div class="nav-item"><span>Progresso</span><span class="badge" id="countPct">0%</span></div>
+
+    <!-- ASIDE (rola sozinho) -->
+    <aside class="app-aside">
+      <!-- mini dashboard -->
+      <div class="nav">
+        <div class="nav-item active"><span>Dashboard</span><span class="badge" id="countAll">R$ 0</span></div>
+        <div class="nav-item"><span>Acumulado</span><span class="badge" id="countDone" style="color:var(--success)">R$ 0</span></div>
+        <div class="nav-item"><span>Progresso</span><span class="badge" id="countPct">0%</span></div>
+      </div>
+
+      <div class="panel-aside">
+        <h3 style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.75rem">AÇÕES DE ARQUIVO</h3>
+        <div style="display:flex;flex-direction:column;gap:.4rem">
+          <button class="btn btn-sec" id="loadFile" style="width:100%">📂 Importar arquivo</button>
+          <button class="btn btn-primary" id="saveJson" style="width:100%">⬇️ Exportar JSON</button>
         </div>
-        <div class="panel" style="padding:1rem;margin-top:1rem">
-          <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">AÇÕES DE ARQUIVO</h3>
-          <div style="display:flex;flex-direction:column;gap:.5rem">
-            <button class="btn btn-sec" id="loadFile" style="width:100%">📂 Importar arquivo</button>
-            <button class="btn btn-primary" id="saveJson" style="width:100%">⬇️ Exportar JSON</button>
+      </div>
+
+      <div class="panel-aside">
+        <h3 style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.75rem">OBRAS SALVAS</h3>
+        <div id="obrasBox"></div>
+        <div style="margin-top:.75rem"><button class="btn btn-primary" id="addObraBtn" style="width:100%">➕ Nova obra</button></div>
+      </div>
+
+      <div class="panel-aside">
+        <h3 style="font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.75rem">NOVA ATIVIDADE</h3>
+        <div style="display:flex;flex-direction:column;gap:.35rem">
+          <div class="form-group"><label>Nº Item</label><input type="text" id="fItem" class="form-control"></div>
+          <div class="form-group"><label>Descrição</label><input type="text" id="fName" class="form-control"></div>
+          <div class="form-group"><label>Valor Contrato (R$)</label><input type="text" id="fValorContrato" class="form-control" inputmode="decimal"></div>
+          <div class="form-group"><label>Medição (R$)</label><input type="text" id="fMedicao" class="form-control" inputmode="decimal"></div>
+          <div class="form-group"><label>Acumulado (R$)</label><input type="text" id="fAcumulado" class="form-control" inputmode="decimal"></div>
+          <div class="form-group"><label>Saldo (R$)</label><input type="text" id="fSaldo" class="form-control" readonly></div>
+          <div class="form-group"><label>% Executada</label><input type="text" id="fPct" class="form-control" readonly></div>
+          <button class="btn btn-primary" id="addRow" style="width:100%">➕ Adicionar ao Índice</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN (rola sozinho) -->
+    <main class="app-main">
+      <div class="panel">
+        <h2 style="margin-bottom:1rem">Configurações do Projeto</h2>
+        <div class="form-grid">
+          <div class="form-group" style="grid-column:1/-1"><label>Nome do Projeto</label><input type="text" id="projName" class="form-control"></div>
+          <div class="form-group"><label>Contratada</label><input type="text" id="projContratada" class="form-control" placeholder="Extraído automaticamente da planilha"></div>
+          <div class="form-group"><label>Medição / Fase</label><input type="text" id="projScope" class="form-control"></div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:1.5rem">
+        <h2 style="margin-bottom:1rem">Curva S — Progresso Físico</h2>
+        <div class="chart-scroll-wrap" id="sCurveScrollWrap"><div class="chart-container"><canvas id="sCurveChart"></canvas></div></div>
+      </div>
+
+      <div class="stats-grid" id="stats"></div>
+
+      <div class="panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem">
+          <h2>Índice / Itens Principais</h2>
+          <div style="display:flex;gap:.5rem">
+            <button class="btn btn-sec" id="fillSample">🗑 Limpar</button>
+            <button class="btn btn-sec" id="exportCsv">📊 Exportar CSV</button>
           </div>
         </div>
-        <div class="panel" style="padding:1rem">
-          <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">OBRAS SALVAS</h3>
-          <div id="obrasBox"></div>
-          <div style="margin-top:1rem"><button class="btn btn-primary" id="addObraBtn" style="width:100%">➕ Adicionar nova obra</button></div>
+        <div class="table-container">
+          <table>
+            <thead><tr>
+              <th class="th-sticky">Item</th>
+              <th class="th-sticky">Descrição</th>
+              <th class="th-sticky" style="text-align:right">Valor Contrato</th>
+              <th class="th-sticky" style="text-align:right">Medição</th>
+              <th class="th-sticky" style="text-align:right">Acumulado</th>
+              <th class="th-sticky" style="text-align:right">Saldo</th>
+              <th class="th-sticky" style="text-align:right">% Executada</th>
+              <th class="th-sticky"></th>
+            </tr></thead>
+            <tbody id="tbody"></tbody>
+          </table>
         </div>
-        <div class="panel" style="padding:1rem">
-          <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">NOVA ATIVIDADE</h3>
-          <div style="display:flex;flex-direction:column;gap:.5rem">
-            <div class="form-group"><label>Nº Item</label><input type="text" id="fItem" class="form-control"></div>
-            <div class="form-group"><label>Descrição</label><input type="text" id="fName" class="form-control"></div>
-            <div class="form-group"><label>Valor Contrato (R$)</label><input type="text" id="fValorContrato" class="form-control" inputmode="decimal"></div>
-            <div class="form-group"><label>Medição (R$)</label><input type="text" id="fMedicao" class="form-control" inputmode="decimal"></div>
-            <div class="form-group"><label>Acumulado (R$)</label><input type="text" id="fAcumulado" class="form-control" inputmode="decimal"></div>
-            <div class="form-group"><label>Saldo (R$)</label><input type="text" id="fSaldo" class="form-control" readonly></div>
-            <div class="form-group"><label>% Executada</label><input type="text" id="fPct" class="form-control" readonly></div>
-            <button class="btn btn-primary" id="addRow" style="width:100%">➕ Adicionar ao Índice</button>
-          </div>
-        </div>
-      </aside>
-      <main>
-        <div class="panel">
-          <h2 style="margin-bottom:1rem">Configurações do Projeto</h2>
-          <div class="form-grid">
-            <div class="form-group" style="grid-column:1/-1"><label>Nome do Projeto</label><input type="text" id="projName" class="form-control"></div>
-            <div class="form-group"><label>Cliente / Setor</label><input type="text" id="projClient" class="form-control"></div>
-            <div class="form-group"><label>Medição / Fase</label><input type="text" id="projScope" class="form-control"></div>
-          </div>
-        </div>
-        <div class="panel" style="margin-bottom:1.5rem">
-          <h2 style="margin-bottom:1rem">Curva S — Progresso Físico</h2>
-          <div class="chart-scroll-wrap" id="sCurveScrollWrap"><div class="chart-container"><canvas id="sCurveChart"></canvas></div></div>
-        </div>
-        <div class="stats-grid" id="stats"></div>
-        <div class="panel">
-          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem">
-            <h2>Índice / Itens Principais</h2>
-            <div style="display:flex;gap:.5rem">
-              <button class="btn btn-sec" id="fillSample">🗑 Limpar</button>
-              <button class="btn btn-sec" id="exportCsv">📊 Exportar CSV</button>
-            </div>
-          </div>
-          <div class="table-container">
-            <table>
-              <thead><tr>
-                <th class="th-sticky">Item</th>
-                <th class="th-sticky">Descrição</th>
-                <th class="th-sticky" style="text-align:right">Valor Contrato</th>
-                <th class="th-sticky" style="text-align:right">Medição</th>
-                <th class="th-sticky" style="text-align:right">Acumulado</th>
-                <th class="th-sticky" style="text-align:right">Saldo</th>
-                <th class="th-sticky" style="text-align:right">% Executada</th>
-                <th class="th-sticky"></th>
-              </tr></thead>
-              <tbody id="tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </main>
-    </div>
-  </div>
+      </div>
+    </main>
+
+  </div><!-- /app-shell -->
 </div>
 </body>
 </html>
