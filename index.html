@@ -76,18 +76,6 @@ function scheduleSave(){
   state.saveTimer = setTimeout(async()=>{ const o=currentObra(); if(o){ o.itens=state.rows; await saveObra(o); } }, 1200);
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
- * EXCEL
- * ─────────────────────────────────────────────────────────────────────────────
- * REGRA FUNDAMENTAL (imutável):
- *   Ao identificar uma linha de ITEM PRINCIPAL (célula com número inteiro puro
- *   na coluna de item: 1, 2, 3, ...),  TODOS os valores desse item são lidos
- *   NA MESMA LINHA, cada um na sua coluna.
- *   O mapeamento coluna→campo é feito UMA VEZ a partir dos cabeçalhos que
- *   aparecem ACIMA da primeira linha de dados.
- * ─────────────────────────────────────────────────────────────────────────────
- */
-
 function detectSheet(wb){
   const matches = wb.SheetNames.filter(n => /^(BM|MED)\s*\d+/i.test(n));
   if(matches.length){
@@ -99,11 +87,6 @@ function detectSheet(wb){
   return wb.SheetNames.at(-1);
 }
 
-/*
- * detectItemCol — encontra a coluna onde ficam os números de item (1, 2, 3...).
- * Percorre as primeiras 30 linhas e retorna a coluna mais à esquerda (máx col 5)
- * que contenha um inteiro puro.
- */
 function detectItemCol(data){
   for(let r=0; r<Math.min(30,data.length); r++){
     const row=data[r]||[];
@@ -114,31 +97,6 @@ function detectItemCol(data){
   return 0;
 }
 
-/*
- * detectColumns — mapeia campos → índice de coluna a partir dos cabeçalhos.
- *
- * Estratégia em 3 camadas (aplicadas em ordem, da mais confiável para fallback):
- *
- * CAMADA 1 — Regex nos cabeçalhos (headerRows)
- *   Varre todas as linhas acima da primeira linha de dados.
- *   Para cada campo, guarda o índice da última coluna cujo texto bate no regex.
- *   Isso cobre 95% dos casos.
- *
- * CAMADA 2 — Regex na própria linha do item (se o cabeçalho falhou)
- *   Algumas planilhas repetem os rótulos inline ou usam células mescladas
- *   que aparecem como texto na linha de dados. Tenta os mesmos regex
- *   nas células não-numéricas da linha do item.
- *   Limitado aos campos ainda não detectados.
- *
- * CAMADA 3 — Posição relativa das colunas numéricas na linha do item
- *   (só para campos ainda -1 após camadas 1 e 2)
- *   Na linha do item os números aparecem em ordem:
- *     [desc texto] [vc] [med] [acum] [saldo]
- *   Coleta todas as colunas numéricas > 0 (após a coluna de descrição)
- *   e as atribui sequencialmente aos campos faltantes.
- *   Isso garante que, independente da posição, os valores sejam lidos
- *   da linha correta.
- */
 function detectColumns(headerRows, itemRow, itemCol){
   const RE = {
     desc:  /discrimina|descri[çc]ao|servic[oa]|servi[çc]|especifica/,
@@ -148,8 +106,6 @@ function detectColumns(headerRows, itemRow, itemCol){
     saldo: /saldo/
   };
   const cols = { desc:-1, vc:-1, med:-1, acum:-1, saldo:-1 };
-
-  // ── CAMADA 1: cabeçalhos ──
   for(const row of headerRows){
     for(let c=0; c<row.length; c++){
       const t = norm(row[c]); if(!t) continue;
@@ -158,8 +114,6 @@ function detectColumns(headerRows, itemRow, itemCol){
       }
     }
   }
-
-  // ── CAMADA 2: rótulos inline na linha do item ──
   if(itemRow){
     for(let c=0; c<itemRow.length; c++){
       if(c === itemCol) continue;
@@ -170,24 +124,18 @@ function detectColumns(headerRows, itemRow, itemCol){
       }
     }
   }
-
-  // ── CAMADA 3: posição numérica relativa na linha do item ──
   if(itemRow){
-    // Campos numéricos que ainda não foram mapeados
     const missing = ['vc','med','acum','saldo'].filter(k => cols[k] < 0);
     if(missing.length > 0){
-      // Colunas numéricas > 0 na linha, após a coluna do item e não usadas ainda
       const usedCols = new Set(Object.values(cols).filter(v => v >= 0));
       const numCols = [];
       for(let c=itemCol+1; c<itemRow.length; c++){
         if(!usedCols.has(c) && isNum(itemRow[c]) && Number(itemRow[c]) > 0)
           numCols.push(c);
       }
-      // Atribui em ordem: vc, med, acum, saldo
       missing.forEach((k, i) => { if(numCols[i] !== undefined) cols[k] = numCols[i]; });
     }
   }
-
   return cols;
 }
 
@@ -314,8 +262,6 @@ async function readExcelFile(file){
   const ws=wb.Sheets[sheetName];
   const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
   if(!data.length) throw new Error(`A aba "${sheetName}" está vazia.`);
-
-  // Detecta coluna dos itens e primeira linha de dados
   const itemCol = detectItemCol(data);
   let firstDataRowIdx = -1;
   for(let r=0; r<data.length; r++){
@@ -323,35 +269,17 @@ async function readExcelFile(file){
       firstDataRowIdx = r; break;
     }
   }
-
-  // Cabeçalhos = tudo acima da primeira linha de dados
   const headerRows = firstDataRowIdx > 0
     ? data.slice(0, firstDataRowIdx)
     : data.slice(0, Math.min(25, data.length));
-
-  // Linha do primeiro item principal (usada para camadas 2 e 3 do detectColumns)
   const firstItemRow = firstDataRowIdx >= 0 ? (data[firstDataRowIdx] || []) : [];
-
-  // Mapeamento final coluna→campo
   const cols = detectColumns(headerRows, firstItemRow, itemCol);
-
   const meta = extractMetaFromHeaders(data, firstDataRowIdx);
-
-  /*
-   * ── LEITURA DOS ITENS ────────────────────────────────────────────────────
-   * Regra absoluta:
-   *   Uma linha é item principal se e somente se data[r][itemCol] é inteiro puro.
-   *   Todos os campos (vc, med, acum, saldo, desc) são lidos NA MESMA LINHA,
-   *   nas colunas mapeadas por detectColumns.
-   *   NUNCA há herança de linha anterior.
-   */
   const items=[], warnings=[];
   for(let r=0; r<data.length; r++){
     const row = data[r]||[];
     const itemStr = String(row[itemCol]??'').trim();
     if(!/^\d+$/.test(itemStr)) continue;
-
-    // Descrição: coluna detectada ou primeira célula texto após o item
     let descricao = '';
     if(cols.desc >= 0) descricao = String(row[cols.desc]??'').trim();
     if(!descricao){
@@ -361,18 +289,14 @@ async function readExcelFile(file){
         if(v && !isNum(row[c])){ descricao = v; break; }
       }
     }
-
-    // Valores: SEMPRE da linha atual, coluna mapeada
     const vc   = cols.vc   >= 0 ? (Number(row[cols.vc])   || 0) : 0;
     const med  = cols.med  >= 0 ? (Number(row[cols.med])  || 0) : 0;
     const acum = cols.acum >= 0 ? (Number(row[cols.acum]) || 0) : 0;
     let saldo  = cols.saldo >= 0 ? (Number(row[cols.saldo]) || 0) : 0;
     if(!saldo && vc > 0) saldo = vc - acum;
     const p = vc > 0 ? +(acum/vc*100).toFixed(2) : 0;
-
     if(!descricao) warnings.push(`Item ${itemStr}: descrição não encontrada`);
     if(!vc && !acum) warnings.push(`Item ${itemStr}: valores zerados`);
-
     items.push({
       item: itemStr, descricao,
       valorContrato: +vc.toFixed(2),
@@ -383,7 +307,6 @@ async function readExcelFile(file){
     });
   }
   if(!items.length) throw new Error(`Nenhum item numérico encontrado na aba "${sheetName}".`);
-
   const sumVC   = items.reduce((a,i)=>a+i.valorContrato,0);
   const sumAcum = items.reduce((a,i)=>a+i.acumulado,0);
   const vca = meta.valorContratoAditivo || sumVC;
@@ -414,7 +337,6 @@ function normalizeRows(list){
   })):[];
 }
 
-/* ─── IMPORT ─── */
 async function importFile(replace=false){
   const input=document.createElement('input');
   input.type='file';
@@ -465,7 +387,6 @@ async function importFile(replace=false){
   input.click();
 }
 
-/* ─── TOAST ─── */
 function showToast(msg,isError=false){
   let t=$('toast');
   if(!t){ t=document.createElement('div'); t.id='toast'; document.body.appendChild(t); }
@@ -473,7 +394,6 @@ function showToast(msg,isError=false){
   clearTimeout(t._timer); t._timer=setTimeout(()=>{ t.style.opacity='0'; },isError?5000:3500);
 }
 
-/* ─── CHART ─── */
 function renderCurvaS(canvasId,wrapId,itens,prev){
   const canvas=$(canvasId); if(!canvas) return prev;
   if(prev) prev.destroy();
@@ -501,7 +421,6 @@ function renderCurvaS(canvasId,wrapId,itens,prev){
   });
 }
 
-/* ─── RENDER USER ─── */
 function applySelected(o){
   state.rows=Array.isArray(o.itens)?o.itens:[];
   $('projName').value       = o.nomeProjeto||o.nome||'Nova obra';
@@ -578,7 +497,6 @@ function renderObrasBox(){
 }
 function renderAll(){ renderObrasBox(); renderTable(); updateDashboard(); }
 
-/* ─── ADMIN ─── */
 function renderAdminStats(){
   let tot=0,tit=0,tvc=0,tac=0;
   Object.values(state.allUsers).forEach(u=>{
@@ -703,8 +621,7 @@ function renderAdminDetail(){
            <td style="text-align:right">${money(r.medicao)}</td>
            <td style="text-align:right">${money(r.acumulado)}</td>
            <td style="text-align:right">${money(r.saldo)}</td>
-           <td style="text-align:right;font-weight:700;color:${Number(r.percentualExecutado)>=99.5?'var(--success)':'var(--text)'}">
-             ${Number(r.percentualExecutado||0).toFixed(2)}%</td>
+           <td style="text-align:right;font-weight:700;color:${Number(r.percentualExecutado)>=99.5?'var(--success)':'var(--text)'}">${Number(r.percentualExecutado||0).toFixed(2)}%</td>
          </tr>`).join('')}</tbody>
        </table></div>
      </div>`;
@@ -713,7 +630,6 @@ function renderAdminDetail(){
 }
 function renderAdminViews(){ renderAdminStats(); renderAdminSidebar(); renderColabList(); }
 
-/* ─── SUBS ─── */
 function setupAdminSubs(){
   if(state.unsubAllUsers) state.unsubAllUsers();
   state.unsubAllUsers=onSnapshot(collection(db,'users'),snap=>{
@@ -751,7 +667,6 @@ function listenUserObras(){
   });
 }
 
-/* ─── COLAB FORM ─── */
 function setupColabForm(){
   const form=$('addColabForm'); if(!form) return;
   form.addEventListener('submit',async e=>{
@@ -773,7 +688,6 @@ function setupColabForm(){
   });
 }
 
-/* ─── NOVA ATIVIDADE ─── */
 function setupNovaAtividade(){
   const recalc=()=>{
     const vc=parseMoney($('fValorContrato').value), acu=parseMoney($('fAcumulado').value);
@@ -794,7 +708,6 @@ function setupNovaAtividade(){
   };
 }
 
-/* ─── BIND EVENTS ─── */
 function bindEvents(){
   $('loginForm').addEventListener('submit',async e=>{
     e.preventDefault();
@@ -999,8 +912,183 @@ tr:hover td{background:var(--surface-hover)}
 </style>
 </head>
 <body>
+
+<!-- ═══════════════════════════════════════ LOGIN ═══════════════════════════════════════ -->
 <div id="loginView" style="display:flex">
   <div class="login-wrapper" style="width:100%">
     <div class="login-card">
       <div class="brand-login">
-        <svg width="48" height="48" viewBox="0 0 48 48" fill="none"><rect width="48" height="48" rx="12" fill="#4f46e5"/><path d="M14 34V18l10-6 10 6v16" stro
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+          <rect width="48" height="48" rx="12" fill="#4f46e5"/>
+          <path d="M14 34V18l10-6 10 6v16" stroke="#fff" stroke-width="2.5" stroke-linejoin="round" fill="none"/>
+          <rect x="20" y="24" width="8" height="10" rx="1.5" fill="#fff"/>
+        </svg>
+        <div>
+          <h2 style="font-size:1.5rem;font-weight:800">Cronograma PRO</h2>
+          <p style="color:var(--text-muted);font-size:.875rem">Gestão de obras e medições</p>
+        </div>
+      </div>
+      <form id="loginForm" style="display:flex;flex-direction:column;gap:1rem">
+        <div class="form-group">
+          <label for="loginEmail">E-mail</label>
+          <input id="loginEmail" type="email" class="form-control" placeholder="seu@email.com" required autocomplete="email"/>
+        </div>
+        <div class="form-group">
+          <label for="loginSenha">Senha</label>
+          <input id="loginSenha" type="password" class="form-control" placeholder="••••••••" required autocomplete="current-password"/>
+        </div>
+        <div id="loginError" style="display:none;color:var(--danger);font-size:.8rem;background:rgba(239,68,68,.08);padding:.6rem .875rem;border-radius:var(--radius-sm)"></div>
+        <button id="loginBtn" type="submit" class="btn btn-primary" style="width:100%;margin-top:.25rem">Entrar</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════ APP USER ══════════════════════════════════════ -->
+<div id="appView" style="display:none">
+  <div class="app-shell">
+    <header class="app-topbar">
+      <div class="brand">
+        <svg width="36" height="36" viewBox="0 0 48 48" fill="none">
+          <rect width="48" height="48" rx="10" fill="#4f46e5"/>
+          <path d="M14 34V18l10-6 10 6v16" stroke="#fff" stroke-width="2.5" stroke-linejoin="round" fill="none"/>
+          <rect x="20" y="24" width="8" height="10" rx="1.5" fill="#fff"/>
+        </svg>
+        <div class="brand-text"><h1>Cronograma PRO</h1><p>Gestão de Obras</p></div>
+      </div>
+      <div class="header-actions">
+        <span class="user-chip">👤 <span id="userNameDisplay">—</span></span>
+        <button id="toggleTheme" class="btn btn-sec" style="padding:.5rem .75rem">🌙</button>
+        <button id="logoutBtnUser" class="btn btn-sec" style="padding:.5rem .75rem">Sair</button>
+      </div>
+    </header>
+
+    <aside class="app-aside">
+      <div class="panel" style="padding:1rem">
+        <div class="section-title" style="margin-bottom:.75rem">📁 Obras</div>
+        <div id="obrasBox"></div>
+        <button id="addObraBtn" class="btn btn-primary" style="width:100%;margin-top:.75rem">＋ Nova Obra</button>
+      </div>
+      <div class="panel" style="padding:1rem">
+        <div class="section-title">🏗️ Projeto</div>
+        <div style="display:flex;flex-direction:column;gap:.6rem;margin-top:.5rem">
+          <div class="form-group"><label>Nome do projeto</label><input id="projName" class="form-control" placeholder="Nome da obra"/></div>
+          <div class="form-group"><label>Contratada</label><input id="projContratada" class="form-control" placeholder="Empresa executora"/></div>
+          <div class="form-group"><label>Medição atual</label><input id="projScope" class="form-control" readonly style="background:var(--bg)"/></div>
+        </div>
+      </div>
+      <div class="panel" style="padding:1rem">
+        <div class="section-title">🔧 Ações</div>
+        <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.5rem">
+          <button id="loadFile" class="btn btn-sec" style="width:100%">📂 Importar Excel / JSON</button>
+          <button id="exportCsv" class="btn btn-sec" style="width:100%">⬇️ Exportar CSV</button>
+          <button id="saveJson" class="btn btn-sec" style="width:100%">💾 Salvar JSON</button>
+          <button id="fillSample" class="btn btn-danger" style="width:100%">🗑 Limpar itens</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="app-main">
+      <div class="stats-grid" id="stats"></div>
+
+      <div class="panel" style="margin-bottom:1.25rem">
+        <h3 style="margin-bottom:1rem">Curva S — Progresso Físico</h3>
+        <div class="chart-scroll-wrap" id="sCurveScrollWrap">
+          <div class="chart-container"><canvas id="sCurveChart"></canvas></div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:1.25rem">
+        <h3 style="margin-bottom:1rem">➕ Nova atividade</h3>
+        <div class="add-form-grid">
+          <div class="form-group"><label>Item</label><input id="fItem" class="form-control" placeholder="ex: 1"/></div>
+          <div class="form-group" style="grid-column:span 2"><label>Descrição</label><input id="fName" class="form-control" placeholder="Descrição do serviço"/></div>
+          <div class="form-group"><label>Valor Contrato</label><input id="fValorContrato" class="form-control" placeholder="0,00"/></div>
+          <div class="form-group"><label>Medição</label><input id="fMedicao" class="form-control" placeholder="0,00"/></div>
+          <div class="form-group"><label>Acumulado</label><input id="fAcumulado" class="form-control" placeholder="0,00"/></div>
+          <div class="form-group"><label>Saldo</label><input id="fSaldo" class="form-control" readonly style="background:var(--bg)"/></div>
+          <div class="form-group"><label>% Exec.</label><input id="fPct" class="form-control" readonly style="background:var(--bg)"/></div>
+          <div class="form-group" style="justify-content:flex-end"><button id="addRow" class="btn btn-primary" style="width:100%">Adicionar</button></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3 style="margin-bottom:1rem">📋 Índice de Itens</h3>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Descrição</th>
+                <th style="text-align:right">Valor Contrato</th>
+                <th style="text-align:right">Medição</th>
+                <th style="text-align:right">Acumulado</th>
+                <th style="text-align:right">Saldo</th>
+                <th style="text-align:right">% Exec.</th>
+                <th style="text-align:right">Ação</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+  <button id="btnTopo" class="btn btn-primary btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
+</div>
+
+<!-- ══════════════════════════════════════ ADMIN ══════════════════════════════════════ -->
+<div id="adminView" style="display:none">
+  <div class="app-shell">
+    <header class="app-topbar">
+      <div class="brand">
+        <svg width="36" height="36" viewBox="0 0 48 48" fill="none">
+          <rect width="48" height="48" rx="10" fill="#4f46e5"/>
+          <path d="M14 34V18l10-6 10 6v16" stroke="#fff" stroke-width="2.5" stroke-linejoin="round" fill="none"/>
+          <rect x="20" y="24" width="8" height="10" rx="1.5" fill="#fff"/>
+        </svg>
+        <div class="brand-text"><h1>Cronograma PRO</h1><p>Painel Administrativo</p></div>
+      </div>
+      <div class="header-actions">
+        <button id="adminToggleColab" class="btn btn-sec">👥 Colaboradores</button>
+        <button id="toggleTheme" class="btn btn-sec" style="padding:.5rem .75rem;display:none">🌙</button>
+        <button id="logoutBtnAdmin" class="btn btn-sec" style="padding:.5rem .75rem">Sair</button>
+      </div>
+    </header>
+
+    <aside class="app-aside">
+      <div class="section-title" style="padding:.25rem .5rem">👥 Colaboradores</div>
+      <div id="adminColabSidebar"></div>
+    </aside>
+
+    <main class="app-main">
+      <div class="stats-grid" id="adminStats" style="margin-bottom:1.5rem"></div>
+
+      <div id="adminDetailPanel">
+        <p style="color:var(--text-muted);padding:1rem">Selecione um colaborador ao lado.</p>
+      </div>
+
+      <!-- Painel de gerenciamento de colaboradores -->
+      <div id="adminColabPanel" style="display:none;margin-top:1.5rem">
+        <div class="panel">
+          <h3 style="margin-bottom:1.25rem">Cadastrar novo colaborador</h3>
+          <form id="addColabForm" style="display:flex;flex-direction:column;gap:.875rem;max-width:400px">
+            <div class="form-group"><label>Nome</label><input id="colabNome" class="form-control" placeholder="Nome completo" required/></div>
+            <div class="form-group"><label>E-mail</label><input id="colabEmail" class="form-control" type="email" placeholder="email@exemplo.com" required/></div>
+            <div class="form-group"><label>Senha inicial</label><input id="colabSenha" class="form-control" type="password" placeholder="Mínimo 6 caracteres" required minlength="6"/></div>
+            <div id="colabMsgError" style="display:none;color:var(--danger);font-size:.8rem;background:rgba(239,68,68,.08);padding:.5rem .75rem;border-radius:var(--radius-sm)"></div>
+            <button id="addColabBtn" type="submit" class="btn btn-primary" style="align-self:flex-start">Cadastrar colaborador</button>
+          </form>
+        </div>
+
+        <div class="panel" style="margin-top:1.25rem">
+          <h3 style="margin-bottom:1rem">Colaboradores cadastrados</h3>
+          <div id="colabList" style="display:flex;flex-direction:column;gap:.5rem"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+</body>
+</html>
