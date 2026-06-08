@@ -6,8 +6,8 @@
   <title>Cronograma PRO</title>
   <link rel="preconnect" href="https://api.fontshare.com">
   <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
@@ -58,50 +58,6 @@
     function showView(name){
       ['loginView','appView','adminView'].forEach(v=>$(v).style.display='none');
       $(name).style.display = name==='loginView' ? 'flex' : 'block';
-    }
-
-    onAuthStateChanged(auth, async user => {
-      currentUser = user;
-      if(!user){ showView('loginView'); return; }
-      const snap = await getDoc(doc(db,'users',user.uid));
-      const data = snap.exists() ? snap.data() : {};
-      isAdmin = data.role === 'admin';
-      if(isAdmin){ initAdminView(); }
-      else        { initUserView(); }
-    });
-
-    $('loginForm').addEventListener('submit', async e => {
-      e.preventDefault();
-      const email = $('loginEmail').value.trim();
-      const senha = $('loginSenha').value;
-      const btn = $('loginBtn'); btn.disabled=true; btn.textContent='Entrando...';
-      $('loginError').style.display='none';
-      try{
-        await signInWithEmailAndPassword(auth, email, senha);
-      } catch(err){
-        $('loginError').textContent = 'E-mail ou senha inválidos.';
-        $('loginError').style.display='block';
-      } finally{ btn.disabled=false; btn.textContent='Entrar'; }
-    });
-
-    $('logoutBtnAdmin').addEventListener('click', () => { cleanupListeners(); signOut(auth); });
-    $('logoutBtnUser' ).addEventListener('click', () => { cleanupListeners(); signOut(auth); });
-
-    function cleanupListeners(){
-      if(unsubObras) unsubObras();
-      if(unsubAllObras) unsubAllObras();
-      Object.values(adminUnsubMap).forEach(fn=>fn());
-      adminUnsubMap={}; allUsersData={};
-      adminSelectedUid=null; adminSelectedObraId=null;
-      colabFormReady=false;
-    }
-
-    async function findDisabledDocByEmail(email){
-      const q = query(collection(db,'users'), where('email','==',email), where('disabled','==',true));
-      const snap = await getDocs(q);
-      if(snap.empty) return null;
-      const d = snap.docs[0];
-      return { uid: d.id, ...d.data() };
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -178,7 +134,8 @@
         colabFormReady = true;
         setupAdminColabForm();
       }
-      $('adminToggleColab').onclick = ()=>{
+      const togColab = $('adminToggleColab');
+      if(togColab) togColab.onclick = ()=>{
         const p=$('adminColabPanel');
         p.style.display=p.style.display==='none'?'block':'none';
       };
@@ -323,9 +280,7 @@
             <td style="text-align:right">${fmtMoney(r.medicao)}</td>
             <td style="text-align:right">${fmtMoney(r.acumulado)}</td>
             <td style="text-align:right">${fmtMoney(r.saldo)}</td>
-            <td style="text-align:right;font-weight:700;color:${Number(r.percentualExecutado)>=99.5?'var(--success)':'var(--text)'}">
-              ${Number(r.percentualExecutado||0).toFixed(2)}%
-            </td>
+            <td style="text-align:right;font-weight:700;color:${Number(r.percentualExecutado)>=99.5?'var(--success)':'var(--text)'}">${Number(r.percentualExecutado||0).toFixed(2)}%</td>
           </tr>`).join('')}</tbody>
           </table>
         </div>
@@ -358,6 +313,7 @@
     }
 
     function renderAdminStats(){
+      const el = $('adminStats'); if(!el) return;
       let tot=0, tit=0, tvc=0, tac=0;
       Object.values(allUsersData).forEach(u=>{
         if(u.role==='admin') return;
@@ -370,7 +326,7 @@
         });
       });
       const pg = tvc > 0 ? (tac/tvc*100).toFixed(2) : 0;
-      $('adminStats').innerHTML=`
+      el.innerHTML=`
         <div class="stat-card"><span class="stat-label">Total de Obras</span><span class="stat-value">${tot}</span></div>
         <div class="stat-card"><span class="stat-label">Total de Itens</span><span class="stat-value">${tit}</span></div>
         <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pg}%</span></div>
@@ -427,7 +383,8 @@
     };
 
     function setupAdminColabForm(){
-      $('addColabForm').addEventListener('submit', async e=>{
+      const form = $('addColabForm'); if(!form) return;
+      form.addEventListener('submit', async e=>{
         e.preventDefault();
         const nome  = $('colabNome').value.trim();
         const email = $('colabEmail').value.trim();
@@ -541,7 +498,8 @@
     }
 
     function renderTable(){
-      $('tbody').innerHTML=rows.map((r,i)=>`<tr data-i="${i}">
+      const tbody = $('tbody'); if(!tbody) return;
+      tbody.innerHTML=rows.map((r,i)=>`<tr data-i="${i}">
         <td contenteditable="true" data-k="item">${esc(r.item)}</td>
         <td contenteditable="true" data-k="descricao" class="td-desc">${esc(r.descricao)}</td>
         <td contenteditable="true" data-k="valorContrato" style="text-align:right">${fmtMoney(r.valorContrato)}</td>
@@ -554,11 +512,12 @@
     }
 
     function updateDashboard(){
+      const statsEl = $('stats'); if(!statsEl) return;
       const o = currentObra();
       const vcAditivo = Number(o?.resumo?.valorContratoAditivo) || rows.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
       const acumTotal = Number(o?.resumo?.acumuladoTotal)       || rows.reduce((a,r)=>a+(Number(r.acumulado)||0),0);
       const pct = calcPctGeral(o?.resumo, rows);
-      $('stats').innerHTML=`
+      statsEl.innerHTML=`
         <div class="stat-card">
           <span class="stat-label">Valor CT / Aditivo</span>
           <span class="stat-value" style="font-size:1rem">${fmtMoney(vcAditivo)}</span>
@@ -575,15 +534,15 @@
           <span class="stat-label">Medição Atual</span>
           <span class="stat-value" style="font-size:1.2rem">${esc(o?.medicaoAtual||'-')}</span>
         </div>`;
-      $('countAll').textContent = fmtMoney(vcAditivo);
-      $('countDone').textContent = fmtMoney(acumTotal);
-      $('countPct').textContent  = pct.toFixed(2)+'%';
+      const ca=$('countAll'),cd=$('countDone'),cp=$('countPct');
+      if(ca) ca.textContent = fmtMoney(vcAditivo);
+      if(cd) cd.textContent = fmtMoney(acumTotal);
+      if(cp) cp.textContent = pct.toFixed(2)+'%';
       chartInstance = renderCurvaS('sCurveChart', 'sCurveScrollWrap', rows, chartInstance);
     }
 
     function renderAll(){renderObrasBox();renderTable();updateDashboard();}
 
-    // ── Nova Atividade: auto-calcula saldo e % ao digitar ──────────
     function setupNovaAtividade(){
       const recalc = () => {
         const vc  = parseMoney($('fValorContrato').value);
@@ -609,7 +568,6 @@
     function extractHeaderValues(data, dataStart){
       let valorContratoAditivo = 0;
       let acumuladoTotal = 0;
-      // Inclui até dataStart (exclusive) — os labels podem estar na linha logo antes dos dados
       const headerRows = data.slice(0, dataStart < 0 ? data.length : dataStart);
       for(let r=0; r<headerRows.length; r++){
         const row = headerRows[r] || [];
@@ -640,29 +598,16 @@
       return { valorContratoAditivo, acumuladoTotal };
     }
 
-    // ══════════════════════════════════════════════════════════════
-    // FALLBACK: busca NO PERIODO, ACUMULADO e SALDO varrendo TODAS
-    // as linhas até dataStart (inclusive a imediatamente anterior).
-    // Resolve o caso onde os labels ficam na linha logo antes do
-    // primeiro item (linha que pulou após cabeçalho mesclado/vazio).
-    // Prioriza ocorrências APÓS a coluna de Valor de Contrato
-    // para pegar valores em R$ e não quantidades.
-    // ══════════════════════════════════════════════════════════════
     function fallbackColsFromSubHeaders(data, dataStart, colsAtual){
       const cols = Object.assign({}, colsAtual);
       const RE_MED_FB   = /no.{0,10}period|periodo/;
       const RE_ACUM_FB  = /acumulado/;
       const RE_SALDO_FB = /^saldo$/;
-
-      // FIX: inclui a linha imediatamente antes de dataStart (dataStart inclusive)
-      // pois é exatamente onde ficam os sub-labels "NO PERIODO / ACUMULADO / SALDO"
       const scanEnd = dataStart < 0 ? data.length : dataStart + 1;
       const headerRows = data.slice(0, scanEnd);
-
       const medCandidates   = [];
       const acumCandidates  = [];
       const saldoCandidates = [];
-
       for(let r = 0; r < headerRows.length; r++){
         const row = headerRows[r] || [];
         for(let c = 0; c < row.length; c++){
@@ -673,9 +618,7 @@
           if(RE_SALDO_FB.test(t)) saldoCandidates.push(c);
         }
       }
-
       const vcRef = cols.vc >= 0 ? cols.vc : 0;
-
       function bestCandidate(candidates, currentCol){
         if(currentCol >= 0) return currentCol;
         if(!candidates.length) return -1;
@@ -683,11 +626,9 @@
         if(afterVc.length) return afterVc[0];
         return candidates[candidates.length - 1];
       }
-
       cols.med   = bestCandidate(medCandidates,   cols.med);
       cols.acum  = bestCandidate(acumCandidates,  cols.acum);
       cols.saldo = bestCandidate(saldoCandidates, cols.saldo);
-
       return cols;
     }
 
@@ -699,12 +640,6 @@
       if(!target)throw new Error('Nenhuma aba encontrada.');
       const ws=wb.Sheets[target];
       const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
-
-      // ── Regra principal ──
-      // Varre até encontrar a primeira linha que começa com número (dataStart).
-      // IMPORTANTE: os labels de sub-coluna (NO PERIODO / ACUMULADO / SALDO)
-      // podem estar na linha imediatamente ANTES de dataStart, por isso o
-      // fallback agora escaneia até dataStart inclusive (dataStart + 1).
       const RE={desc:/discrimina|descri|servico/,vc:/valor.{0,25}contrato|total.{0,25}contrato/,med:/no.{0,10}period|no.{0,10}mes|^medicao$|^realizado$|periodo/,acum:/acumulado/,saldo:/^saldo$/};
       let cols={desc:-1,vc:-1,med:-1,acum:-1,saldo:-1},dataStart=-1;
       for(let r=0;r<data.length;r++){
@@ -712,14 +647,10 @@
         if(/^\d+$/.test(String(row[0]??'').trim())){dataStart=r;break;}
         for(let c=0;c<row.length;c++){const t=norm(row[c]);if(!t)continue;if(RE.desc.test(t))cols.desc=c;if(RE.vc.test(t))cols.vc=c;if(RE.med.test(t))cols.med=c;if(RE.acum.test(t))cols.acum=c;if(RE.saldo.test(t))cols.saldo=c;}
       }
-
-      // ── Fallback: ativa se med OU acum OU saldo não foram encontrados ──
       if(cols.med < 0 || cols.acum < 0 || cols.saldo < 0){
         cols = fallbackColsFromSubHeaders(data, dataStart, cols);
       }
-
       if(cols.vc<0&&dataStart>=0){const fr=data[dataStart]||[];const nc=[];for(let c=1;c<fr.length;c++)if(isNum(fr[c]))nc.push(c);const vi=nc.findIndex(c=>Number(fr[c])>0);if(vi>=0){cols.vc=nc[vi];if(cols.med<0)cols.med=nc[vi+1]??cols.vc+1;if(cols.acum<0)cols.acum=nc[vi+2]??cols.vc+2;if(cols.saldo<0)cols.saldo=nc[vi+3]??cols.vc+3;}else{cols.vc=12;cols.med=13;cols.acum=14;cols.saldo=15;}}
-
       const items=[];
       for(let r=0;r<data.length;r++){
         const row=data[r]||[];const itemStr=String(row[0]??'').trim();if(!/^\d+$/.test(itemStr))continue;
@@ -772,52 +703,136 @@
     let saveTimeout=null;
     function scheduleSave(){clearTimeout(saveTimeout);saveTimeout=setTimeout(async()=>{const o=currentObra();if(o){o.itens=rows;await saveObraFirestore(o);}},1000);}
 
-    $('tbody').addEventListener('input',e=>{const t=e.target,tr=t.closest('tr');if(!tr)return;const i=+tr.dataset.i,k=t.dataset.k;if(k){if(['valorContrato','medicao','acumulado','saldo','percentualExecutado'].includes(k))rows[i][k]=Number(t.textContent.replace(',','.').replace(/[^\d.-]/g,''))||0;else rows[i][k]=t.textContent.trim();updateDashboard();scheduleSave();}});
-    $('tbody').addEventListener('focusout',e=>{const t=e.target,tr=t.closest('tr');if(!tr)return;const i=+tr.dataset.i,k=t.dataset.k;if(k&&['valorContrato','medicao','acumulado','saldo'].includes(k))t.textContent=fmtMoney(rows[i][k]);else if(k==='percentualExecutado')t.textContent=Number(rows[i][k]).toFixed(2);});
-    $('tbody').addEventListener('click',e=>{const b=e.target.closest('button[data-del]');if(!b)return;rows.splice(+b.dataset.del,1);const o=currentObra();if(o){o.itens=rows;saveObraFirestore(o);}renderAll();});
+    function cleanupListeners(){
+      if(unsubObras) unsubObras();
+      if(unsubAllObras) unsubAllObras();
+      Object.values(adminUnsubMap).forEach(fn=>fn());
+      adminUnsubMap={}; allUsersData={};
+      adminSelectedUid=null; adminSelectedObraId=null;
+      colabFormReady=false;
+    }
 
-    $('addRow').onclick=()=>{
-      const vc  = parseMoney($('fValorContrato').value);
-      const med = parseMoney($('fMedicao').value);
-      const acu = parseMoney($('fAcumulado').value);
-      const pctInput = parseFloat($('fPct').value) || (vc > 0 ? +(acu/vc*100).toFixed(2) : 0);
-      const saldo = parseMoney($('fSaldo').value) || (vc > 0 ? vc - acu : 0);
-      rows.push({
-        item: $('fItem').value.trim() || String(rows.length + 1),
-        descricao: $('fName').value.trim() || 'Nova atividade',
-        valorContrato: vc,
-        medicao: med,
-        acumulado: acu,
-        saldo: saldo,
-        percentualExecutado: pctInput
+    async function findDisabledDocByEmail(email){
+      const q = query(collection(db,'users'), where('email','==',email), where('disabled','==',true));
+      const snap = await getDocs(q);
+      if(snap.empty) return null;
+      const d = snap.docs[0];
+      return { uid: d.id, ...d.data() };
+    }
+
+    // ══ INICIALIZAÇÃO — aguarda DOM estar pronto ════════════════════
+    document.addEventListener('DOMContentLoaded', () => {
+
+      onAuthStateChanged(auth, async user => {
+        currentUser = user;
+        if(!user){ showView('loginView'); return; }
+        const snap = await getDoc(doc(db,'users',user.uid));
+        const data = snap.exists() ? snap.data() : {};
+        isAdmin = data.role === 'admin';
+        if(isAdmin){ initAdminView(); }
+        else        { initUserView(); }
       });
-      ['fItem','fName','fValorContrato','fMedicao','fAcumulado','fSaldo','fPct'].forEach(id=>{ const el=$(id); if(el) el.value=''; });
-      const o=currentObra();if(o){o.itens=rows;saveObraFirestore(o);}renderAll();
-    };
-    $('fillSample').onclick=()=>{rows=[];const o=currentObra();if(o){o.itens=[];saveObraFirestore(o);}renderAll();};
-    $('loadFile').onclick=()=>loadFromJsonOrExcel(false);
-    $('addObraBtn').onclick=()=>loadFromJsonOrExcel(false);
-    $('toggleTheme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';if(rows.length) chartInstance = renderCurvaS('sCurveChart','sCurveScrollWrap',rows,chartInstance);};
-    $('exportCsv').onclick=()=>{const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];const body=rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}"`).join(',')).join('\n');const blob=new Blob([fields.join(',')+'\\n'+body],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='cronograma.csv';a.click();URL.revokeObjectURL(a.href);};
-    $('saveJson').onclick=()=>{const o=currentObra();const name=($('projName').value.trim()||'projeto');const payload={obra:name,medicaoAtual:o?.medicaoAtual||'',resumo:o?.resumo||{},itens:rows};const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name+'.json';a.click();URL.revokeObjectURL(a.href);};
 
-    $('projName').addEventListener('change', async () => {
-      const o = currentObra(); if(!o) return;
-      o.nomeProjeto = $('projName').value.trim(); o.nome = o.nomeProjeto;
-      await saveObraFirestore(o); renderObrasBox();
-    });
-    $('projClient').addEventListener('change', async () => {
-      const o = currentObra(); if(!o) return;
-      o.cliente = $('projClient').value.trim();
-      await saveObraFirestore(o);
-    });
-    $('projScope').addEventListener('change', async () => {
-      const o = currentObra(); if(!o) return;
-      o.medicaoAtual = $('projScope').value.trim();
-      await saveObraFirestore(o);
+      const loginForm = $('loginForm');
+      if(loginForm) loginForm.addEventListener('submit', async e => {
+        e.preventDefault();
+        const email = $('loginEmail').value.trim();
+        const senha = $('loginSenha').value;
+        const btn = $('loginBtn'); btn.disabled=true; btn.textContent='Entrando...';
+        $('loginError').style.display='none';
+        try{
+          await signInWithEmailAndPassword(auth, email, senha);
+        } catch(err){
+          $('loginError').textContent = 'E-mail ou senha inválidos.';
+          $('loginError').style.display='block';
+        } finally{ btn.disabled=false; btn.textContent='Entrar'; }
+      });
+
+      const logoutAdmin = $('logoutBtnAdmin');
+      if(logoutAdmin) logoutAdmin.addEventListener('click', () => { cleanupListeners(); signOut(auth); });
+
+      const logoutUser = $('logoutBtnUser');
+      if(logoutUser) logoutUser.addEventListener('click', () => { cleanupListeners(); signOut(auth); });
+
+      const tbody = $('tbody');
+      if(tbody){
+        tbody.addEventListener('input',e=>{const t=e.target,tr=t.closest('tr');if(!tr)return;const i=+tr.dataset.i,k=t.dataset.k;if(k){if(['valorContrato','medicao','acumulado','saldo','percentualExecutado'].includes(k))rows[i][k]=Number(t.textContent.replace(',','.').replace(/[^\d.-]/g,''))||0;else rows[i][k]=t.textContent.trim();updateDashboard();scheduleSave();}});
+        tbody.addEventListener('focusout',e=>{const t=e.target,tr=t.closest('tr');if(!tr)return;const i=+tr.dataset.i,k=t.dataset.k;if(k&&['valorContrato','medicao','acumulado','saldo'].includes(k))t.textContent=fmtMoney(rows[i][k]);else if(k==='percentualExecutado')t.textContent=Number(rows[i][k]).toFixed(2);});
+        tbody.addEventListener('click',e=>{const b=e.target.closest('button[data-del]');if(!b)return;rows.splice(+b.dataset.del,1);const o=currentObra();if(o){o.itens=rows;saveObraFirestore(o);}renderAll();});
+      }
+
+      const addRow = $('addRow');
+      if(addRow) addRow.onclick=()=>{
+        const vc  = parseMoney($('fValorContrato').value);
+        const med = parseMoney($('fMedicao').value);
+        const acu = parseMoney($('fAcumulado').value);
+        const pctInput = parseFloat($('fPct').value) || (vc > 0 ? +(acu/vc*100).toFixed(2) : 0);
+        const saldo = parseMoney($('fSaldo').value) || (vc > 0 ? vc - acu : 0);
+        rows.push({
+          item: $('fItem').value.trim() || String(rows.length + 1),
+          descricao: $('fName').value.trim() || 'Nova atividade',
+          valorContrato: vc, medicao: med, acumulado: acu,
+          saldo: saldo, percentualExecutado: pctInput
+        });
+        ['fItem','fName','fValorContrato','fMedicao','fAcumulado','fSaldo','fPct'].forEach(id=>{ const el=$(id); if(el) el.value=''; });
+        const o=currentObra();if(o){o.itens=rows;saveObraFirestore(o);}renderAll();
+      };
+
+      const fillSample = $('fillSample');
+      if(fillSample) fillSample.onclick=()=>{rows=[];const o=currentObra();if(o){o.itens=[];saveObraFirestore(o);}renderAll();};
+
+      const loadFile = $('loadFile');
+      if(loadFile) loadFile.onclick=()=>loadFromJsonOrExcel(false);
+
+      const addObraBtn = $('addObraBtn');
+      if(addObraBtn) addObraBtn.onclick=()=>loadFromJsonOrExcel(false);
+
+      const toggleTheme = $('toggleTheme');
+      if(toggleTheme) toggleTheme.onclick=()=>{
+        document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';
+        if(rows.length) chartInstance = renderCurvaS('sCurveChart','sCurveScrollWrap',rows,chartInstance);
+      };
+
+      const exportCsv = $('exportCsv');
+      if(exportCsv) exportCsv.onclick=()=>{
+        const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];
+        const body=rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}`).join(',')).join('\n');
+        const blob=new Blob([fields.join(',')+'\n'+body],{type:'text/csv;charset=utf-8'});
+        const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='cronograma.csv';a.click();URL.revokeObjectURL(a.href);
+      };
+
+      const saveJson = $('saveJson');
+      if(saveJson) saveJson.onclick=()=>{
+        const o=currentObra();const name=($('projName').value.trim()||'projeto');
+        const payload={obra:name,medicaoAtual:o?.medicaoAtual||'',resumo:o?.resumo||{},itens:rows};
+        const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+        const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name+'.json';a.click();URL.revokeObjectURL(a.href);
+      };
+
+      const projName = $('projName');
+      if(projName) projName.addEventListener('change', async () => {
+        const o = currentObra(); if(!o) return;
+        o.nomeProjeto = $('projName').value.trim(); o.nome = o.nomeProjeto;
+        await saveObraFirestore(o); renderObrasBox();
+      });
+
+      const projClient = $('projClient');
+      if(projClient) projClient.addEventListener('change', async () => {
+        const o = currentObra(); if(!o) return;
+        o.cliente = $('projClient').value.trim();
+        await saveObraFirestore(o);
+      });
+
+      const projScope = $('projScope');
+      if(projScope) projScope.addEventListener('change', async () => {
+        const o = currentObra(); if(!o) return;
+        o.medicaoAtual = $('projScope').value.trim();
+        await saveObraFirestore(o);
+      });
+
+      setupNovaAtividade();
     });
 
-    setupNovaAtividade();
   </script>
   <style>
     :root{
