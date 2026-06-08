@@ -10,9 +10,10 @@
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, updatePassword } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
 import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, deleteDoc, getDocs, updateDoc, query, where } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
+/* ─── CONFIG ─── */
 const firebaseConfig = {
   apiKey: "AIzaSyBc7jh4dai3OZIriKdFxguI44A73TRKYTI",
   authDomain: "cronograma-pro-ray.firebaseapp.com",
@@ -21,326 +22,594 @@ const firebaseConfig = {
   messagingSenderId: "358433192984",
   appId: "1:358433192984:web:5af60313307f9bfadc176d"
 };
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
 const ADMIN_SENHA = "35343535";
 
-const $ = id => document.getElementById(id);
-const fmtMoney = v => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v)||0);
-const esc = s => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-const parseMoney = s => Number(String(s||'').replace(/[R$\s.]/g,'').replace(',','.')) || 0;
-const norm = v => String(v??'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
-const isNum = v => v!=='' && !isNaN(Number(v)) && isFinite(Number(v));
-const fileBaseName = n => String(n||'').replace(/\.[^.]+$/,'');
+/* ─── INIT ─── */
+const app  = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db   = getFirestore(app);
 
+/* ─── UTILS ─── */
+const $        = id => document.getElementById(id);
+const fmtMoney = v  => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v)||0);
+const esc      = s  => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const parseMoney = s => Number(String(s||'').replace(/[R$\s.]/g,'').replace(',','.')) || 0;
+const norm     = v  => String(v??'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+const isNum    = v  => v !== '' && !isNaN(Number(v)) && isFinite(Number(v));
+const baseName = n  => String(n||'').replace(/\.[^.]+$/,'');
+const money    = fmtMoney;
+const pct      = n  => `${Number(n||0).toFixed(2)}%`;
+
+/* ─── STATE ─── */
 const state = {
-  user: null,
-  admin: false,
-  obras: [],
-  selectedObraId: null,
-  rows: [],
-  allUsers: {},
-  adminSubs: {},
-  adminSelectedUid: null,
-  adminSelectedObraId: null,
-  unsubUserObras: null,
-  unsubAllUsers: null,
-  chartUser: null,
-  chartAdmin: null,
-  saveTimer: null,
-  colabFormReady: false
+  user: null, admin: false,
+  obras: [], selectedObraId: null, rows: [],
+  allUsers: {}, adminSubs: {},
+  adminSelectedUid: null, adminSelectedObraId: null,
+  unsubUserObras: null, unsubAllUsers: null,
+  chartUser: null, chartAdmin: null,
+  saveTimer: null, colabFormReady: false
 };
 
-function el(id){ return $(id); }
-function showView(name){ ['loginView','appView','adminView'].forEach(v=>el(v).style.display='none'); el(name).style.display = name==='loginView' ? 'flex' : 'block'; }
-function money(n){ return fmtMoney(n); }
-function pct(n){ return `${Number(n||0).toFixed(2)}%`; }
+/* ─── HELPERS ─── */
+function currentObra(){ return state.obras.find(o => o.id === state.selectedObraId); }
+function cleanup(){
+  if(state.unsubUserObras) state.unsubUserObras();
+  if(state.unsubAllUsers)  state.unsubAllUsers();
+  Object.values(state.adminSubs).forEach(fn => fn && fn());
+  state.adminSubs = {}; state.allUsers = {};
+  state.adminSelectedUid = null; state.adminSelectedObraId = null;
+}
+function showView(name){
+  ['loginView','appView','adminView'].forEach(v => $(v).style.display = 'none');
+  $(name).style.display = name === 'loginView' ? 'flex' : 'block';
+}
 function calcPctGeral(resumo, itens){
   const vca = Number(resumo?.valorContratoAditivo) || 0;
   const acu = Number(resumo?.acumuladoTotal) || 0;
-  if(vca > 0 && acu > 0) return +(acu / vca * 100).toFixed(2);
-  const tvc = (itens||[]).reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
-  const tac = (itens||[]).reduce((a,i)=>a+(Number(i.acumulado)||0),0);
-  return tvc > 0 ? +(tac / tvc * 100).toFixed(2) : 0;
+  if(vca > 0 && acu > 0) return +(acu/vca*100).toFixed(2);
+  const tv = (itens||[]).reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
+  const ta = (itens||[]).reduce((a,i)=>a+(Number(i.acumulado)||0),0);
+  return tv > 0 ? +(ta/tv*100).toFixed(2) : 0;
 }
-function currentObra(){ return state.obras.find(o => o.id === state.selectedObraId); }
-function setRows(rows){ state.rows = rows || []; }
-function cleanup(){
-  if(state.unsubUserObras) state.unsubUserObras();
-  if(state.unsubAllUsers) state.unsubAllUsers();
-  Object.values(state.adminSubs).forEach(fn => fn && fn());
-  state.adminSubs = {};
-  state.allUsers = {};
-  state.adminSelectedUid = null;
-  state.adminSelectedObraId = null;
+
+/* ─── FIRESTORE ─── */
+async function saveObra(obra){ await setDoc(doc(db,'users',state.user.uid,'obras',obra.id), obra); }
+async function deleteObra(id){ await deleteDoc(doc(db,'users',state.user.uid,'obras',id)); }
+function scheduleSave(){
+  clearTimeout(state.saveTimer);
+  state.saveTimer = setTimeout(async()=>{ const o=currentObra(); if(o){ o.itens=state.rows; await saveObra(o); } }, 1200);
 }
-function currencyFromRow(row, key){ return Number(row?.[key]) || 0; }
-function chartConfig(n){
-  const mobile = window.innerWidth <= 640;
-  const thickness = Math.max(mobile ? 8 : 18, Math.min(mobile ? 18 : 40, Math.floor((mobile ? Math.max(160, window.innerWidth - 48) : 600) / (n || 1))));
-  const minCanvasWidth = n > 0 ? Math.max(0, n * (thickness + 14)) : 0;
-  return { thickness, minCanvasWidth };
+
+/* ─── EXCEL READER (v4) ─── */
+function detectSheet(wb){
+  // Prefere BM/MED com maior número, senão última aba
+  const matches = wb.SheetNames.filter(n => /^(BM|MED)\s*\d+/i.test(n));
+  if(matches.length){
+    return matches.sort((a,b)=>{
+      const na = parseInt(a.match(/\d+/)?.[0]||0);
+      const nb = parseInt(b.match(/\d+/)?.[0]||0);
+      return na - nb;
+    }).at(-1);
+  }
+  return wb.SheetNames.at(-1);
+}
+
+function detectColumns(data){
+  const RE = {
+    desc:  /discrimina|descri[çc]|servico|servi[çc]/,
+    vc:    /valor.{0,30}contrato|total.{0,30}contrato|contrato.{0,30}valor/,
+    med:   /no\.?\s*per[ií]odo|no\.?\s*m[eê]s|^medic[aã]o$|^realizado$|per[ií]odo/,
+    acum:  /acumulado/,
+    saldo: /^saldo$/
+  };
+  let cols = {desc:-1, vc:-1, med:-1, acum:-1, saldo:-1};
+  for(const row of data){
+    for(let c=0; c<row.length; c++){
+      const t = norm(row[c]); if(!t) continue;
+      if(cols.desc  < 0 && RE.desc.test(t))  cols.desc  = c;
+      if(cols.vc    < 0 && RE.vc.test(t))    cols.vc    = c;
+      if(cols.med   < 0 && RE.med.test(t))   cols.med   = c;
+      if(cols.acum  < 0 && RE.acum.test(t))  cols.acum  = c;
+      if(cols.saldo < 0 && RE.saldo.test(t)) cols.saldo = c;
+    }
+    // Para quando encontrou tudo ou chegou na primeira linha de dados
+    if(cols.vc >= 0 && cols.acum >= 0) break;
+  }
+  return cols;
+}
+
+function fallbackColumns(firstDataRow, cols){
+  // Quando colunas numéricas não foram detectadas, infere pela posição
+  const nums = [];
+  for(let c=1; c<firstDataRow.length; c++) if(isNum(firstDataRow[c]) && Number(firstDataRow[c]) > 0) nums.push(c);
+  if(!nums.length) return cols;
+  if(cols.vc    < 0) cols.vc    = nums[0] ?? -1;
+  if(cols.med   < 0) cols.med   = nums[1] ?? -1;
+  if(cols.acum  < 0) cols.acum  = nums[2] ?? -1;
+  if(cols.saldo < 0) cols.saldo = nums[3] ?? -1;
+  return cols;
+}
+
+function extractResumoFromHeaders(data, firstDataRow){
+  // Busca Valor Contrato/Aditivo e Acumulado total nas linhas de cabeçalho
+  const RE_VCA  = /valor\s*(ct|contrato)\s*[\/\-]?\s*(ta|aditiv|reajust|atualiz)?/i;
+  const RE_ACUM = /^acumulado$/i;
+  let vca = 0, acu = 0;
+  const rows = firstDataRow < 0 ? data : data.slice(0, firstDataRow);
+  for(const row of rows){
+    for(let c=0; c<row.length; c++){
+      const cell = String(row[c]??'').trim();
+      if(!vca && RE_VCA.test(cell)){
+        for(let cc=c+1; cc<Math.min(c+12,row.length); cc++){
+          const v = Number(row[cc]); if(v > 5000){ vca = v; break; }
+        }
+      }
+      if(!acu && RE_ACUM.test(cell)){
+        for(let cc=c+1; cc<Math.min(c+6,row.length); cc++){
+          const v = Number(row[cc]); if(v > 0){ acu = v; break; }
+        }
+      }
+    }
+  }
+  return { valorContratoAditivo: vca, acumuladoTotal: acu };
+}
+
+async function readExcelFile(file){
+  const buffer = await file.arrayBuffer();
+  const wb = XLSX.read(new Uint8Array(buffer), { type:'array', cellDates:false, cellNF:false, cellText:false });
+  const sheetName = detectSheet(wb);
+  if(!sheetName) throw new Error('Nenhuma aba encontrada na planilha.');
+
+  const ws   = wb.Sheets[sheetName];
+  const data = XLSX.utils.sheet_to_json(ws, { header:1, defval:'', raw:true });
+  if(!data.length) throw new Error(`A aba "${sheetName}" está vazia.`);
+
+  // Encontra primeira linha de dados (começa com número inteiro na col 0)
+  let firstDataRowIdx = -1;
+  for(let r=0; r<data.length; r++){
+    if(/^\d+$/.test(String(data[r][0]??'').trim())){ firstDataRowIdx = r; break; }
+  }
+
+  // Detecta colunas nas linhas de cabeçalho
+  const headerData = firstDataRowIdx > 0 ? data.slice(0, firstDataRowIdx) : data.slice(0, Math.min(20, data.length));
+  let cols = detectColumns(headerData);
+
+  // Fallback: infere pelas primeiras colunas numéricas da primeira linha de dados
+  if(firstDataRowIdx >= 0 && (cols.vc < 0 || cols.acum < 0)){
+    cols = fallbackColumns(data[firstDataRowIdx] || [], cols);
+  }
+
+  // Extrai resumo do cabeçalho
+  const resumoHeader = extractResumoFromHeaders(data, firstDataRowIdx);
+
+  // Lê os itens
+  const items = [];
+  let warnings = [];
+  for(let r=0; r<data.length; r++){
+    const row = data[r] || [];
+    const itemStr = String(row[0]??'').trim();
+    if(!/^\d+$/.test(itemStr)) continue;
+
+    // Descrição: tenta coluna detectada, depois primeira célula de texto antes da coluna de valores
+    let descricao = '';
+    if(cols.desc >= 0) descricao = String(row[cols.desc]??'').trim();
+    if(!descricao){
+      const lim = cols.vc > 0 ? cols.vc : 10;
+      for(let c=1; c<lim; c++){
+        const v = String(row[c]??'').trim();
+        if(v && !isNum(row[c])){ descricao = v; break; }
+      }
+    }
+
+    const vc   = cols.vc    >= 0 ? (Number(row[cols.vc])    || 0) : 0;
+    const med  = cols.med   >= 0 ? (Number(row[cols.med])   || 0) : 0;
+    const acum = cols.acum  >= 0 ? (Number(row[cols.acum])  || 0) : 0;
+    let saldo  = cols.saldo >= 0 ? (Number(row[cols.saldo]) || 0) : 0;
+    if(!saldo && vc > 0) saldo = vc - acum;
+    const p = vc > 0 ? +(acum/vc*100).toFixed(2) : 0;
+
+    if(!descricao) warnings.push(`Item ${itemStr}: descrição não encontrada`);
+    if(!vc && !acum) warnings.push(`Item ${itemStr}: valores zerados — verifique a aba "${sheetName}"`);
+
+    items.push({
+      item: itemStr,
+      descricao,
+      valorContrato: +vc.toFixed(2),
+      medicao:       +med.toFixed(2),
+      acumulado:     +acum.toFixed(2),
+      saldo:         +saldo.toFixed(2),
+      percentualExecutado: p
+    });
+  }
+
+  if(!items.length){
+    throw new Error(
+      `Nenhum item numérico encontrado na aba "${sheetName}".\n` +
+      `Verifique se a coluna A contém números inteiros (1, 2, 3...) para cada item.`
+    );
+  }
+
+  const sumVC   = items.reduce((a,i)=>a+i.valorContrato,0);
+  const sumAcum = items.reduce((a,i)=>a+i.acumulado,0);
+  const vca     = resumoHeader.valorContratoAditivo || sumVC;
+  const acu     = resumoHeader.acumuladoTotal       || sumAcum;
+
+  return {
+    nome:        baseName(file.name),
+    nomeProjeto: wb.Props?.Title || baseName(file.name) || 'Nova obra',
+    medicaoAtual: sheetName,
+    itens:   items,
+    warnings,
+    resumo: {
+      total:     sumVC,
+      acumulado: sumAcum,
+      percentual: vca > 0 ? +(acu/vca*100).toFixed(2) : 0,
+      valorContratoAditivo: vca,
+      acumuladoTotal:       acu
+    }
+  };
+}
+
+function normalizeRows(list){
+  return Array.isArray(list) ? list.map(item=>({
+    item:       item?.item ?? '',
+    descricao:  item?.descricao ?? item?.descricaoServico ?? item?.name ?? '',
+    valorContrato:       Number(item?.valorContrato       ?? item?.valor_contrato       ?? 0) || 0,
+    medicao:             Number(item?.medicao             ?? 0) || 0,
+    acumulado:           Number(item?.acumulado           ?? 0) || 0,
+    saldo:               Number(item?.saldo               ?? 0) || 0,
+    percentualExecutado: Number(item?.percentualExecutado ?? item?.percentual_executado ?? 0) || 0
+  })) : [];
+}
+
+/* ─── FILE IMPORT ─── */
+async function importFile(replace = false){
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json,.xlsx,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  input.onchange = async e => {
+    if(!e.target.files.length) return;
+    const file = e.target.files[0];
+    const ext  = file.name.split('.').pop().toLowerCase();
+    try {
+      let obj, rows = [];
+      if(ext === 'xlsx'){
+        obj  = await readExcelFile(file);
+        rows = normalizeRows(obj.itens);
+        if(obj.warnings?.length){
+          const preview = obj.warnings.slice(0,5).join('\n');
+          const extra   = obj.warnings.length > 5 ? `\n...e mais ${obj.warnings.length-5} aviso(s).` : '';
+          console.warn('[Importação] Avisos:\n' + preview + extra);
+          // Só bloqueia se não tiver nenhum item válido
+        }
+      } else {
+        const text = await file.text();
+        obj  = JSON.parse(text);
+        rows = Array.isArray(obj) ? normalizeRows(obj) : normalizeRows(obj.itens);
+        if(!rows.length && !Array.isArray(obj) && !Array.isArray(obj.itens))
+          throw new Error('Formato JSON inválido. Esperado array ou objeto com campo "itens".');
+      }
+
+      const obraId   = replace && state.selectedObraId ? state.selectedObraId : ('obra_' + Date.now());
+      const obraNome = baseName(file.name) || obj.nome || 'Nova obra';
+      const obra = {
+        id: obraId,
+        nome:         obraNome,
+        nomeProjeto:  obj.nomeProjeto || obj.obra || obraNome,
+        cliente:      obj.cliente || '',
+        arquivoNome:  file.name,
+        origem:       ext,
+        medicaoAtual: obj.medicaoAtual || '',
+        itens:        rows,
+        resumo:       obj.resumo || { percentual: 0 }
+      };
+      await saveObra(obra);
+      state.selectedObraId = obraId;
+      showToast(`✅ ${rows.length} itens importados da aba "${obj.medicaoAtual || ext}"`);
+    } catch(err){
+      showToast('❌ ' + err.message, true);
+      console.error('[Importação]', err);
+    }
+  };
+  input.click();
+}
+
+/* ─── TOAST ─── */
+function showToast(msg, isError = false){
+  let t = $('toast');
+  if(!t){
+    t = document.createElement('div');
+    t.id = 'toast';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.className   = 'toast' + (isError ? ' toast-error' : '');
+  t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(()=>{ t.style.opacity='0'; }, isError ? 5000 : 3500);
+}
+
+/* ─── CHART ─── */
+function chartBarConfig(n){
+  const mobile    = window.innerWidth <= 640;
+  const thickness = Math.max(mobile?8:18, Math.min(mobile?18:40, Math.floor((mobile?Math.max(160,window.innerWidth-48):600)/(n||1))));
+  const minW      = n > 0 ? Math.max(0, n*(thickness+14)) : 0;
+  return { thickness, minW };
 }
 function renderCurvaS(canvasId, wrapId, itens, prev){
-  const canvas = el(canvasId);
-  if(!canvas) return prev;
+  const canvas = $(canvasId); if(!canvas) return prev;
   if(prev) prev.destroy();
-  const theme = document.documentElement.dataset.theme;
-  const gc = theme==='dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
-  const tc = theme==='dark' ? '#94a3b8' : '#64748b';
-  const { thickness, minCanvasWidth } = chartConfig(itens.length);
-  const wrap = el(wrapId);
+  const dark = document.documentElement.dataset.theme === 'dark';
+  const gc   = dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+  const tc   = dark ? '#94a3b8' : '#64748b';
+  const { thickness, minW } = chartBarConfig(itens.length);
+  const wrap = $(wrapId);
   if(wrap){
-    if(minCanvasWidth > wrap.offsetWidth){ wrap.style.overflowX='auto'; canvas.style.minWidth = minCanvasWidth + 'px'; }
+    if(minW > wrap.offsetWidth){ wrap.style.overflowX='auto'; canvas.style.minWidth=minW+'px'; }
     else { wrap.style.overflowX='hidden'; canvas.style.minWidth=''; }
   }
-  return new Chart(canvas.getContext('2d'), {
+  return new Chart(canvas.getContext('2d'),{
     type:'bar',
     data:{
-      labels: itens.map(r => String(r.item||'')),
-      datasets:[{ label:'% Executado', data: itens.map(r => Number(r.percentualExecutado)||0), backgroundColor:'rgba(99,102,241,0.2)', borderColor:'#6366f1', borderWidth:1, borderRadius:3, barThickness:thickness }]
+      labels: itens.map(r=>String(r.item||'')),
+      datasets:[{ label:'% Executado', data:itens.map(r=>Number(r.percentualExecutado)||0),
+        backgroundColor:'rgba(99,102,241,0.2)', borderColor:'#6366f1', borderWidth:1, borderRadius:3, barThickness:thickness }]
     },
-    options:{ responsive:true, maintainAspectRatio:false, categoryPercentage:0.8, barPercentage:0.85, scales:{ y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}}, x:{grid:{display:false},ticks:{color:tc,font:{size:window.innerWidth<=640?9:10},maxRotation:45,minRotation:0}} }, plugins:{legend:{labels:{color:tc}}} }
+    options:{ responsive:true, maintainAspectRatio:false,
+      scales:{ y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},
+               x:{grid:{display:false},ticks:{color:tc,font:{size:window.innerWidth<=640?9:10},maxRotation:45,minRotation:0}} },
+      plugins:{legend:{labels:{color:tc}}} }
   });
 }
+
+/* ─── RENDER: USER ─── */
+function applySelected(o){
+  state.rows = Array.isArray(o.itens) ? o.itens : [];
+  $('projName').value  = o.nomeProjeto || o.nome || 'Nova obra';
+  $('projClient').value = o.cliente || '';
+  $('projScope').value  = o.medicaoAtual || '';
+}
 function renderTable(){
-  const tbody = el('tbody'); if(!tbody) return;
-  tbody.innerHTML = state.rows.map((r,i)=>`<tr data-i="${i}"><td contenteditable="true" data-k="item">${esc(r.item)}</td><td contenteditable="true" data-k="descricao" class="td-desc">${esc(r.descricao)}</td><td contenteditable="true" data-k="valorContrato" style="text-align:right">${money(r.valorContrato)}</td><td contenteditable="true" data-k="medicao" style="text-align:right">${money(r.medicao)}</td><td contenteditable="true" data-k="acumulado" style="text-align:right">${money(r.acumulado)}</td><td contenteditable="true" data-k="saldo" style="text-align:right">${money(r.saldo)}</td><td contenteditable="true" data-k="percentualExecutado" style="text-align:right;font-weight:700">${Number(r.percentualExecutado||0).toFixed(2)}</td><td style="text-align:right"><button data-del="${i}" class="btn btn-danger" style="padding:.4rem;border-radius:6px">🗑</button></td></tr>`).join('');
+  const tbody = $('tbody'); if(!tbody) return;
+  tbody.innerHTML = state.rows.map((r,i)=>`
+    <tr data-i="${i}">
+      <td contenteditable="true" data-k="item">${esc(r.item)}</td>
+      <td contenteditable="true" data-k="descricao" class="td-desc">${esc(r.descricao)}</td>
+      <td contenteditable="true" data-k="valorContrato" style="text-align:right">${money(r.valorContrato)}</td>
+      <td contenteditable="true" data-k="medicao" style="text-align:right">${money(r.medicao)}</td>
+      <td contenteditable="true" data-k="acumulado" style="text-align:right">${money(r.acumulado)}</td>
+      <td contenteditable="true" data-k="saldo" style="text-align:right">${money(r.saldo)}</td>
+      <td contenteditable="true" data-k="percentualExecutado" style="text-align:right;font-weight:700">${Number(r.percentualExecutado||0).toFixed(2)}</td>
+      <td style="text-align:right"><button data-del="${i}" class="btn btn-danger" style="padding:.4rem;border-radius:6px">🗑</button></td>
+    </tr>`).join('');
 }
 function updateDashboard(){
-  const o = currentObra();
-  const vc = Number(o?.resumo?.valorContratoAditivo) || state.rows.reduce((a,r)=>a+currencyFromRow(r,'valorContrato'),0);
-  const ac = Number(o?.resumo?.acumuladoTotal) || state.rows.reduce((a,r)=>a+currencyFromRow(r,'acumulado'),0);
-  const p = calcPctGeral(o?.resumo, state.rows);
-  if(el('stats')) el('stats').innerHTML = `<div class="stat-card"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value" style="font-size:1rem">${money(vc)}</span></div><div class="stat-card"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="font-size:1rem;color:var(--success)">${money(ac)}</span></div><div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div><div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.2rem">${esc(o?.medicaoAtual||'-')}</span></div>`;
-  if(el('countAll')) el('countAll').textContent = money(vc);
-  if(el('countDone')) el('countDone').textContent = money(ac);
-  if(el('countPct')) el('countPct').textContent = pct(p);
+  const o   = currentObra();
+  const vc  = Number(o?.resumo?.valorContratoAditivo) || state.rows.reduce((a,r)=>a+Number(r.valorContrato||0),0);
+  const ac  = Number(o?.resumo?.acumuladoTotal)       || state.rows.reduce((a,r)=>a+Number(r.acumulado||0),0);
+  const p   = calcPctGeral(o?.resumo, state.rows);
+  if($('stats')) $('stats').innerHTML =
+    `<div class="stat-card"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value" style="font-size:1rem">${money(vc)}</span></div>
+     <div class="stat-card"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="font-size:1rem;color:var(--success)">${money(ac)}</span></div>
+     <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
+     <div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.2rem">${esc(o?.medicaoAtual||'-')}</span></div>`;
+  if($('countAll'))  $('countAll').textContent  = money(vc);
+  if($('countDone')) $('countDone').textContent = money(ac);
+  if($('countPct'))  $('countPct').textContent  = pct(p);
   state.chartUser = renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser);
 }
-function renderAll(){ renderObrasBox(); renderTable(); updateDashboard(); }
-function applySelected(o){ state.rows = Array.isArray(o.itens) ? o.itens : []; el('projName').value = o.nomeProjeto || o.nome || 'Nova obra'; el('projClient').value = o.cliente || ''; el('projScope').value = o.medicaoAtual || ''; }
-async function saveObraFirestore(obra){ await setDoc(doc(db,'users',state.user.uid,'obras',obra.id), obra); }
-async function deleteObraFirestore(id){ await deleteDoc(doc(db,'users',state.user.uid,'obras',id)); }
-function scheduleSave(){ clearTimeout(state.saveTimer); state.saveTimer = setTimeout(async()=>{ const o = currentObra(); if(o){ o.itens = state.rows; await saveObraFirestore(o); } }, 1000); }
 function renderObrasBox(){
-  const box = el('obrasBox'); if(!box) return;
-  box.innerHTML = `<div class="form-group" style="margin-bottom:0"><label>Selecionar obra</label><select id="obraSelect" class="form-control">${state.obras.map(o=>`<option value="${o.id}" ${o.id===state.selectedObraId?'selected':''}>${esc(o.nome||'Obra')}</option>`).join('')}</select></div><div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn btn-sec" id="openObraBtn">Abrir</button><button class="btn btn-sec" id="replaceObraBtn">Atualizar</button><button class="btn btn-danger" id="deleteObraBtn">Remover</button></div>`;
-  el('obraSelect').onchange = e => { state.selectedObraId = e.target.value; const o = currentObra(); if(o){ applySelected(o); renderAll(); } };
-  el('openObraBtn').onclick = () => { const o = currentObra(); if(o){ applySelected(o); renderAll(); } };
-  el('replaceObraBtn').onclick = () => loadFromJsonOrExcel(true);
-  el('deleteObraBtn').onclick = async() => { if(!state.selectedObraId || !confirm('Remover obra?')) return; await deleteObraFirestore(state.selectedObraId); state.selectedObraId = null; };
+  const box = $('obrasBox'); if(!box) return;
+  box.innerHTML =
+    `<div class="form-group" style="margin-bottom:0"><label>Selecionar obra</label>
+     <select id="obraSelect" class="form-control">
+       ${state.obras.map(o=>`<option value="${o.id}" ${o.id===state.selectedObraId?'selected':''}>${esc(o.nome||'Obra')}</option>`).join('')}
+     </select></div>
+     <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+       <button class="btn btn-sec" id="openObraBtn">Abrir</button>
+       <button class="btn btn-sec" id="replaceObraBtn">Atualizar</button>
+       <button class="btn btn-danger" id="deleteObraBtn">Remover</button>
+     </div>`;
+  $('obraSelect').onchange   = e => { state.selectedObraId=e.target.value; const o=currentObra(); if(o){ applySelected(o); renderAll(); } };
+  $('openObraBtn').onclick   = ()=>{ const o=currentObra(); if(o){ applySelected(o); renderAll(); } };
+  $('replaceObraBtn').onclick = ()=>importFile(true);
+  $('deleteObraBtn').onclick  = async()=>{
+    if(!state.selectedObraId || !confirm('Remover obra?')) return;
+    await deleteObra(state.selectedObraId); state.selectedObraId=null;
+  };
 }
+function renderAll(){ renderObrasBox(); renderTable(); updateDashboard(); }
+
+/* ─── RENDER: ADMIN ─── */
 function renderAdminStats(){
   let tot=0,tit=0,tvc=0,tac=0;
-  Object.values(state.allUsers).forEach(u=>{ if(u.role==='admin') return; (u.obras||[]).forEach(o=>{ tot++; const it=Array.isArray(o.itens)?o.itens:[]; tit += it.length; tvc += Number(o.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0); tac += Number(o.resumo?.acumuladoTotal)||it.reduce((a,i)=>a+Number(i.acumulado||0),0); }); });
-  const p = tvc > 0 ? +(tac/tvc*100).toFixed(2) : 0;
-  if(el('adminStats')) el('adminStats').innerHTML = `<div class="stat-card"><span class="stat-label">Total de Obras</span><span class="stat-value">${tot}</span></div><div class="stat-card"><span class="stat-label">Total de Itens</span><span class="stat-value">${tit}</span></div><div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div><div class="stat-card"><span class="stat-label">Acumulado Geral</span><span class="stat-value" style="font-size:1.1rem">${money(tac)}</span></div>`;
+  Object.values(state.allUsers).forEach(u=>{
+    if(u.role==='admin') return;
+    (u.obras||[]).forEach(o=>{
+      tot++; const it=Array.isArray(o.itens)?o.itens:[];
+      tit += it.length;
+      tvc += Number(o.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
+      tac += Number(o.resumo?.acumuladoTotal)       || it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+    });
+  });
+  const p = tvc>0 ? +(tac/tvc*100).toFixed(2) : 0;
+  if($('adminStats')) $('adminStats').innerHTML =
+    `<div class="stat-card"><span class="stat-label">Total de Obras</span><span class="stat-value">${tot}</span></div>
+     <div class="stat-card"><span class="stat-label">Total de Itens</span><span class="stat-value">${tit}</span></div>
+     <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
+     <div class="stat-card"><span class="stat-label">Acumulado Geral</span><span class="stat-value" style="font-size:1.1rem">${money(tac)}</span></div>`;
 }
 function renderColabList(){
-  const box = el('colabList'); if(!box) return;
+  const box = $('colabList'); if(!box) return;
   const colabs = Object.entries(state.allUsers).filter(([,u])=>u.role!=='admin');
   if(!colabs.length){ box.innerHTML='<p style="color:var(--text-muted);font-size:.875rem">Nenhum colaborador cadastrado.</p>'; return; }
-  box.innerHTML = colabs.map(([uid,u])=>`<div class="colab-item" style="${u.blocked?'opacity:.7':''}"><div><strong>${esc(u.nome)}</strong>${u.blocked?'<span style="margin-left:.5rem;font-size:.7rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.1rem .4rem;border-radius:999px">🔒 Bloqueado</span>':''}<br><small style="color:var(--text-muted)">${esc(u.email)}</small></div><div style="display:flex;gap:.4rem;flex-wrap:wrap"><button class="btn ${u.blocked?'btn-success':'btn-warning'}" style="padding:.3rem .65rem;font-size:.72rem" onclick="toggleBloqueio('${uid}',${u.blocked})">${u.blocked?'✅ Desbloquear':'🔒 Bloquear'}</button><button class="btn btn-danger" style="padding:.3rem .65rem;font-size:.72rem" onclick="removeColab('${uid}')">Remover</button></div></div>`).join('');
+  box.innerHTML = colabs.map(([uid,u])=>
+    `<div class="colab-item" style="${u.blocked?'opacity:.7':''}">
+       <div><strong>${esc(u.nome)}</strong>
+         ${u.blocked?'<span style="margin-left:.5rem;font-size:.7rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.1rem .4rem;border-radius:999px">🔒 Bloqueado</span>':''}
+         <br><small style="color:var(--text-muted)">${esc(u.email)}</small>
+       </div>
+       <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+         <button class="btn ${u.blocked?'btn-success':'btn-warning'}" style="padding:.3rem .65rem;font-size:.72rem" onclick="toggleBloqueio('${uid}',${u.blocked})">${u.blocked?'✅ Desbloquear':'🔒 Bloquear'}</button>
+         <button class="btn btn-danger" style="padding:.3rem .65rem;font-size:.72rem" onclick="removeColab('${uid}')">Remover</button>
+       </div>
+     </div>`).join('');
 }
 function renderAdminSidebar(){
-  const box = el('adminColabSidebar'); if(!box) return;
+  const box = $('adminColabSidebar'); if(!box) return;
   const colabs = Object.entries(state.allUsers).filter(([,u])=>u.role!=='admin');
   if(!colabs.length){ box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem">Nenhum colaborador ainda.</p>'; return; }
   if(state.adminSelectedUid && state.allUsers[state.adminSelectedUid]){
     const u = state.allUsers[state.adminSelectedUid];
     const n = (u.obras||[]).length;
-    box.innerHTML = `<button class="btn btn-sec" onclick="adminDeselectColab()" style="width:100%;margin-bottom:.75rem;font-size:.8rem;justify-content:flex-start;gap:.4rem">← Todos</button><div class="colab-sidebar-item active"><div style="font-weight:600;font-size:.875rem">${u.blocked?'🔒 ':''}${esc(u.nome)}</div><div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n!==1?'s':''}</div></div>`;
+    box.innerHTML =
+      `<button class="btn btn-sec" onclick="adminDeselectColab()" style="width:100%;margin-bottom:.75rem;font-size:.8rem">← Todos</button>
+       <div class="colab-sidebar-item active">
+         <div style="font-weight:600;font-size:.875rem">${u.blocked?'🔒 ':''}${esc(u.nome)}</div>
+         <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n!==1?'s':''}</div>
+       </div>`;
     return;
   }
-  box.innerHTML = colabs.map(([uid,u])=>`<div class="colab-sidebar-item" style="${u.blocked?'opacity:.55':''}" onclick="adminSelectColab('${uid}')"><div style="font-weight:600;font-size:.875rem">${u.blocked?'🔒 ':''}${esc(u.nome)}</div><div style="font-size:.75rem;color:var(--text-muted)">${(u.obras||[]).length} obra${(u.obras||[]).length!==1?'s':''}</div></div>`).join('');
+  box.innerHTML = colabs.map(([uid,u])=>
+    `<div class="colab-sidebar-item" style="${u.blocked?'opacity:.55':''}" onclick="adminSelectColab('${uid}')">
+       <div style="font-weight:600;font-size:.875rem">${u.blocked?'🔒 ':''}${esc(u.nome)}</div>
+       <div style="font-size:.75rem;color:var(--text-muted)">${(u.obras||[]).length} obra${(u.obras||[]).length!==1?'s':''}</div>
+     </div>`).join('');
 }
 function adminObraCardHTML(obra){
-  const it = Array.isArray(obra.itens) ? obra.itens : [];
-  const vc = Number(obra.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
-  const ac = Number(obra.resumo?.acumuladoTotal) || it.reduce((a,i)=>a+Number(i.acumulado||0),0);
-  const p = calcPctGeral(obra.resumo, it);
-  return `<div class="obra-card" style="cursor:pointer" onclick="adminSelectObra('${obra.id}')"><div class="obra-card-header"><div><div class="obra-card-title">${esc(obra.nome||'Sem nome')}</div><div class="obra-card-sub">${it.length} itens &nbsp;|&nbsp; Aba: ${esc(obra.medicaoAtual||'-')}</div></div><div class="obra-card-pct">${pct(p)}</div></div><div class="obra-progress-bar"><div class="obra-progress-fill" style="width:${Math.min(100,p)}%"></div></div><div class="obra-card-footer"><span>CT/Aditivo: ${money(vc)}</span><span>Acumulado: ${money(ac)}</span><span>Saldo: ${money(vc-ac)}</span></div></div>`;
+  const it  = Array.isArray(obra.itens) ? obra.itens : [];
+  const vc  = Number(obra.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
+  const ac  = Number(obra.resumo?.acumuladoTotal)       || it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+  const p   = calcPctGeral(obra.resumo, it);
+  return `<div class="obra-card" style="cursor:pointer" onclick="adminSelectObra('${obra.id}')">
+    <div class="obra-card-header">
+      <div><div class="obra-card-title">${esc(obra.nome||'Sem nome')}</div>
+      <div class="obra-card-sub">${it.length} itens &nbsp;|&nbsp; Aba: ${esc(obra.medicaoAtual||'-')}</div></div>
+      <div class="obra-card-pct">${pct(p)}</div>
+    </div>
+    <div class="obra-progress-bar"><div class="obra-progress-fill" style="width:${Math.min(100,p)}%"></div></div>
+    <div class="obra-card-footer">
+      <span>CT/Aditivo: ${money(vc)}</span><span>Acumulado: ${money(ac)}</span><span>Saldo: ${money(vc-ac)}</span>
+    </div></div>`;
 }
 function renderAdminDetail(){
-  const panel = el('adminDetailPanel'); if(!panel) return;
+  const panel = $('adminDetailPanel'); if(!panel) return;
   if(!state.adminSelectedUid){ panel.innerHTML='<p style="color:var(--text-muted);padding:1rem">Selecione um colaborador ao lado para ver as obras.</p>'; return; }
   const u = state.allUsers[state.adminSelectedUid];
   if(!u){ panel.innerHTML=''; return; }
   const obrasList = u.obras || [];
-  let html = `<div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem"><div style="font-weight:700;font-size:1.1rem">👤 ${esc(u.nome)}${u.blocked?' <span style="font-size:.75rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.2rem .6rem;border-radius:999px;font-weight:600">🔒 Bloqueado</span>':''}</div><div class="form-group" style="margin:0;min-width:220px"><select id="adminObraSelect" class="form-control" onchange="adminSelectObra(this.value)"><option value="">-- Selecione uma obra --</option>${obrasList.map(o=>`<option value="${o.id}" ${o.id===state.adminSelectedObraId?'selected':''}>${esc(o.nome||'Obra')}</option>`).join('')}</select></div></div>`;
-  if(!state.adminSelectedObraId || !obrasList.length){ panel.innerHTML = html + (obrasList.length ? obrasList.map(adminObraCardHTML).join('') : '<p style="color:var(--text-muted)">Este colaborador não tem obras cadastradas.</p>'); return; }
+  let html = `<div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
+    <div style="font-weight:700;font-size:1.1rem">👤 ${esc(u.nome)}${u.blocked?' <span style="font-size:.75rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.2rem .6rem;border-radius:999px">🔒 Bloqueado</span>':''}</div>
+    <div class="form-group" style="margin:0;min-width:220px">
+      <select id="adminObraSelect" class="form-control" onchange="adminSelectObra(this.value)">
+        <option value="">-- Selecione uma obra --</option>
+        ${obrasList.map(o=>`<option value="${o.id}" ${o.id===state.adminSelectedObraId?'selected':''}>${esc(o.nome||'Obra')}</option>`).join('')}
+      </select>
+    </div></div>`;
+  if(!state.adminSelectedObraId || !obrasList.length){
+    panel.innerHTML = html + (obrasList.length ? obrasList.map(adminObraCardHTML).join('') : '<p style="color:var(--text-muted)">Este colaborador não tem obras cadastradas.</p>');
+    return;
+  }
   const obra = obrasList.find(o=>o.id===state.adminSelectedObraId);
   if(!obra){ panel.innerHTML = html + '<p style="color:var(--text-muted)">Obra não encontrada.</p>'; return; }
-  const it = Array.isArray(obra.itens) ? obra.itens : [];
-  const vc = Number(obra.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
-  const ac = Number(obra.resumo?.acumuladoTotal) || it.reduce((a,i)=>a+Number(i.acumulado||0),0);
-  const p = calcPctGeral(obra.resumo, it);
-  const totalAcum = it.reduce((a,i)=>a+Number(i.acumulado||0),0);
-  const totalMed = it.reduce((a,i)=>a+Number(i.medicao||0),0);
-  html += `<div class="admin-stats-grid"><div class="stat-card compact"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value">${money(vc)}</span></div><div class="stat-card compact"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="color:var(--success)">${money(ac)}</span></div><div class="stat-card compact"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div><div class="stat-card compact"><span class="stat-label">Medição Atual</span><span class="stat-value">${esc(obra.medicaoAtual||'-')}</span></div><div class="stat-card compact"><span class="stat-label">Acumulado (itens)</span><span class="stat-value">${money(totalAcum)}</span></div><div class="stat-card compact"><span class="stat-label">Medição</span><span class="stat-value">${money(totalMed)}</span></div><div class="stat-card compact"><span class="stat-label">Saldo</span><span class="stat-value">${money(vc-ac)}</span></div></div><div class="panel" style="margin-bottom:1.5rem"><h3 style="margin-bottom:1rem">Curva S — Progresso Físico</h3><div class="chart-scroll-wrap" id="adminCurvaSwrap"><div class="chart-container"><canvas id="adminCurvaS"></canvas></div></div></div><div class="panel"><h3 style="margin-bottom:1rem">Índice de Itens</h3><div class="table-container"><table><thead><tr><th class="th-sticky">Item</th><th class="th-sticky">Descrição</th><th class="th-sticky" style="text-align:right">Valor Contrato</th><th class="th-sticky" style="text-align:right">Medição</th><th class="th-sticky" style="text-align:right">Acumulado</th><th class="th-sticky" style="text-align:right">Saldo</th><th class="th-sticky" style="text-align:right">% Exec.</th></tr></thead><tbody>${it.map(r=>`<tr><td>${esc(r.item)}</td><td class="td-desc">${esc(r.descricao)}</td><td style="text-align:right">${money(r.valorContrato)}</td><td style="text-align:right">${money(r.medicao)}</td><td style="text-align:right">${money(r.acumulado)}</td><td style="text-align:right">${money(r.saldo)}</td><td style="text-align:right;font-weight:700;color:${Number(r.percentualExecutado)>=99.5?'var(--success)':'var(--text)'}">${Number(r.percentualExecutado||0).toFixed(2)}%</td></tr>`).join('')}</tbody></table></div></div>`;
+  const it   = Array.isArray(obra.itens) ? obra.itens : [];
+  const vc   = Number(obra.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
+  const ac   = Number(obra.resumo?.acumuladoTotal)       || it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+  const p    = calcPctGeral(obra.resumo, it);
+  const tAcu = it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+  const tMed = it.reduce((a,i)=>a+Number(i.medicao||0),0);
+  html +=
+    `<div class="admin-stats-grid">
+       <div class="stat-card compact"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value">${money(vc)}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="color:var(--success)">${money(ac)}</span></div>
+       <div class="stat-card compact"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Medição Atual</span><span class="stat-value">${esc(obra.medicaoAtual||'-')}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Acumulado (itens)</span><span class="stat-value">${money(tAcu)}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Medição</span><span class="stat-value">${money(tMed)}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Saldo</span><span class="stat-value">${money(vc-ac)}</span></div>
+     </div>
+     <div class="panel" style="margin-bottom:1.5rem">
+       <h3 style="margin-bottom:1rem">Curva S — Progresso Físico</h3>
+       <div class="chart-scroll-wrap" id="adminCurvaSwrap"><div class="chart-container"><canvas id="adminCurvaS"></canvas></div></div>
+     </div>
+     <div class="panel">
+       <h3 style="margin-bottom:1rem">Índice de Itens</h3>
+       <div class="table-container"><table>
+         <thead><tr>
+           <th class="th-sticky">Item</th><th class="th-sticky">Descrição</th>
+           <th class="th-sticky" style="text-align:right">Valor Contrato</th>
+           <th class="th-sticky" style="text-align:right">Medição</th>
+           <th class="th-sticky" style="text-align:right">Acumulado</th>
+           <th class="th-sticky" style="text-align:right">Saldo</th>
+           <th class="th-sticky" style="text-align:right">% Exec.</th>
+         </tr></thead>
+         <tbody>${it.map(r=>`<tr>
+           <td>${esc(r.item)}</td><td class="td-desc">${esc(r.descricao)}</td>
+           <td style="text-align:right">${money(r.valorContrato)}</td>
+           <td style="text-align:right">${money(r.medicao)}</td>
+           <td style="text-align:right">${money(r.acumulado)}</td>
+           <td style="text-align:right">${money(r.saldo)}</td>
+           <td style="text-align:right;font-weight:700;color:${Number(r.percentualExecutado)>=99.5?'var(--success)':'var(--text)'}">${Number(r.percentualExecutado||0).toFixed(2)}%</td>
+         </tr>`).join('')}</tbody>
+       </table></div>
+     </div>`;
   panel.innerHTML = html;
   requestAnimationFrame(()=>{ state.chartAdmin = renderCurvaS('adminCurvaS','adminCurvaSwrap',it,state.chartAdmin); });
 }
-function listenAllUsers(){
+function renderAdminViews(){ renderAdminStats(); renderAdminSidebar(); renderColabList(); }
+
+/* ─── ADMIN SUBS ─── */
+function setupAdminSubs(){
   if(state.unsubAllUsers) state.unsubAllUsers();
   state.unsubAllUsers = onSnapshot(collection(db,'users'), snap => {
     snap.docChanges().forEach(change => {
       const d = change.doc, data = d.data();
       if(data.disabled){
-        if(state.allUsers[d.id]){
-          delete state.allUsers[d.id];
-          if(state.adminSubs[d.id]){ state.adminSubs[d.id](); delete state.adminSubs[d.id]; }
-        }
+        delete state.allUsers[d.id];
+        if(state.adminSubs[d.id]){ state.adminSubs[d.id](); delete state.adminSubs[d.id]; }
         return;
       }
-      if(change.type==='removed'){
+      if(change.type === 'removed'){
         delete state.allUsers[d.id];
         if(state.adminSubs[d.id]){ state.adminSubs[d.id](); delete state.adminSubs[d.id]; }
         return;
       }
       if(!state.allUsers[d.id]) state.allUsers[d.id] = { nome:data.nome||data.email, email:data.email, role:data.role, blocked:!!data.blocked, obras:[] };
-      else { state.allUsers[d.id].nome = data.nome||data.email; state.allUsers[d.id].email = data.email; state.allUsers[d.id].role = data.role; state.allUsers[d.id].blocked = !!data.blocked; }
-      if(data.role!=='admin' && !state.adminSubs[d.id]){
+      else { state.allUsers[d.id].nome=data.nome||data.email; state.allUsers[d.id].email=data.email; state.allUsers[d.id].role=data.role; state.allUsers[d.id].blocked=!!data.blocked; }
+      if(data.role !== 'admin' && !state.adminSubs[d.id]){
         state.adminSubs[d.id] = onSnapshot(collection(db,'users',d.id,'obras'), oSnap => {
           state.allUsers[d.id].obras = oSnap.docs.map(o=>({id:o.id,...o.data()}));
-          renderAdminStats(); renderAdminSidebar(); renderColabList(); if(state.adminSelectedUid===d.id) renderAdminDetail();
+          renderAdminViews();
+          if(state.adminSelectedUid === d.id) renderAdminDetail();
         });
       }
     });
-    renderAdminStats(); renderAdminSidebar(); renderColabList();
+    renderAdminViews();
   });
 }
+
+/* ─── USER OBRAS SUB ─── */
 function listenUserObras(){
   if(state.unsubUserObras) state.unsubUserObras();
   state.unsubUserObras = onSnapshot(collection(db,'users',state.user.uid,'obras'), snap => {
     state.obras = snap.docs.map(d=>({id:d.id,...d.data()}));
     if(!state.selectedObraId && state.obras.length) state.selectedObraId = state.obras[0].id;
-    if(state.selectedObraId){ const o = state.obras.find(x=>x.id===state.selectedObraId); if(o) applySelected(o); }
+    if(state.selectedObraId){ const o=state.obras.find(x=>x.id===state.selectedObraId); if(o) applySelected(o); }
     renderAll();
   });
 }
-function initUserView(){ showView('appView'); state.obras = []; state.selectedObraId = null; state.rows = []; listenUserObras(); }
-function initAdminView(){ showView('adminView'); listenAllUsers(); if(!state.colabFormReady){ state.colabFormReady = true; setupAdminColabForm(); } }
-function setupNovaAtividade(){
-  const recalc = () => {
-    const vc = parseMoney(el('fValorContrato').value);
-    const acu = parseMoney(el('fAcumulado').value);
-    if(vc > 0){ el('fSaldo').value = (vc - acu).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); el('fPct').value = (acu/vc*100).toFixed(2); }
-    else { el('fSaldo').value = ''; el('fPct').value = ''; }
-  };
-  ['fValorContrato','fMedicao','fAcumulado'].forEach(id=>{ const i=el(id); if(i) i.addEventListener('input', recalc); });
-}
-function normalizeImportedRows(list){ return Array.isArray(list) ? list.map(item=>({ item:item?.item??'', descricao:item?.descricao??item?.descricaoServico??item?.name??'', valorContrato:Number(item?.valorContrato??item?.valor_contrato??0)||0, medicao:Number(item?.medicao??0)||0, acumulado:Number(item?.acumulado??0)||0, saldo:Number(item?.saldo??0)||0, percentualExecutado:Number(item?.percentualExecutado??item?.percentual_executado??0)||0 })) : []; }
-const RE_VCA = /valor\s*(ct|contrato)\s*[\/\-]?\s*(ta|aditiv|reajust|atualiz)?/i;
-const RE_ACUM = /^acumulado$/i;
-function extractHeaderValues(data, start){
-  let vca = 0, acu = 0;
-  const headerRows = data.slice(0, start < 0 ? data.length : start);
-  for(const row of headerRows){
-    for(let c=0; c<row.length; c++){
-      const cell = String(row[c] ?? '').trim();
-      if(!vca && RE_VCA.test(cell)){
-        for(let cc=c+1; cc<Math.min(c+10,row.length); cc++){ const v = Number(row[cc]); if(v > 10000){ vca = v; break; } }
-      }
-      if(!acu && RE_ACUM.test(cell)){
-        for(let cc=c+1; cc<Math.min(c+5,row.length); cc++){ const v = Number(row[cc]); if(v > 10000){ acu = v; break; } }
-      }
-    }
-  }
-  return { valorContratoAditivo:vca, acumuladoTotal:acu };
-}
-async function readExcelFile(file){
-  const buffer = await file.arrayBuffer();
-  const wb = XLSX.read(new Uint8Array(buffer), { type:'array', cellDates:false, cellNF:false, cellText:false });
-  const target = wb.SheetNames.filter(n=>/^(BM|MED)\s*\d+/i.test(n)).sort((a,b)=>parseInt(a.match(/\d+/)?.[0]||0)-parseInt(b.match(/\d+/)?.[0]||0)).at(-1) || wb.SheetNames.at(-1);
-  if(!target) throw new Error('Nenhuma aba encontrada.');
-  const ws = wb.Sheets[target];
-  const data = XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
-  const RE = { desc:/discrimina|descri|servico/, vc:/valor.{0,25}contrato|total.{0,25}contrato/, med:/no.{0,10}period|no.{0,10}mes|^medicao$|^realizado$|periodo/, acum:/acumulado/, saldo:/^saldo$/ };
-  let cols={desc:-1,vc:-1,med:-1,acum:-1,saldo:-1}, start=-1;
-  for(let r=0;r<data.length;r++){
-    const row=data[r]||[];
-    if(/^\d+$/.test(String(row[0]??'').trim())){ start=r; break; }
-    for(let c=0;c<row.length;c++){
-      const t=norm(row[c]); if(!t) continue;
-      if(RE.desc.test(t)) cols.desc=c;
-      if(RE.vc.test(t)) cols.vc=c;
-      if(RE.med.test(t)) cols.med=c;
-      if(RE.acum.test(t)) cols.acum=c;
-      if(RE.saldo.test(t)) cols.saldo=c;
-    }
-  }
-  if(cols.vc < 0 && start >= 0){
-    const fr = data[start] || []; const numericCols = [];
-    for(let c=1;c<fr.length;c++) if(isNum(fr[c])) numericCols.push(c);
-    const vi = numericCols.findIndex(c=>Number(fr[c])>0);
-    if(vi >= 0){ cols.vc = numericCols[vi]; if(cols.med<0) cols.med = numericCols[vi+1] ?? cols.vc+1; if(cols.acum<0) cols.acum = numericCols[vi+2] ?? cols.vc+2; if(cols.saldo<0) cols.saldo = numericCols[vi+3] ?? cols.vc+3; }
-  }
-  const items=[];
-  for(let r=0;r<data.length;r++){
-    const row = data[r]||[];
-    const itemStr = String(row[0]??'').trim();
-    if(!/^\d+$/.test(itemStr)) continue;
-    let descricao = '';
-    if(cols.desc >= 0) descricao = String(row[cols.desc]??'').trim();
-    if(!descricao){
-      const lim = cols.vc > 0 ? cols.vc : 10;
-      for(let c=1;c<lim;c++){ const v = String(row[c]??'').trim(); if(v && !isNum(row[c])){ descricao = v; break; } }
-    }
-    const vc = Number(row[cols.vc]) || 0;
-    const med = Number(row[cols.med]) || 0;
-    const acum = Number(row[cols.acum]) || 0;
-    let saldo = cols.saldo >= 0 ? Number(row[cols.saldo]) : 0;
-    if(!saldo && vc > 0) saldo = vc - acum;
-    const p = vc > 0 ? +(acum/vc*100).toFixed(2) : 0;
-    items.push({ item:itemStr, descricao, valorContrato:+vc.toFixed(2), medicao:+med.toFixed(2), acumulado:+acum.toFixed(2), saldo:+saldo.toFixed(2), percentualExecutado:p });
-  }
-  const st=items.reduce((a,i)=>a+i.valorContrato,0);
-  const sa=items.reduce((a,i)=>a+i.acumulado,0);
-  const hv=extractHeaderValues(data,start);
-  const vca=hv.valorContratoAditivo || st;
-  const acu=hv.acumuladoTotal || sa;
-  return { nome:fileBaseName(file.name), nomeProjeto: wb.Props?.Title || fileBaseName(file.name) || 'Nova obra', medicaoAtual: target, itens:items, resumo:{ total:st, acumulado:sa, percentual:vca>0?+(acu/vca*100).toFixed(2):0, valorContratoAditivo:vca, acumuladoTotal:acu } };
-}
-async function loadFromJsonOrExcel(replace=false){
-  const input=document.createElement('input'); input.type='file'; input.accept='.json,.xlsx,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-  input.onchange = async e => {
-    if(!e.target.files.length) return;
-    const file=e.target.files[0]; const ext=file.name.split('.').pop().toLowerCase();
-    try{
-      let obj, imported=[];
-      if(ext==='xlsx'){ obj = await readExcelFile(file); imported = normalizeImportedRows(obj.itens); }
-      else { const text = await file.text(); obj = JSON.parse(text); imported = Array.isArray(obj) ? normalizeImportedRows(obj) : normalizeImportedRows(obj.itens); if(!imported.length && !Array.isArray(obj) && !Array.isArray(obj.itens)) throw new Error('Formato inválido'); }
-      const obraNome = fileBaseName(file.name) || obj.nome || 'Nova obra';
-      const obraId = replace && state.selectedObraId ? state.selectedObraId : ('obra_' + Date.now());
-      const obra = { id:obraId, nome:obraNome, nomeProjeto:obj.nomeProjeto||obj.obra||obraNome, cliente:obj.cliente||'', arquivoNome:file.name, origem:ext, medicaoAtual:obj.medicaoAtual||obj.nome||'', itens:imported, resumo:obj.resumo||{percentual:0} };
-      await saveObraFirestore(obra);
-      state.selectedObraId = obraId;
-      alert('Arquivo importado com sucesso.');
-    }catch(err){ alert('Erro ao importar: ' + err.message); }
-  };
-  input.click();
-}
-async function initUserOrAdmin(){
-  const snap = await getDoc(doc(db,'users',state.user.uid));
-  if(!snap.exists()){ cleanup(); await signOut(auth); return; }
-  const data = snap.data();
-  state.admin = data.role === 'admin';
-  if(data.disabled===true || data.blocked===true){ cleanup(); await signOut(auth); return; }
-  if(state.admin) initAdminView(); else initUserView();
-}
-function setupAdminColabForm(){
-  const form = el('addColabForm'); if(!form) return;
+
+/* ─── COLAB FORM ─── */
+function setupColabForm(){
+  const form = $('addColabForm'); if(!form) return;
   form.addEventListener('submit', async e => {
     e.preventDefault();
-    const nome = el('colabNome').value.trim();
-    const email = el('colabEmail').value.trim();
-    const senha = el('colabSenha').value;
-    const msgEl = el('colabMsgError');
-    const btn = el('addColabBtn');
+    const nome  = $('colabNome').value.trim();
+    const email = $('colabEmail').value.trim();
+    const senha = $('colabSenha').value;
+    const msgEl = $('colabMsgError');
+    const btn   = $('addColabBtn');
     if(!nome || !email || !senha) return;
     btn.disabled = true; btn.textContent = 'Cadastrando...'; msgEl.style.display = 'none';
     const adminEmail = state.user.email;
@@ -349,158 +618,144 @@ function setupAdminColabForm(){
       await setDoc(doc(db,'users',cred.user.uid), { nome, email, role:'colaborador', criadoEm:Date.now(), disabled:false, blocked:false });
       await signOut(auth);
       await signInWithEmailAndPassword(auth, adminEmail, ADMIN_SENHA);
-      el('colabNome').value=''; el('colabEmail').value=''; el('colabSenha').value='';
-      alert(`Colaborador "${nome}" cadastrado com sucesso!`);
+      $('colabNome').value=''; $('colabEmail').value=''; $('colabSenha').value='';
+      showToast(`✅ Colaborador "${nome}" cadastrado com sucesso!`);
     }catch(err){
       msgEl.textContent = err?.message || 'Erro ao cadastrar.';
       msgEl.style.display = 'block';
     }finally{ btn.disabled=false; btn.textContent='Cadastrar colaborador'; }
   });
 }
-function setupEvents(){
-  el('loginForm').addEventListener('submit', async e => {
+
+/* ─── NOVA ATIVIDADE RECALC ─── */
+function setupNovaAtividade(){
+  const recalc = () => {
+    const vc  = parseMoney($('fValorContrato').value);
+    const acu = parseMoney($('fAcumulado').value);
+    if(vc > 0){
+      $('fSaldo').value = (vc-acu).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+      $('fPct').value   = (acu/vc*100).toFixed(2);
+    } else { $('fSaldo').value=''; $('fPct').value=''; }
+  };
+  ['fValorContrato','fMedicao','fAcumulado'].forEach(id=>{ const el=$( id); if(el) el.addEventListener('input', recalc); });
+  $('addRow').onclick = () => {
+    const item = $('fItem').value.trim();
+    const desc = $('fName').value.trim();
+    if(!item && !desc){ showToast('⚠️ Preencha ao menos o item ou a descrição.', true); return; }
+    const vc   = parseMoney($('fValorContrato').value);
+    const med  = parseMoney($('fMedicao').value);
+    const acu  = parseMoney($('fAcumulado').value);
+    const saldo = vc > 0 ? vc - acu : 0;
+    const p     = vc > 0 ? +(acu/vc*100).toFixed(2) : 0;
+    state.rows.push({ item, descricao:desc, valorContrato:vc, medicao:med, acumulado:acu, saldo, percentualExecutado:p });
+    const o = currentObra(); if(o){ o.itens = state.rows; saveObra(o); }
+    renderAll();
+    $('fItem').value=''; $('fName').value=''; $('fValorContrato').value=''; $('fMedicao').value=''; $('fAcumulado').value=''; $('fSaldo').value=''; $('fPct').value='';
+    showToast('✅ Item adicionado.');
+  };
+}
+
+/* ─── BIND EVENTS ─── */
+function bindEvents(){
+  // Login
+  $('loginForm').addEventListener('submit', async e => {
     e.preventDefault();
-    const email = el('loginEmail').value.trim();
-    const senha = el('loginSenha').value;
-    const btn = el('loginBtn');
-    btn.disabled = true; btn.textContent = 'Entrando...'; el('loginError').style.display='none';
+    const email = $('loginEmail').value.trim();
+    const senha = $('loginSenha').value;
+    const btn   = $('loginBtn');
+    btn.disabled=true; btn.textContent='Entrando...'; $('loginError').style.display='none';
     try{ await signInWithEmailAndPassword(auth, email, senha); }
-    catch{ el('loginError').textContent='E-mail ou senha inválidos.'; el('loginError').style.display='block'; }
+    catch{ $('loginError').textContent='E-mail ou senha inválidos.'; $('loginError').style.display='block'; }
     finally{ btn.disabled=false; btn.textContent='Entrar'; }
   });
-  el('logoutBtnAdmin').addEventListener('click', ()=>{ cleanup(); signOut(auth); });
-  el('logoutBtnUser').addEventListener('click', ()=>{ cleanup(); signOut(auth); });
-  el('toggleTheme').onclick = ()=>{ document.documentElement.dataset.theme = document.documentElement.dataset.theme==='dark' ? 'light' : 'dark'; if(state.rows.length) state.chartUser = renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser); };
-  el('adminToggleColab').onclick = ()=>{ const p = el('adminColabPanel'); p.style.display = p.style.display==='none' ? 'block' : 'none'; };
-  el('loadFile').onclick = ()=>loadFromJsonOrExcel(false);
-  el('addObraBtn').onclick = ()=>loadFromJsonOrExcel(false);
-  el('fillSample').onclick = ()=>{ state.rows=[]; const o=currentObra(); if(o){ o.itens=[]; saveObraFirestore(o); } renderAll(); };
-  el('exportCsv').onclick = ()=>{
-    const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];
-    const body = state.rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}"`).join(',')).join('\n');
-    const blob = new Blob([fields.join(',')+'\n'+body], {type:'text/csv;charset=utf-8'});
+
+  // Logout
+  $('logoutBtnAdmin').addEventListener('click', ()=>{ cleanup(); signOut(auth); });
+  $('logoutBtnUser').addEventListener('click',  ()=>{ cleanup(); signOut(auth); });
+
+  // Theme toggle
+  $('toggleTheme').onclick = () => {
+    document.documentElement.dataset.theme = document.documentElement.dataset.theme==='dark' ? 'light' : 'dark';
+    if(state.rows.length) state.chartUser = renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser);
+  };
+
+  // Admin colab panel
+  $('adminToggleColab').onclick = () => { const p=$('adminColabPanel'); p.style.display=p.style.display==='none'?'block':'none'; };
+
+  // File actions
+  $('loadFile').onclick  = ()=>importFile(false);
+  $('addObraBtn').onclick = ()=>importFile(false);
+  $('fillSample').onclick = ()=>{
+    if(!confirm('Limpar todos os itens da obra atual?')) return;
+    state.rows=[]; const o=currentObra(); if(o){ o.itens=[]; saveObra(o); } renderAll();
+  };
+
+  // Export CSV
+  $('exportCsv').onclick = () => {
+    const fields = ['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];
+    const body   = state.rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob   = new Blob([fields.join(',')+'\n'+body],{type:'text/csv;charset=utf-8'});
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='cronograma.csv'; a.click(); URL.revokeObjectURL(a.href);
   };
-  el('saveJson').onclick = ()=>{
-    const o=currentObra(); const name=(el('projName').value.trim()||'projeto');
-    const payload={obra:name,medicaoAtual:o?.medicaoAtual||'',itens:state.rows};
-    const blob=new Blob([JSON.stringify(payload,null,2)], {type:'application/json;charset=utf-8'});
+
+  // Export JSON
+  $('saveJson').onclick = () => {
+    const o    = currentObra();
+    const name = ($('projName').value.trim()||'projeto');
+    const payload = { obra:name, medicaoAtual:o?.medicaoAtual||'', itens:state.rows };
+    const blob  = new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name.replace(/[^a-zA-Z0-9\-_]/g,'-').toLowerCase()+'.json'; a.click(); URL.revokeObjectURL(a.href);
   };
-  el('tbody').addEventListener('input', e => {
-    const t=e.target,tr=t.closest('tr'); if(!tr) return; const i=+tr.dataset.i,k=t.dataset.k; if(!k) return;
-    if(['valorContrato','medicao','acumulado','saldo','percentualExecutado'].includes(k)) state.rows[i][k] = Number(t.textContent.replace(',','.').replace(/[^\d.-]/g,'')) || 0;
+
+  // Table edit
+  $('tbody').addEventListener('input', e => {
+    const t=e.target, tr=t.closest('tr'); if(!tr) return;
+    const i=+tr.dataset.i, k=t.dataset.k; if(!k) return;
+    if(['valorContrato','medicao','acumulado','saldo','percentualExecutado'].includes(k))
+      state.rows[i][k] = Number(t.textContent.replace(',','.').replace(/[^\d.-]/g,'')) || 0;
     else state.rows[i][k] = t.textContent.trim();
     updateDashboard(); scheduleSave();
   });
-  el('tbody').addEventListener('focusout', e => {
-    const t=e.target,tr=t.closest('tr'); if(!tr) return; const i=+tr.dataset.i,k=t.dataset.k;
-    if(k && ['valorContrato','medicao','acumulado','saldo'].includes(k)) t.textContent = money(state.rows[i][k]);
-    else if(k==='percentualExecutado') t.textContent = Number(state.rows[i][k]).toFixed(2);
+  $('tbody').addEventListener('focusout', e => {
+    const t=e.target, tr=t.closest('tr'); if(!tr) return;
+    const i=+tr.dataset.i, k=t.dataset.k;
+    if(k && ['valorContrato','medicao','acumulado','saldo'].includes(k)) t.textContent=money(state.rows[i][k]);
+    else if(k==='percentualExecutado') t.textContent=Number(state.rows[i][k]).toFixed(2);
   });
-  el('tbody').addEventListener('click', e => {
-    const b=e.target.closest('button[data-del]'); if(!b) return; state.rows.splice(+b.dataset.del,1); const o=currentObra(); if(o){ o.itens=state.rows; saveObraFirestore(o); } renderAll();
+  $('tbody').addEventListener('click', e => {
+    const b=e.target.closest('button[data-del]'); if(!b) return;
+    state.rows.splice(+b.dataset.del,1);
+    const o=currentObra(); if(o){ o.itens=state.rows; saveObra(o); }
+    renderAll();
   });
-  window.addEventListener('scroll',()=>{ const b=el('btnTopo'); if(b) b.classList.toggle('visible', window.scrollY>200); });
+
+  // Back to top
+  window.addEventListener('scroll',()=>{ const b=$('btnTopo'); if(b) b.classList.toggle('visible', window.scrollY>200); });
 }
-function updateSelectedMeta(){
-  const o=currentObra();
-  const vc = Number(o?.resumo?.valorContratoAditivo) || state.rows.reduce((a,r)=>a+Number(r.valorContrato||0),0);
-  const ac = Number(o?.resumo?.acumuladoTotal) || state.rows.reduce((a,r)=>a+Number(r.acumulado||0),0);
-  const p = calcPctGeral(o?.resumo, state.rows);
-  if(el('stats')) el('stats').innerHTML = `<div class="stat-card"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value" style="font-size:1rem">${money(vc)}</span></div><div class="stat-card"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="font-size:1rem;color:var(--success)">${money(ac)}</span></div><div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div><div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.2rem">${esc(o?.medicaoAtual||'-')}</span></div>`;
-  if(el('countAll')) el('countAll').textContent = money(vc);
-  if(el('countDone')) el('countDone').textContent = money(ac);
-  if(el('countPct')) el('countPct').textContent = pct(p);
-  state.chartUser = renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser);
-}
-function renderAll(){ renderObrasBox(); renderTable(); updateSelectedMeta(); }
-function renderObrasBox(){
-  const box = el('obrasBox'); if(!box) return;
-  box.innerHTML = `<div class="form-group" style="margin-bottom:0"><label>Selecionar obra</label><select id="obraSelect" class="form-control">${state.obras.map(o=>`<option value="${o.id}" ${o.id===state.selectedObraId?'selected':''}>${esc(o.nome||'Obra')}</option>`).join('')}</select></div><div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="btn btn-sec" id="openObraBtn">Abrir</button><button class="btn btn-sec" id="replaceObraBtn">Atualizar</button><button class="btn btn-danger" id="deleteObraBtn">Remover</button></div>`;
-  el('obraSelect').onchange = e => { state.selectedObraId = e.target.value; const o=currentObra(); if(o){ applySelected(o); renderAll(); } };
-  el('openObraBtn').onclick = () => { const o=currentObra(); if(o){ applySelected(o); renderAll(); } };
-  el('replaceObraBtn').onclick = () => loadFromJsonOrExcel(true);
-  el('deleteObraBtn').onclick = async() => { if(!state.selectedObraId || !confirm('Remover obra?')) return; await deleteObraFirestore(state.selectedObraId); state.selectedObraId = null; };
-}
-function renderAdminViews(){ renderAdminStats(); renderAdminSidebar(); renderColabList(); }
-function renderUserViews(){ renderAll(); }
-function selectColab(uid){ state.adminSelectedUid = uid; state.adminSelectedObraId = null; renderAdminSidebar(); renderAdminDetail(); }
-function deselectColab(){ state.adminSelectedUid = null; state.adminSelectedObraId = null; renderAdminSidebar(); renderAdminDetail(); }
-function selectAdminObra(obraId){ state.adminSelectedObraId = obraId || null; renderAdminDetail(); }
-async function toggleBloqueio(uid, isBlocked){ await updateDoc(doc(db,'users',uid), { blocked: !isBlocked }); state.allUsers[uid].blocked = !isBlocked; renderColabList(); renderAdminSidebar(); if(state.adminSelectedUid===uid) renderAdminDetail(); }
-async function removeColab(uid){ await updateDoc(doc(db,'users',uid), { disabled:true }); delete state.allUsers[uid]; if(state.adminSubs[uid]){ state.adminSubs[uid](); delete state.adminSubs[uid]; } if(state.adminSelectedUid===uid){ state.adminSelectedUid=null; state.adminSelectedObraId=null; } renderAdminViews(); renderAdminDetail(); }
-async function findDisabledDocByEmail(email){ const q=query(collection(db,'users'), where('email','==',email), where('disabled','==',true)); const snap=await getDocs(q); if(snap.empty) return null; const d=snap.docs[0]; return { uid:d.id, ...d.data() }; }
-function setupAdminSubs(){
-  if(state.unsubAllUsers) state.unsubAllUsers();
-  state.unsubAllUsers = onSnapshot(collection(db,'users'), snap => {
-    snap.docChanges().forEach(change => {
-      const d = change.doc, data = d.data();
-      if(data.disabled){ if(state.allUsers[d.id]){ delete state.allUsers[d.id]; if(state.adminSubs[d.id]){ state.adminSubs[d.id](); delete state.adminSubs[d.id]; } } return; }
-      if(change.type==='removed'){ delete state.allUsers[d.id]; if(state.adminSubs[d.id]){ state.adminSubs[d.id](); delete state.adminSubs[d.id]; } return; }
-      if(!state.allUsers[d.id]) state.allUsers[d.id] = { nome:data.nome||data.email, email:data.email, role:data.role, blocked:!!data.blocked, obras:[] };
-      else { state.allUsers[d.id].nome = data.nome||data.email; state.allUsers[d.id].email = data.email; state.allUsers[d.id].role = data.role; state.allUsers[d.id].blocked = !!data.blocked; }
-      if(data.role!=='admin' && !state.adminSubs[d.id]){
-        state.adminSubs[d.id] = onSnapshot(collection(db,'users',d.id,'obras'), oSnap => {
-          state.allUsers[d.id].obras = oSnap.docs.map(o=>({id:o.id,...o.data()}));
-          renderAdminViews(); if(state.adminSelectedUid===d.id) renderAdminDetail();
-        });
-      }
-    });
-    renderAdminViews();
-  });
-}
-function setupAdminForm(){
-  const form = el('addColabForm'); if(!form) return;
-  form.addEventListener('submit', async e => {
-    e.preventDefault();
-    const nome = el('colabNome').value.trim();
-    const email = el('colabEmail').value.trim();
-    const senha = el('colabSenha').value;
-    const msgEl = el('colabMsgError');
-    const btn = el('addColabBtn');
-    if(!nome || !email || !senha) return;
-    btn.disabled = true; btn.textContent='Cadastrando...'; msgEl.style.display='none';
-    const adminEmail = state.user.email;
-    try{
-      const cred = await createUserWithEmailAndPassword(auth, email, senha);
-      await setDoc(doc(db,'users',cred.user.uid), { nome, email, role:'colaborador', criadoEm:Date.now(), disabled:false, blocked:false });
-      await signOut(auth);
-      await signInWithEmailAndPassword(auth, adminEmail, ADMIN_SENHA);
-      el('colabNome').value=''; el('colabEmail').value=''; el('colabSenha').value='';
-      alert(`Colaborador "${nome}" cadastrado com sucesso!`);
-    }catch(err){ msgEl.textContent = err?.message || 'Erro ao cadastrar.'; msgEl.style.display='block'; }
-    finally{ btn.disabled=false; btn.textContent='Cadastrar colaborador'; }
-  });
-}
-function bindActions(){
-  el('loginForm').addEventListener('submit', async e => {
-    e.preventDefault();
-    const email = el('loginEmail').value.trim();
-    const senha = el('loginSenha').value;
-    const btn = el('loginBtn');
-    btn.disabled = true; btn.textContent='Entrando...'; el('loginError').style.display='none';
-    try{ await signInWithEmailAndPassword(auth, email, senha); }
-    catch{ el('loginError').textContent='E-mail ou senha inválidos.'; el('loginError').style.display='block'; }
-    finally{ btn.disabled=false; btn.textContent='Entrar'; }
-  });
-  el('logoutBtnAdmin').addEventListener('click', ()=>{ cleanup(); signOut(auth); });
-  el('logoutBtnUser').addEventListener('click', ()=>{ cleanup(); signOut(auth); });
-  el('adminToggleColab').onclick = ()=>{ const p=el('adminColabPanel'); p.style.display = p.style.display==='none' ? 'block' : 'none'; };
-  el('toggleTheme').onclick = ()=>{ document.documentElement.dataset.theme = document.documentElement.dataset.theme==='dark' ? 'light' : 'dark'; if(state.rows.length) state.chartUser = renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser); };
-  el('loadFile').onclick = ()=>loadFromJsonOrExcel(false);
-  el('addObraBtn').onclick = ()=>loadFromJsonOrExcel(false);
-  el('fillSample').onclick = ()=>{ state.rows=[]; const o=currentObra(); if(o){ o.itens=[]; saveObraFirestore(o); } renderAll(); };
-  el('exportCsv').onclick = ()=>{ const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado']; const body = state.rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}"`).join(',')).join('\n'); const blob = new Blob([fields.join(',')+'\n'+body], {type:'text/csv;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='cronograma.csv'; a.click(); URL.revokeObjectURL(a.href); };
-  el('saveJson').onclick = ()=>{ const o=currentObra(); const name=(el('projName').value.trim()||'projeto'); const payload={obra:name,medicaoAtual:o?.medicaoAtual||'',itens:state.rows}; const blob=new Blob([JSON.stringify(payload,null,2)], {type:'application/json;charset=utf-8'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name.replace(/[^a-zA-Z0-9\-_]/g,'-').toLowerCase()+'.json'; a.click(); URL.revokeObjectURL(a.href); };
-  el('tbody').addEventListener('input', e => { const t=e.target,tr=t.closest('tr'); if(!tr) return; const i=+tr.dataset.i,k=t.dataset.k; if(!k) return; if(['valorContrato','medicao','acumulado','saldo','percentualExecutado'].includes(k)) state.rows[i][k] = Number(t.textContent.replace(',','.').replace(/[^\d.-]/g,'')) || 0; else state.rows[i][k] = t.textContent.trim(); updateDashboard(); scheduleSave(); });
-  el('tbody').addEventListener('focusout', e => { const t=e.target,tr=t.closest('tr'); if(!tr) return; const i=+tr.dataset.i,k=t.dataset.k; if(k && ['valorContrato','medicao','acumulado','saldo'].includes(k)) t.textContent = money(state.rows[i][k]); else if(k==='percentualExecutado') t.textContent = Number(state.rows[i][k]).toFixed(2); });
-  el('tbody').addEventListener('click', e => { const b=e.target.closest('button[data-del]'); if(!b) return; state.rows.splice(+b.dataset.del,1); const o=currentObra(); if(o){ o.itens=state.rows; saveObraFirestore(o); } renderAll(); });
-}
-function setupTopButton(){ window.addEventListener('scroll',()=>{ const b=el('btnTopo'); if(b) b.classList.toggle('visible', window.scrollY>200); }); }
+
+/* ─── GLOBAL CALLBACKS (admin) ─── */
+window.adminSelectColab   = uid  => { state.adminSelectedUid=uid; state.adminSelectedObraId=null; renderAdminSidebar(); renderAdminDetail(); };
+window.adminDeselectColab = ()   => { state.adminSelectedUid=null; state.adminSelectedObraId=null; renderAdminSidebar(); renderAdminDetail(); };
+window.adminSelectObra    = id   => { state.adminSelectedObraId=id||null; renderAdminDetail(); };
+window.toggleBloqueio = async (uid, isBlocked) => {
+  await updateDoc(doc(db,'users',uid), { blocked: !isBlocked });
+  state.allUsers[uid].blocked = !isBlocked;
+  renderColabList(); renderAdminSidebar();
+  if(state.adminSelectedUid===uid) renderAdminDetail();
+};
+window.removeColab = async uid => {
+  if(!confirm('Remover este colaborador?')) return;
+  await updateDoc(doc(db,'users',uid), { disabled:true });
+  delete state.allUsers[uid];
+  if(state.adminSubs[uid]){ state.adminSubs[uid](); delete state.adminSubs[uid]; }
+  if(state.adminSelectedUid===uid){ state.adminSelectedUid=null; state.adminSelectedObraId=null; }
+  renderAdminViews(); renderAdminDetail();
+  showToast('✅ Colaborador removido.');
+};
+
+/* ─── INIT ─── */
 async function init(){
-  bindActions();
-  setupTopButton();
+  bindEvents();
   setupNovaAtividade();
   onAuthStateChanged(auth, async user => {
     state.user = user;
@@ -510,60 +765,311 @@ async function init(){
     const data = snap.data();
     state.admin = data.role === 'admin';
     if(data.disabled===true || data.blocked===true){ cleanup(); await signOut(auth); return; }
-    if(state.admin){ showView('adminView'); setupAdminSubs(); if(!state.colabFormReady){ state.colabFormReady = true; setupAdminForm(); } }
-    else { showView('appView'); state.obras=[]; state.selectedObraId=null; state.rows=[]; listenUserObras(); }
+    if(state.admin){
+      showView('adminView');
+      setupAdminSubs();
+      if(!state.colabFormReady){ state.colabFormReady=true; setupColabForm(); }
+    } else {
+      showView('appView');
+      state.obras=[]; state.selectedObraId=null; state.rows=[];
+      listenUserObras();
+    }
   });
 }
-async function listenUserObras(){
-  if(state.unsubUserObras) state.unsubUserObras();
-  state.unsubUserObras = onSnapshot(collection(db,'users',state.user.uid,'obras'), snap => {
-    state.obras = snap.docs.map(d=>({id:d.id,...d.data()}));
-    if(!state.selectedObraId && state.obras.length) state.selectedObraId = state.obras[0].id;
-    if(state.selectedObraId){ const o=state.obras.find(x=>x.id===state.selectedObraId); if(o) applySelected(o); }
-    renderAll();
-  });
-}
-window.adminSelectColab = uid => { state.adminSelectedUid = uid; state.adminSelectedObraId = null; renderAdminSidebar(); renderAdminDetail(); };
-window.adminDeselectColab = () => { state.adminSelectedUid = null; state.adminSelectedObraId = null; renderAdminSidebar(); renderAdminDetail(); };
-window.adminSelectObra = obraId => { state.adminSelectedObraId = obraId || null; renderAdminDetail(); };
-window.toggleBloqueio = toggleBloqueio;
-window.removeColab = removeColab;
-
-function renderAdminDetailIfNeeded(){ renderAdminDetail(); }
 
 init();
 </script>
 <style>
-:root{--bg:#f7f9fc;--surface:#fff;--surface-hover:#f1f5f9;--text:#0f172a;--text-muted:#64748b;--border:rgba(15,23,42,.1);--border-focus:#6366f1;--primary:#4f46e5;--primary-hover:#4338ca;--success:#10b981;--danger:#ef4444;--warning:#f59e0b;--radius-sm:.5rem;--radius-md:.75rem;--radius-lg:1rem;--shadow-sm:0 1px 2px rgba(0,0,0,.05);--shadow-md:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px -1px rgba(0,0,0,.06);--shadow-lg:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -2px rgba(0,0,0,.05);--font:'Satoshi',system-ui,sans-serif;}
-[data-theme="dark"]{--bg:#0f172a;--surface:#1e293b;--surface-hover:#334155;--text:#f8fafc;--text-muted:#94a3b8;--border:rgba(255,255,255,.1);--border-focus:#818cf8;--primary:#6366f1;--primary-hover:#818cf8;}
-*{box-sizing:border-box;margin:0;padding:0}body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh;transition:background .2s}
+:root{
+  --bg:#f7f9fc;--surface:#fff;--surface-hover:#f1f5f9;
+  --text:#0f172a;--text-muted:#64748b;
+  --border:rgba(15,23,42,.1);--border-focus:#6366f1;
+  --primary:#4f46e5;--primary-hover:#4338ca;
+  --success:#10b981;--danger:#ef4444;--warning:#f59e0b;
+  --radius-sm:.5rem;--radius-md:.75rem;--radius-lg:1rem;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.05);
+  --shadow-md:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px -1px rgba(0,0,0,.06);
+  --shadow-lg:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -2px rgba(0,0,0,.05);
+  --font:'Satoshi',system-ui,sans-serif;
+}
+[data-theme="dark"]{
+  --bg:#0f172a;--surface:#1e293b;--surface-hover:#334155;
+  --text:#f8fafc;--text-muted:#94a3b8;
+  --border:rgba(255,255,255,.1);--border-focus:#818cf8;
+  --primary:#6366f1;--primary-hover:#818cf8;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh;transition:background .2s}
+
+/* TOAST */
+.toast{position:fixed;bottom:5rem;left:50%;transform:translateX(-50%);background:#1e293b;color:#f8fafc;padding:.7rem 1.4rem;border-radius:var(--radius-md);font-size:.875rem;font-weight:600;box-shadow:var(--shadow-lg);z-index:9999;max-width:90vw;text-align:center;transition:opacity .4s;}
+.toast-error{background:#7f1d1d;color:#fecaca;}
+
+/* LOGIN */
 .login-wrapper{display:flex;min-height:100vh;align-items:center;justify-content:center;padding:1rem;background:linear-gradient(135deg,#f3e8ff,#eff6ff 45%,#ecfdf5)}
 [data-theme="dark"] .login-wrapper{background:linear-gradient(135deg,#1e1b4b,#172554 45%,#064e3b)}
 .login-card{background:var(--surface);width:100%;max-width:400px;padding:2.5rem;border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);border:1px solid var(--border)}
 .brand-login{display:flex;flex-direction:column;align-items:center;gap:1rem;margin-bottom:2rem;text-align:center}
+
+/* BUTTONS */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;padding:.625rem 1.25rem;border-radius:var(--radius-sm);font-weight:600;font-size:.875rem;font-family:inherit;cursor:pointer;transition:all .2s;border:1px solid transparent}
-.btn-primary{background:var(--primary);color:#fff;box-shadow:var(--shadow-sm)}.btn-sec{background:var(--surface);color:var(--text);border-color:var(--border)}.btn-danger{color:var(--danger);background:rgba(239,68,68,.1)}.btn-warning{color:#92400e;background:rgba(245,158,11,.12)}.btn-success{color:#065f46;background:rgba(16,185,129,.12)}
-.container{max-width:1440px;margin:0 auto;padding:2rem}.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;gap:.75rem}.brand{display:flex;align-items:center;gap:1rem;min-width:0}.brand-text h1{font-size:1.5rem;font-weight:700;white-space:nowrap}.brand-text p{color:var(--text-muted);font-size:.875rem;white-space:nowrap}.header-actions{display:flex;gap:.5rem;align-items:center;flex-shrink:0}.logo{width:48px;height:48px;background:linear-gradient(135deg,var(--primary),#818cf8);color:#fff;border-radius:var(--radius-md);display:grid;place-items:center;font-weight:900}.logo-large{width:64px;height:64px;font-size:1.5rem}
-.admin-layout{display:grid;grid-template-columns:220px 1fr;gap:1.5rem;align-items:start}.admin-sidebar{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1rem;position:sticky;top:1.5rem;max-height:calc(100vh - 3rem);overflow-y:auto}.admin-sidebar h3{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.75rem}.colab-sidebar-item{padding:.75rem;border-radius:var(--radius-sm);cursor:pointer;border:1px solid transparent;margin-bottom:.375rem;transition:.15s}.colab-sidebar-item:hover{background:var(--surface-hover)}.colab-sidebar-item.active{background:rgba(99,102,241,.1);border-color:var(--primary);color:var(--primary)}
-.admin-stats-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1rem;margin-bottom:1.5rem}.stat-card.compact{min-height:100px;padding:1rem 1.1rem;justify-content:space-between}.stat-card.compact .stat-value{font-size:1.2rem;line-height:1.1}.stat-card.compact .stat-label{font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:1.5rem}.stat-card{background:var(--surface);padding:1.25rem;border-radius:var(--radius-lg);border:1px solid var(--border);display:flex;flex-direction:column;gap:.25rem;box-shadow:var(--shadow-sm)}.stat-value{font-size:2rem;font-weight:900;line-height:1;color:var(--text)}.stat-label{font-size:.875rem;color:var(--text-muted);font-weight:500}
-.dashboard{display:grid;grid-template-columns:260px 1fr;gap:2rem}.panel{background:var(--surface);border-radius:var(--radius-lg);border:1px solid var(--border);box-shadow:var(--shadow-sm);padding:1.5rem;margin-bottom:1.5rem}.nav{display:flex;flex-direction:column;gap:.5rem;position:sticky;top:2rem;max-height:calc(100vh - 4rem);overflow-y:auto;padding-right:.25rem}.nav-item{display:flex;justify-content:space-between;padding:.75rem 1rem;border-radius:var(--radius-sm);font-weight:500;color:var(--text-muted)}.nav-item.active{background:rgba(99,102,241,.1);color:var(--primary);font-weight:700}.badge{background:var(--surface-hover);padding:.125rem .5rem;border-radius:999px;font-size:.75rem;border:1px solid var(--border);white-space:nowrap}.nav-item.active .badge{background:#fff;color:var(--primary);border-color:transparent}
-.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem}.form-group{display:flex;flex-direction:column;gap:.375rem;margin-bottom:1rem}.form-group label{font-size:.8125rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}.form-control{padding:.625rem .875rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:inherit;font-size:.875rem;transition:.2s;outline:none;width:100%}.form-control:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(99,102,241,.15);background:var(--surface)}
-.chart-scroll-wrap{width:100%;overflow-x:hidden;-webkit-overflow-scrolling:touch}.chart-container{height:300px;width:100%;position:relative}.table-container{overflow-x:auto;margin-top:1rem;-webkit-overflow-scrolling:touch;border-radius:var(--radius-md)}.th-sticky{position:sticky;top:0;z-index:10;background:var(--surface);box-shadow:0 1px 0 var(--border)}.td-desc{white-space:normal !important;overflow-wrap:break-word;word-break:normal;min-width:120px;max-width:220px;line-height:1.4}table{width:100%;border-collapse:separate;border-spacing:0;min-width:580px}th{text-align:left;padding:1rem;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);border-bottom:1px solid var(--border);background:var(--surface)}td{padding:1rem;font-size:.875rem;border-bottom:1px solid var(--border);transition:background .2s;white-space:nowrap}tr:last-child td{border-bottom:none}tbody tr:hover td{background:var(--surface-hover)}td[contenteditable="true"]{outline:none;cursor:text}td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px var(--primary);border-radius:4px}
-.error-msg{color:var(--danger);font-size:.875rem;margin-top:.5rem;display:none;padding:.5rem;background:rgba(239,68,68,.08);border-radius:var(--radius-sm)}.obra-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)}.obra-card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.75rem}.obra-card-title{font-weight:700;font-size:1rem}.obra-card-sub{font-size:.8rem;color:var(--text-muted);margin-top:.25rem}.obra-card-pct{font-size:1.5rem;font-weight:900;color:var(--primary);white-space:nowrap}.obra-progress-bar{height:6px;background:var(--surface-hover);border-radius:999px;overflow:hidden;margin-bottom:.75rem}.obra-progress-fill{height:100%;background:var(--primary);border-radius:999px;transition:width .4s}.obra-card-footer{display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.8125rem;color:var(--text-muted)}.colab-item{display:flex;justify-content:space-between;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:.5rem;background:var(--bg);gap:.5rem;flex-wrap:wrap}
-#btnTopo{position:fixed;bottom:1.5rem;right:1.5rem;z-index:999;width:46px;height:46px;border-radius:50%;background:var(--primary);color:#fff;border:none;font-size:1.2rem;cursor:pointer;box-shadow:var(--shadow-md);opacity:0;transition:opacity .3s,transform .2s;display:flex;align-items:center;justify-content:center;pointer-events:none;}#btnTopo.visible{opacity:1;pointer-events:auto;}
-@media(max-width:1100px){.admin-layout{grid-template-columns:1fr}.admin-sidebar{position:static;max-height:none;overflow-y:visible}.admin-stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard{grid-template-columns:1fr}.nav{position:static;max-height:none;overflow-y:visible}}
-@media(max-width:640px){.container{padding:1rem}.header{margin-bottom:1.25rem;gap:.5rem;flex-wrap:wrap}.brand-text h1{font-size:1rem !important}.brand-text p{font-size:.72rem !important}.btn{padding:.45rem .7rem;font-size:.75rem}.admin-stats-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;margin-bottom:1rem}.stat-card.compact{min-height:88px;padding:.85rem}.stat-card.compact .stat-value{font-size:1rem}.stat-card.compact .stat-label{font-size:.7rem}.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}.stat-value{font-size:1.4rem}.panel{padding:1rem;margin-bottom:1rem}.obra-card{padding:1rem}.obra-card-pct{font-size:1.2rem}.obra-card-footer{gap:.75rem;font-size:.75rem}table{min-width:480px}th{padding:.55rem .5rem;font-size:.68rem}td{padding:.55rem .5rem;font-size:.72rem}.td-desc{min-width:90px;max-width:140px;font-size:.7rem}.chart-container{height:240px}.chart-scroll-wrap{overflow-x:auto !important}.admin-sidebar{position:static !important;max-height:none !important;overflow-y:visible !important}.nav{position:static !important;max-height:none !important;overflow-y:visible !important}#btnTopo{bottom:1rem;right:1rem;width:42px;height:42px;font-size:1rem}}
+.btn-primary{background:var(--primary);color:#fff;box-shadow:var(--shadow-sm)}
+.btn-primary:hover{background:var(--primary-hover)}
+.btn-sec{background:var(--surface);color:var(--text);border-color:var(--border)}
+.btn-danger{color:var(--danger);background:rgba(239,68,68,.1)}
+.btn-warning{color:#92400e;background:rgba(245,158,11,.12)}
+.btn-success{color:#065f46;background:rgba(16,185,129,.12)}
+
+/* LAYOUT */
+.container{max-width:1440px;margin:0 auto;padding:2rem}
+.header{display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;gap:.75rem}
+.brand{display:flex;align-items:center;gap:1rem;min-width:0}
+.brand-text h1{font-size:1.5rem;font-weight:700;white-space:nowrap}
+.brand-text p{color:var(--text-muted);font-size:.875rem;white-space:nowrap}
+.header-actions{display:flex;gap:.5rem;align-items:center;flex-shrink:0}
+.logo{width:48px;height:48px;background:linear-gradient(135deg,var(--primary),#818cf8);color:#fff;border-radius:var(--radius-md);display:grid;place-items:center;font-weight:900;font-size:1rem}
+.logo-large{width:64px;height:64px;font-size:1.5rem}
+
+/* ADMIN */
+.admin-layout{display:grid;grid-template-columns:220px 1fr;gap:1.5rem;align-items:start}
+.admin-sidebar{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1rem;position:sticky;top:1.5rem;max-height:calc(100vh - 3rem);overflow-y:auto}
+.admin-sidebar h3{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.75rem}
+.colab-sidebar-item{padding:.75rem;border-radius:var(--radius-sm);cursor:pointer;border:1px solid transparent;margin-bottom:.375rem;transition:.15s}
+.colab-sidebar-item:hover{background:var(--surface-hover)}
+.colab-sidebar-item.active{background:rgba(99,102,241,.1);border-color:var(--primary);color:var(--primary)}
+.admin-stats-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1rem;margin-bottom:1.5rem}
+.stat-card.compact{min-height:100px;padding:1rem 1.1rem;justify-content:space-between}
+.stat-card.compact .stat-value{font-size:1.2rem;line-height:1.1}
+.stat-card.compact .stat-label{font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+
+/* STATS */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:1.5rem}
+.stat-card{background:var(--surface);padding:1.25rem;border-radius:var(--radius-lg);border:1px solid var(--border);display:flex;flex-direction:column;gap:.25rem;box-shadow:var(--shadow-sm)}
+.stat-value{font-size:2rem;font-weight:900;line-height:1;color:var(--text)}
+.stat-label{font-size:.875rem;color:var(--text-muted);font-weight:500}
+
+/* DASHBOARD */
+.dashboard{display:grid;grid-template-columns:260px 1fr;gap:2rem}
+.panel{background:var(--surface);border-radius:var(--radius-lg);border:1px solid var(--border);box-shadow:var(--shadow-sm);padding:1.5rem;margin-bottom:1.5rem}
+.nav{display:flex;flex-direction:column;gap:.5rem;position:sticky;top:2rem;max-height:calc(100vh - 4rem);overflow-y:auto;padding-right:.25rem}
+.nav-item{display:flex;justify-content:space-between;padding:.75rem 1rem;border-radius:var(--radius-sm);font-weight:500;color:var(--text-muted)}
+.nav-item.active{background:rgba(99,102,241,.1);color:var(--primary);font-weight:700}
+.badge{background:var(--surface-hover);padding:.125rem .5rem;border-radius:999px;font-size:.75rem;border:1px solid var(--border);white-space:nowrap}
+.nav-item.active .badge{background:#fff;color:var(--primary);border-color:transparent}
+
+/* FORMS */
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem}
+.form-group{display:flex;flex-direction:column;gap:.375rem;margin-bottom:1rem}
+.form-group label{font-size:.8125rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
+.form-control{padding:.625rem .875rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:inherit;font-size:.875rem;transition:.2s;outline:none;width:100%}
+.form-control:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(99,102,241,.15);background:var(--surface)}
+
+/* TABLE */
+.chart-scroll-wrap{width:100%;overflow-x:hidden;-webkit-overflow-scrolling:touch}
+.chart-container{height:300px;width:100%;position:relative}
+.table-container{overflow-x:auto;margin-top:1rem;-webkit-overflow-scrolling:touch;border-radius:var(--radius-md)}
+.th-sticky{position:sticky;top:0;z-index:10;background:var(--surface);box-shadow:0 1px 0 var(--border)}
+.td-desc{white-space:normal !important;overflow-wrap:break-word;word-break:normal;min-width:120px;max-width:220px;line-height:1.4}
+table{width:100%;border-collapse:separate;border-spacing:0;min-width:580px}
+th{text-align:left;padding:1rem;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);border-bottom:1px solid var(--border);background:var(--surface)}
+td{padding:1rem;font-size:.875rem;border-bottom:1px solid var(--border);transition:background .2s;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tbody tr:hover td{background:var(--surface-hover)}
+td[contenteditable="true"]{outline:none;cursor:text}
+td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px var(--primary);border-radius:4px}
+
+/* MISC */
+.error-msg{color:var(--danger);font-size:.875rem;margin-top:.5rem;display:none;padding:.5rem;background:rgba(239,68,68,.08);border-radius:var(--radius-sm)}
+.obra-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)}
+.obra-card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.75rem}
+.obra-card-title{font-weight:700;font-size:1rem}
+.obra-card-sub{font-size:.8rem;color:var(--text-muted);margin-top:.25rem}
+.obra-card-pct{font-size:1.5rem;font-weight:900;color:var(--primary);white-space:nowrap}
+.obra-progress-bar{height:6px;background:var(--surface-hover);border-radius:999px;overflow:hidden;margin-bottom:.75rem}
+.obra-progress-fill{height:100%;background:var(--primary);border-radius:999px;transition:width .4s}
+.obra-card-footer{display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.8125rem;color:var(--text-muted)}
+.colab-item{display:flex;justify-content:space-between;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:.5rem;background:var(--bg);gap:.5rem;flex-wrap:wrap}
+
+/* BACK TO TOP */
+#btnTopo{position:fixed;bottom:1.5rem;right:1.5rem;z-index:999;width:46px;height:46px;border-radius:50%;background:var(--primary);color:#fff;border:none;font-size:1.2rem;cursor:pointer;box-shadow:var(--shadow-md);opacity:0;transition:opacity .3s,transform .2s;display:flex;align-items:center;justify-content:center;pointer-events:none;}
+#btnTopo.visible{opacity:1;pointer-events:auto;}
+
+/* RESPONSIVE */
+@media(max-width:1100px){
+  .admin-layout{grid-template-columns:1fr}
+  .admin-sidebar{position:static;max-height:none;overflow-y:visible}
+  .admin-stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .dashboard{grid-template-columns:1fr}
+  .nav{position:static;max-height:none;overflow-y:visible}
+}
+@media(max-width:640px){
+  .container{padding:1rem}
+  .header{margin-bottom:1.25rem;gap:.5rem;flex-wrap:wrap}
+  .brand-text h1{font-size:1rem !important}
+  .brand-text p{font-size:.72rem !important}
+  .btn{padding:.45rem .7rem;font-size:.75rem}
+  .admin-stats-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem;margin-bottom:1rem}
+  .stat-card.compact{min-height:88px;padding:.85rem}
+  .stat-card.compact .stat-value{font-size:1rem}
+  .stat-card.compact .stat-label{font-size:.7rem}
+  .stats-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}
+  .stat-value{font-size:1.4rem}
+  .panel{padding:1rem;margin-bottom:1rem}
+  .obra-card{padding:1rem}
+  .obra-card-pct{font-size:1.2rem}
+  .obra-card-footer{gap:.75rem;font-size:.75rem}
+  table{min-width:480px}
+  th{padding:.55rem .5rem;font-size:.68rem}
+  td{padding:.55rem .5rem;font-size:.72rem}
+  .td-desc{min-width:90px;max-width:140px;font-size:.7rem}
+  .chart-container{height:240px}
+  .chart-scroll-wrap{overflow-x:auto !important}
+  .admin-sidebar{position:static !important;max-height:none !important;overflow-y:visible !important}
+  .nav{position:static !important;max-height:none !important;overflow-y:visible !important}
+  #btnTopo{bottom:1rem;right:1rem;width:42px;height:42px;font-size:1rem}
+}
 </style>
 </head>
 <body>
 <button id="btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Voltar ao início">↑</button>
+
+<!-- LOGIN -->
 <div id="loginView" class="login-wrapper">
   <div class="login-card">
-    <div class="brand-login"><div class="logo logo-large">RA</div><div><h1 style="font-size:1.5rem;font-weight:700">Cronograma PRO</h1><p style="color:var(--text-muted);font-size:.875rem">Acesse sua conta</p></div></div>
-    <form id="loginForm"><div class="form-group"><label>E-mail</label><input type="email" id="loginEmail" class="form-control" placeholder="seu@email.com" required></div><div class="form-group"><label>Senha</label><input type="password" id="loginSenha" class="form-control" placeholder="••••••••" required></div><div id="loginError" class="error-msg"></div><button type="submit" class="btn btn-primary" id="loginBtn" style="width:100%;padding:.875rem;margin-top:.75rem">Entrar</button></form>
+    <div class="brand-login">
+      <div class="logo logo-large">RA</div>
+      <div><h1 style="font-size:1.5rem;font-weight:700">Cronograma PRO</h1>
+      <p style="color:var(--text-muted);font-size:.875rem">Acesse sua conta</p></div>
+    </div>
+    <form id="loginForm">
+      <div class="form-group"><label>E-mail</label><input type="email" id="loginEmail" class="form-control" placeholder="seu@email.com" required></div>
+      <div class="form-group"><label>Senha</label><input type="password" id="loginSenha" class="form-control" placeholder="••••••••" required></div>
+      <div id="loginError" class="error-msg"></div>
+      <button type="submit" class="btn btn-primary" id="loginBtn" style="width:100%;padding:.875rem;margin-top:.75rem">Entrar</button>
+    </form>
   </div>
 </div>
-<div id="adminView" style="display:none"><div class="container"><header class="header"><div class="brand"><div class="logo">RA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Visão Geral do Gestor</p></div></div><div class="header-actions"><button class="btn btn-sec" id="adminToggleColab">👥 Gerenciar Colaboradores</button><button class="btn btn-sec" id="logoutBtnAdmin" style="color:var(--danger)">Sair</button></div></header><div id="adminColabPanel" class="panel" style="display:none"><div class="admin-colabpanel-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem"><div><h3 style="font-size:.9rem;margin-bottom:.5rem;color:var(--text-muted)">CADASTRAR COLABORADOR</h3><form id="addColabForm"><div class="form-group"><label>Nome</label><input type="text" id="colabNome" class="form-control" required></div><div class="form-group"><label>E-mail</label><input type="email" id="colabEmail" class="form-control" required></div><div class="form-group"><label>Senha</label><input type="password" id="colabSenha" class="form-control" minlength="6" required></div><div id="colabMsgError" class="error-msg"></div><button type="submit" class="btn btn-primary" id="addColabBtn" style="width:100%;margin-top:.5rem">Cadastrar colaborador</button></form></div><div><h3 style="font-size:.9rem;margin-bottom:1rem;color:var(--text-muted)">COLABORADORES ATIVOS</h3><div id="colabList"></div></div></div></div><div class="stats-grid" id="adminStats"></div><div class="admin-layout"><div class="admin-sidebar"><h3>Colaboradores</h3><div id="adminColabSidebar"></div></div><div><div id="adminDetailPanel" class="panel"></div></div></div></div></div>
-<div id="appView" style="display:none"><div class="container"><header class="header"><div class="brand"><div class="logo">RA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Minhas Obras</p></div></div><div class="header-actions"><button class="btn btn-sec" id="toggleTheme">Tema</button><button class="btn btn-sec" id="logoutBtnUser" style="color:var(--danger)">Sair</button></div></header><div class="dashboard"><aside><div class="nav"><div class="nav-item active"><span>Dashboard</span><span class="badge" id="countAll">R$ 0</span></div><div class="nav-item"><span>Acumulado</span><span class="badge" id="countDone" style="color:var(--success)">R$ 0</span></div><div class="nav-item"><span>Progresso</span><span class="badge" id="countPct">0%</span></div><div class="panel mt-4" style="padding:1rem"><h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">AÇÕES DE ARQUIVO</h3><div style="display:flex;flex-direction:column;gap:.5rem"><button class="btn btn-sec" id="loadFile" style="width:100%">Importar arquivo</button><button class="btn btn-primary" id="saveJson" style="width:100%">Exportar JSON</button></div></div><div class="panel" style="padding:1rem"><h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">OBRAS SALVAS</h3><div id="obrasBox"></div><div style="margin-top:1rem"><button class="btn btn-primary" id="addObraBtn" style="width:100%">Adicionar nova obra</button></div></div><div class="panel" style="padding:1rem"><h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">NOVA ATIVIDADE</h3><div style="display:flex;flex-direction:column;gap:.5rem"><div class="form-group"><label>Nº Item</label><input type="text" id="fItem" class="form-control"></div><div class="form-group"><label>Descrição</label><input type="text" id="fName" class="form-control"></div><div class="form-group"><label>Valor Contrato (R$)</label><input type="text" id="fValorContrato" class="form-control" inputmode="decimal"></div><div class="form-group"><label>Medição (R$)</label><input type="text" id="fMedicao" class="form-control" inputmode="decimal"></div><div class="form-group"><label>Acumulado (R$)</label><input type="text" id="fAcumulado" class="form-control" inputmode="decimal"></div><div class="form-group"><label>Saldo (R$)</label><input type="text" id="fSaldo" class="form-control" readonly></div><div class="form-group"><label>% Executada</label><input type="text" id="fPct" class="form-control" readonly></div><button class="btn btn-primary" id="addRow" style="width:100%">➕ Adicionar ao Índice</button></div></div></div></aside><main><div class="panel"><div class="flex-between mb-4"><h2>Configurações do Projeto</h2></div><div class="form-grid"><div class="form-group" style="grid-column:1/-1"><label>Nome do Projeto</label><input type="text" id="projName" class="form-control"></div><div class="form-group"><label>Cliente / Setor</label><input type="text" id="projClient" class="form-control"></div><div class="form-group"><label>Escopo / Fase</label><input type="text" id="projScope" class="form-control"></div></div></div><div class="panel" style="margin-bottom:1.5rem"><h2 class="mb-4">Curva S — Progresso Físico</h2><div class="chart-scroll-wrap" id="sCurveScrollWrap"><div class="chart-container"><canvas id="sCurveChart"></canvas></div></div></div><div class="stats-grid" id="stats"></div><div class="panel"><div class="flex-between"><h2>Índice / Itens Principais</h2><div><button class="btn btn-sec" id="fillSample" style="margin-right:.5rem">Limpar</button><button class="btn btn-sec" id="exportCsv">Exportar CSV</button></div></div><div class="table-container"><table><thead><tr><th class="th-sticky">Item</th><th class="th-sticky">Descrição</th><th class="th-sticky" style="text-align:right">Valor Contrato</th><th class="th-sticky" style="text-align:right">Medição</th><th class="th-sticky" style="text-align:right">Acumulado</th><th class="th-sticky" style="text-align:right">Saldo</th><th class="th-sticky" style="text-align:right">% Executada</th><th class="th-sticky"></th></tr></thead><tbody id="tbody"></tbody></table></div></div></main></div></div></div>
+
+<!-- ADMIN VIEW -->
+<div id="adminView" style="display:none">
+  <div class="container">
+    <header class="header">
+      <div class="brand"><div class="logo">RA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Visão Geral do Gestor</p></div></div>
+      <div class="header-actions">
+        <button class="btn btn-sec" id="adminToggleColab">👥 Gerenciar Colaboradores</button>
+        <button class="btn btn-sec" id="logoutBtnAdmin" style="color:var(--danger)">Sair</button>
+      </div>
+    </header>
+    <div id="adminColabPanel" class="panel" style="display:none">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem">
+        <div>
+          <h3 style="font-size:.9rem;margin-bottom:.75rem;color:var(--text-muted)">CADASTRAR COLABORADOR</h3>
+          <form id="addColabForm">
+            <div class="form-group"><label>Nome</label><input type="text" id="colabNome" class="form-control" required></div>
+            <div class="form-group"><label>E-mail</label><input type="email" id="colabEmail" class="form-control" required></div>
+            <div class="form-group"><label>Senha</label><input type="password" id="colabSenha" class="form-control" minlength="6" required></div>
+            <div id="colabMsgError" class="error-msg"></div>
+            <button type="submit" class="btn btn-primary" id="addColabBtn" style="width:100%;margin-top:.5rem">Cadastrar colaborador</button>
+          </form>
+        </div>
+        <div>
+          <h3 style="font-size:.9rem;margin-bottom:1rem;color:var(--text-muted)">COLABORADORES ATIVOS</h3>
+          <div id="colabList"></div>
+        </div>
+      </div>
+    </div>
+    <div class="stats-grid" id="adminStats"></div>
+    <div class="admin-layout">
+      <div class="admin-sidebar"><h3>Colaboradores</h3><div id="adminColabSidebar"></div></div>
+      <div><div id="adminDetailPanel" class="panel"></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- USER / COLAB VIEW -->
+<div id="appView" style="display:none">
+  <div class="container">
+    <header class="header">
+      <div class="brand"><div class="logo">RA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Minhas Obras</p></div></div>
+      <div class="header-actions">
+        <button class="btn btn-sec" id="toggleTheme">🌙 Tema</button>
+        <button class="btn btn-sec" id="logoutBtnUser" style="color:var(--danger)">Sair</button>
+      </div>
+    </header>
+    <div class="dashboard">
+      <aside>
+        <div class="nav">
+          <div class="nav-item active"><span>Dashboard</span><span class="badge" id="countAll">R$ 0</span></div>
+          <div class="nav-item"><span>Acumulado</span><span class="badge" id="countDone" style="color:var(--success)">R$ 0</span></div>
+          <div class="nav-item"><span>Progresso</span><span class="badge" id="countPct">0%</span></div>
+        </div>
+        <div class="panel" style="padding:1rem;margin-top:1rem">
+          <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">AÇÕES DE ARQUIVO</h3>
+          <div style="display:flex;flex-direction:column;gap:.5rem">
+            <button class="btn btn-sec" id="loadFile" style="width:100%">📂 Importar arquivo</button>
+            <button class="btn btn-primary" id="saveJson" style="width:100%">⬇️ Exportar JSON</button>
+          </div>
+        </div>
+        <div class="panel" style="padding:1rem">
+          <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">OBRAS SALVAS</h3>
+          <div id="obrasBox"></div>
+          <div style="margin-top:1rem"><button class="btn btn-primary" id="addObraBtn" style="width:100%">➕ Adicionar nova obra</button></div>
+        </div>
+        <div class="panel" style="padding:1rem">
+          <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">NOVA ATIVIDADE</h3>
+          <div style="display:flex;flex-direction:column;gap:.5rem">
+            <div class="form-group"><label>Nº Item</label><input type="text" id="fItem" class="form-control"></div>
+            <div class="form-group"><label>Descrição</label><input type="text" id="fName" class="form-control"></div>
+            <div class="form-group"><label>Valor Contrato (R$)</label><input type="text" id="fValorContrato" class="form-control" inputmode="decimal"></div>
+            <div class="form-group"><label>Medição (R$)</label><input type="text" id="fMedicao" class="form-control" inputmode="decimal"></div>
+            <div class="form-group"><label>Acumulado (R$)</label><input type="text" id="fAcumulado" class="form-control" inputmode="decimal"></div>
+            <div class="form-group"><label>Saldo (R$)</label><input type="text" id="fSaldo" class="form-control" readonly></div>
+            <div class="form-group"><label>% Executada</label><input type="text" id="fPct" class="form-control" readonly></div>
+            <button class="btn btn-primary" id="addRow" style="width:100%">➕ Adicionar ao Índice</button>
+          </div>
+        </div>
+      </aside>
+      <main>
+        <div class="panel">
+          <h2 style="margin-bottom:1rem">Configurações do Projeto</h2>
+          <div class="form-grid">
+            <div class="form-group" style="grid-column:1/-1"><label>Nome do Projeto</label><input type="text" id="projName" class="form-control"></div>
+            <div class="form-group"><label>Cliente / Setor</label><input type="text" id="projClient" class="form-control"></div>
+            <div class="form-group"><label>Medição / Fase</label><input type="text" id="projScope" class="form-control"></div>
+          </div>
+        </div>
+        <div class="panel" style="margin-bottom:1.5rem">
+          <h2 style="margin-bottom:1rem">Curva S — Progresso Físico</h2>
+          <div class="chart-scroll-wrap" id="sCurveScrollWrap"><div class="chart-container"><canvas id="sCurveChart"></canvas></div></div>
+        </div>
+        <div class="stats-grid" id="stats"></div>
+        <div class="panel">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem">
+            <h2>Índice / Itens Principais</h2>
+            <div style="display:flex;gap:.5rem">
+              <button class="btn btn-sec" id="fillSample">🗑 Limpar</button>
+              <button class="btn btn-sec" id="exportCsv">📊 Exportar CSV</button>
+            </div>
+          </div>
+          <div class="table-container">
+            <table>
+              <thead><tr>
+                <th class="th-sticky">Item</th>
+                <th class="th-sticky">Descrição</th>
+                <th class="th-sticky" style="text-align:right">Valor Contrato</th>
+                <th class="th-sticky" style="text-align:right">Medição</th>
+                <th class="th-sticky" style="text-align:right">Acumulado</th>
+                <th class="th-sticky" style="text-align:right">Saldo</th>
+                <th class="th-sticky" style="text-align:right">% Executada</th>
+                <th class="th-sticky"></th>
+              </tr></thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+</div>
 </body>
 </html>
