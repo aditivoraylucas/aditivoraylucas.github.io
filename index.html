@@ -36,6 +36,9 @@ const baseName = n  => String(n||'').replace(/\.[^.]+$/,'');
 const money    = fmtMoney;
 const pct      = n  => `${Number(n||0).toFixed(2)}%`;
 
+/* Extensões reconhecidas como Excel/planilha */
+const EXCEL_EXTS = new Set(['xls','xlsx','xlsm','xlsb','xlam','xla','ods','csv']);
+
 const state = {
   user: null, admin: false, userName: '',
   obras: [], selectedObraId: null, rows: [],
@@ -86,15 +89,6 @@ function detectSheet(wb){
   return wb.SheetNames.at(-1);
 }
 
-/*
- * ─── DETECÇÃO DE COLUNAS ─────────────────────────────────────────────────────
- * Regra para "vc" (valor de contrato do item):
- *   A coluna é identificada pelo cabeçalho que contenha qualquer variação de
- *   "valor contrato", "valor do contrato", "vl contrato", "vlr contrato",
- *   "valor total do contrato", "valor ct", etc.
- *   O valor lido para cada item vem SEMPRE da mesma linha do item, nessa coluna.
- *   Nunca é buscado em outra linha ou coluna.
- */
 function detectColumns(headerRows){
   const RE = {
     desc:  /discrimina|descri[çc]ao|servic[oa]|servi[çc]/,
@@ -131,11 +125,6 @@ function fallbackColumns(firstDataRow, cols){
   return cols;
 }
 
-/*
- * ─── DETECÇÃO DE VALOR DE CONTRATO (cabeçalho da planilha) ───────────────────
- * Usado apenas para preencher resumo.valorContratoAditivo (valor total da obra).
- * NÃO interfere no valor de contrato por item — esse sempre vem da linha do item.
- */
 function findValorContrato(rows){
   const PATTERNS = [
     [1, /valor\s*ct\s*[\/\\]\s*ta/i],
@@ -145,9 +134,7 @@ function findValorContrato(rows){
     [5, /valor\s+de\s+contrato\s+com\s+reajuste(?!\s+e)/i],
     [6, /valor\s+de\s+contrato\s+com\s+reajuste\s+e\s+aditivo/i],
   ];
-
   const candidates = [];
-
   function tryGetValue(rows, r, c){
     const row = rows[r] || [];
     for(let cc = c+1; cc < Math.min(c+16, row.length); cc++){
@@ -162,7 +149,6 @@ function findValorContrato(rows){
     }
     return 0;
   }
-
   for(let r = 0; r < rows.length; r++){
     const row = rows[r] || [];
     for(let c = 0; c < row.length; c++){
@@ -176,7 +162,6 @@ function findValorContrato(rows){
       }
     }
   }
-
   if(!candidates.length) return 0;
   candidates.sort((a,b) => a.pri - b.pri || b.v - a.v);
   return candidates[0].v;
@@ -188,9 +173,7 @@ function extractMetaFromHeaders(data, firstDataRowIdx){
   const RE_CONT = /contratada/i;
   let acu=0, contratada='';
   const rows = firstDataRowIdx>0 ? data.slice(0,firstDataRowIdx) : data.slice(0,Math.min(50,data.length));
-
   const vca = findValorContrato(rows);
-
   let acumColHeader = -1, acumRowHeader = -1;
   for(let r=0; r<rows.length; r++){
     const row = rows[r]||[];
@@ -238,7 +221,6 @@ function extractMetaFromHeaders(data, firstDataRowIdx){
       if(acu) break;
     }
   }
-
   for(let r=0; r<rows.length; r++){
     const row=rows[r]||[];
     for(let c=0; c<row.length; c++){
@@ -270,16 +252,14 @@ function detectItemCol(data){
 
 async function readExcelFile(file){
   const buffer=await file.arrayBuffer();
+  /*
+   * XLSX.read aceita qualquer formato suportado pela biblioteca:
+   * .xlsx, .xls, .xlsm, .xlsb, .ods, .csv — todos tratados da mesma forma.
+   */
   const wb=XLSX.read(new Uint8Array(buffer),{type:'array',cellDates:false,cellNF:false,cellText:false});
   const sheetName=detectSheet(wb);
   if(!sheetName) throw new Error('Nenhuma aba encontrada na planilha.');
   const ws=wb.Sheets[sheetName];
-
-  /*
-   * ─── LEITURA DE DADOS ────────────────────────────────────────────────────────
-   * Sempre lê TODAS as linhas da planilha, independente de outline/agrupamento.
-   * Outline (níveis de agrupamento / estrutura de tópicos) é completamente ignorado.
-   */
   const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
   if(!data.length) throw new Error(`A aba "${sheetName}" está vazia.`);
 
@@ -292,21 +272,11 @@ async function readExcelFile(file){
   const headerRows=firstDataRowIdx>0 ? data.slice(0,firstDataRowIdx) : data.slice(0,Math.min(25,data.length));
   let cols=detectColumns(headerRows);
 
-  /*
-   * ─── FALLBACK PARA vc ────────────────────────────────────────────────────────
-   * Se o cabeçalho não identificou a coluna de valor de contrato,
-   * percorre a primeira linha de dados e pega a primeira coluna numérica > 0
-   * que esteja ANTES das colunas de med/acum/saldo (ou antes da posição delas).
-   * Isso garante que vc aponte para a coluna correta do item.
-   */
   if(firstDataRowIdx>=0){
     if(cols.vc<0 || cols.acum<0){
       cols=fallbackColumns(data[firstDataRowIdx]||[], cols);
     }
-    // Se vc ainda não foi detectado pelo header mas med/acum foram,
-    // tenta a coluna imediatamente anterior a med (padrão comum nas planilhas).
     if(cols.vc<0 && cols.med>0){
-      // busca a última coluna numérica > 0 antes de med na linha do item
       const fdr=data[firstDataRowIdx]||[];
       for(let c=cols.med-1; c>=1; c--){
         if(isNum(fdr[c]) && Number(fdr[c])>0){ cols.vc=c; break; }
@@ -316,14 +286,6 @@ async function readExcelFile(file){
 
   const meta=extractMetaFromHeaders(data,firstDataRowIdx);
 
-  /*
-   * ─── LEITURA DOS ITENS ───────────────────────────────────────────────────────
-   * Regra do "valor de contrato" por item:
-   *   - Sempre lido de row[cols.vc] na mesma linha do item (1, 2, 3...).
-   *   - cols.vc é determinado pelo cabeçalho (detectColumns) ou pelo fallback acima.
-   *   - NUNCA buscado em outra linha, nunca herdado de linha anterior.
-   *   - Se a célula estiver vazia ou zero, o item fica com vc=0 (não pega de outro lugar).
-   */
   const items=[], warnings=[];
   for(let r=0; r<data.length; r++){
     const row=data[r]||[];
@@ -336,9 +298,8 @@ async function readExcelFile(file){
       for(let c=itemCol+1;c<lim;c++){
         const v=String(row[c]??'').trim();
         if(v&&!isNum(row[c])){ descricao=v; break; }
+      }
     }
-    }
-    // Valor de contrato: SEMPRE da coluna cols.vc na linha do item.
     const vc  =cols.vc   >=0 ? (Number(row[cols.vc])   || 0) : 0;
     const med =cols.med  >=0 ? (Number(row[cols.med])  || 0) : 0;
     const acum=cols.acum >=0 ? (Number(row[cols.acum]) || 0) : 0;
@@ -385,33 +346,57 @@ function normalizeRows(list){
 async function importFile(replace=false){
   const input=document.createElement('input');
   input.type='file';
-  input.accept='.json,.xlsx,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  /*
+   * Aceita todos os formatos de planilha suportados pela SheetJS:
+   *   .xlsx  — Excel moderno
+   *   .xls   — Excel legado (97-2003)
+   *   .xlsm  — Excel com macros
+   *   .xlsb  — Excel binário
+   *   .ods   — LibreOffice / OpenDocument
+   *   .csv   — Texto separado por vírgula
+   *   .json  — Export interno do sistema
+   */
+  input.accept=[
+    '.xlsx','.xls','.xlsm','.xlsb','.xlam','.xla','.ods','.csv','.json',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+    'application/vnd.ms-excel.sheet.macroEnabled.12',
+    'application/vnd.ms-excel.sheet.binary.macroEnabled.12',
+    'application/vnd.oasis.opendocument.spreadsheet',
+    'text/csv',
+    'application/json'
+  ].join(',');
   input.onchange=async e=>{
     if(!e.target.files.length) return;
     const file=e.target.files[0];
     const ext=file.name.split('.').pop().toLowerCase();
     try{
       let obj,rows=[];
-      if(ext==='xlsx'){
+      if(EXCEL_EXTS.has(ext)){
+        /* Todos os formatos de planilha passam pelo mesmo readExcelFile */
         obj=await readExcelFile(file);
         rows=normalizeRows(obj.itens);
         if(obj.warnings?.length) console.warn('[Import]',obj.warnings.slice(0,5).join('\n'));
-      } else {
+      } else if(ext==='json'){
         const text=await file.text();
         obj=JSON.parse(text);
         rows=Array.isArray(obj)?normalizeRows(obj):normalizeRows(obj.itens);
         if(!rows.length&&!Array.isArray(obj)&&!Array.isArray(obj.itens))
           throw new Error('JSON inválido.');
+      } else {
+        /* Tenta como planilha mesmo sem extensão reconhecida */
+        obj=await readExcelFile(file);
+        rows=normalizeRows(obj.itens);
       }
       const obraId=replace&&state.selectedObraId?state.selectedObraId:('obra_'+Date.now());
-      const obraNome=baseName(file.name)||obj.nome||'Nova obra';
+      const obraNome=baseName(file.name)||obj?.nome||'Nova obra';
       const obra={
         id:obraId, nome:obraNome,
-        nomeProjeto:obj.nomeProjeto||obj.obra||obraNome,
-        contratada:obj.contratada||'',
+        nomeProjeto:obj?.nomeProjeto||obj?.obra||obraNome,
+        contratada:obj?.contratada||'',
         arquivoNome:file.name, origem:ext,
-        medicaoAtual:obj.medicaoAtual||'',
-        itens:rows, resumo:obj.resumo||{percentual:0}
+        medicaoAtual:obj?.medicaoAtual||'',
+        itens:rows, resumo:obj?.resumo||{percentual:0}
       };
       await saveObra(obra);
       state.selectedObraId=obraId;
@@ -719,4 +704,184 @@ function setupColabForm(){
     const adminEmail=state.user.email;
     try{
       const cred=await createUserWithEmailAndPassword(auth,email,senha);
-      await setDoc(doc(db,'users',cred.user.uid),{nome,email,role:'colaborador',criadoEm:Dat
+      await setDoc(doc(db,'users',cred.user.uid),{nome,email,role:'colaborador',criadoEm:Date.now(),disabled:false,blocked:false});
+      await signOut(auth);
+      await signInWithEmailAndPassword(auth,adminEmail,ADMIN_SENHA);
+      $('colabNome').value=''; $('colabEmail').value=''; $('colabSenha').value='';
+      showToast(`✅ "${nome}" cadastrado!`);
+    }catch(err){ msgEl.textContent=err?.message||'Erro.'; msgEl.style.display='block'; }
+    finally{ btn.disabled=false; btn.textContent='Cadastrar colaborador'; }
+  });
+}
+
+/* ─── NOVA ATIVIDADE ─── */
+function setupNovaAtividade(){
+  const recalc=()=>{
+    const vc=parseMoney($('fValorContrato').value), acu=parseMoney($('fAcumulado').value);
+    if(vc>0){ $('fSaldo').value=(vc-acu).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); $('fPct').value=(acu/vc*100).toFixed(2); }
+    else { $('fSaldo').value=''; $('fPct').value=''; }
+  };
+  ['fValorContrato','fMedicao','fAcumulado'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input',recalc); });
+  $('addRow').onclick=()=>{
+    const item=$('fItem').value.trim(), desc=$('fName').value.trim();
+    if(!item&&!desc){ showToast('⚠️ Preencha item ou descrição.',true); return; }
+    const vc=parseMoney($('fValorContrato').value), med=parseMoney($('fMedicao').value), acu=parseMoney($('fAcumulado').value);
+    const saldo=vc>0?vc-acu:0, p=vc>0?+(acu/vc*100).toFixed(2):0;
+    state.rows.push({item,descricao:desc,valorContrato:vc,medicao:med,acumulado:acu,saldo,percentualExecutado:p});
+    const o=currentObra(); if(o){ o.itens=state.rows; saveObra(o); }
+    renderAll();
+    $('fItem').value=''; $('fName').value=''; $('fValorContrato').value=''; $('fMedicao').value=''; $('fAcumulado').value=''; $('fSaldo').value=''; $('fPct').value='';
+    showToast('✅ Item adicionado.');
+  };
+}
+
+/* ─── BIND EVENTS ─── */
+function bindEvents(){
+  $('loginForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const email=$('loginEmail').value.trim(), senha=$('loginSenha').value, btn=$('loginBtn');
+    btn.disabled=true; btn.textContent='Entrando...'; $('loginError').style.display='none';
+    try{ await signInWithEmailAndPassword(auth,email,senha); }
+    catch{ $('loginError').textContent='E-mail ou senha inválidos.'; $('loginError').style.display='block'; }
+    finally{ btn.disabled=false; btn.textContent='Entrar'; }
+  });
+  $('logoutBtnAdmin').addEventListener('click',()=>{ cleanup(); signOut(auth); });
+  $('logoutBtnUser').addEventListener('click',()=>{ cleanup(); signOut(auth); });
+  $('toggleTheme').onclick=()=>{
+    document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';
+    if(state.rows.length) state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser);
+  };
+  $('adminToggleColab').onclick=()=>{ const p=$('adminColabPanel'); p.style.display=p.style.display==='none'?'block':'none'; };
+  $('loadFile').onclick=()=>importFile(false);
+  $('addObraBtn').onclick=()=>importFile(false);
+  $('fillSample').onclick=()=>{
+    if(!confirm('Limpar todos os itens?')) return;
+    state.rows=[]; const o=currentObra(); if(o){ o.itens=[]; saveObra(o); } renderAll();
+  };
+  $('exportCsv').onclick=()=>{
+    const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];
+    const body=state.rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob=new Blob([fields.join(',')+' \n'+body],{type:'text/csv;charset=utf-8'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='cronograma.csv'; a.click(); URL.revokeObjectURL(a.href);
+  };
+  $('saveJson').onclick=()=>{
+    const o=currentObra(), name=$('projName').value.trim()||'projeto';
+    const blob=new Blob([JSON.stringify({obra:name,medicaoAtual:o?.medicaoAtual||'',itens:state.rows},null,2)],{type:'application/json;charset=utf-8'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name.replace(/[^a-zA-Z0-9\-_]/g,'-').toLowerCase()+'.json'; a.click(); URL.revokeObjectURL(a.href);
+  };
+  $('projContratada').addEventListener('input',()=>{
+    const o=currentObra(); if(!o) return;
+    o.contratada=$('projContratada').value.trim(); scheduleSave();
+  });
+  $('tbody').addEventListener('input',e=>{
+    const t=e.target, tr=t.closest('tr'); if(!tr) return;
+    const i=+tr.dataset.i, k=t.dataset.k; if(!k) return;
+    if(['valorContrato','medicao','acumulado','saldo','percentualExecutado'].includes(k))
+      state.rows[i][k]=Number(t.textContent.replace(',','.').replace(/[^\d.-]/g,''))||0;
+    else state.rows[i][k]=t.textContent.trim();
+    updateDashboard(); scheduleSave();
+  });
+  $('tbody').addEventListener('focusout',e=>{
+    const t=e.target, tr=t.closest('tr'); if(!tr) return;
+    const i=+tr.dataset.i, k=t.dataset.k;
+    if(k&&['valorContrato','medicao','acumulado','saldo'].includes(k)) t.textContent=money(state.rows[i][k]);
+    else if(k==='percentualExecutado') t.textContent=Number(state.rows[i][k]).toFixed(2);
+  });
+  $('tbody').addEventListener('click',e=>{
+    const b=e.target.closest('button[data-del]'); if(!b) return;
+    state.rows.splice(+b.dataset.del,1);
+    const o=currentObra(); if(o){ o.itens=state.rows; saveObra(o); }
+    renderAll();
+  });
+  window.addEventListener('scroll',()=>{ const b=$('btnTopo'); if(b) b.classList.toggle('visible',window.scrollY>200); });
+}
+
+window.adminSelectColab  =uid=>{ state.adminSelectedUid=uid; state.adminSelectedObraId=null; renderAdminSidebar(); renderAdminDetail(); };
+window.adminDeselectColab=()=>{ state.adminSelectedUid=null; state.adminSelectedObraId=null; renderAdminSidebar(); renderAdminDetail(); };
+window.adminSelectObra   =id=>{ state.adminSelectedObraId=id||null; renderAdminDetail(); };
+window.toggleBloqueio=async(uid,isBlocked)=>{
+  await updateDoc(doc(db,'users',uid),{blocked:!isBlocked});
+  state.allUsers[uid].blocked=!isBlocked;
+  renderColabList(); renderAdminSidebar();
+  if(state.adminSelectedUid===uid) renderAdminDetail();
+};
+window.removeColab=async uid=>{
+  if(!confirm('Remover colaborador?')) return;
+  await updateDoc(doc(db,'users',uid),{disabled:true});
+  delete state.allUsers[uid];
+  if(state.adminSubs[uid]){ state.adminSubs[uid](); delete state.adminSubs[uid]; }
+  if(state.adminSelectedUid===uid){ state.adminSelectedUid=null; state.adminSelectedObraId=null; }
+  renderAdminViews(); renderAdminDetail();
+  showToast('✅ Colaborador removido.');
+};
+
+async function init(){
+  bindEvents(); setupNovaAtividade();
+  onAuthStateChanged(auth,async user=>{
+    state.user=user;
+    if(!user){ showView('loginView'); return; }
+    const snap=await getDoc(doc(db,'users',user.uid));
+    if(!snap.exists()){ cleanup(); await signOut(auth); return; }
+    const data=snap.data();
+    state.admin=data.role==='admin';
+    if(data.disabled===true||data.blocked===true){ cleanup(); await signOut(auth); return; }
+    state.userName = data.nome || (user.email ? user.email.split('@')[0] : '');
+    const nameEl = $('userNameDisplay');
+    if(nameEl) nameEl.textContent = state.userName.toUpperCase();
+    if(state.admin){
+      showView('adminView'); setupAdminSubs();
+      if(!state.colabFormReady){ state.colabFormReady=true; setupColabForm(); }
+    } else {
+      showView('appView');
+      state.obras=[]; state.selectedObraId=null; state.rows=[];
+      listenUserObras();
+    }
+  });
+}
+init();
+</script>
+<style>
+:root{
+  --bg:#f7f9fc;--surface:#fff;--surface-hover:#f1f5f9;
+  --text:#0f172a;--text-muted:#64748b;
+  --border:rgba(15,23,42,.1);--border-focus:#6366f1;
+  --primary:#4f46e5;--primary-hover:#4338ca;
+  --success:#10b981;--danger:#ef4444;--warning:#f59e0b;
+  --radius-sm:.5rem;--radius-md:.75rem;--radius-lg:1rem;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.05);
+  --shadow-md:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px -1px rgba(0,0,0,.06);
+  --shadow-lg:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -2px rgba(0,0,0,.05);
+  --font:'Satoshi',system-ui,sans-serif;
+  --aside-w:270px;
+}
+[data-theme="dark"]{
+  --bg:#0f172a;--surface:#1e293b;--surface-hover:#334155;
+  --text:#f8fafc;--text-muted:#94a3b8;
+  --border:rgba(255,255,255,.1);--border-focus:#818cf8;
+  --primary:#6366f1;--primary-hover:#818cf8;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.5;transition:background .2s}
+.toast{position:fixed;bottom:5rem;left:50%;transform:translateX(-50%);background:#1e293b;color:#f8fafc;padding:.7rem 1.4rem;border-radius:var(--radius-md);font-size:.875rem;font-weight:600;box-shadow:var(--shadow-lg);z-index:9999;max-width:90vw;text-align:center;transition:opacity .4s}
+.toast-error{background:#7f1d1d;color:#fecaca}
+.login-wrapper{display:flex;min-height:100vh;align-items:center;justify-content:center;padding:1rem;background:linear-gradient(135deg,#f3e8ff,#eff6ff 45%,#ecfdf5)}
+[data-theme="dark"] .login-wrapper{background:linear-gradient(135deg,#1e1b4b,#172554 45%,#064e3b)}
+.login-card{background:var(--surface);width:100%;max-width:400px;padding:2.5rem;border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);border:1px solid var(--border)}
+.brand-login{display:flex;flex-direction:column;align-items:center;gap:1rem;margin-bottom:2rem;text-align:center}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;padding:.625rem 1.25rem;border-radius:var(--radius-sm);font-weight:600;font-size:.875rem;font-family:inherit;cursor:pointer;transition:all .2s;border:1px solid transparent}
+.btn-primary{background:var(--primary);color:#fff;box-shadow:var(--shadow-sm)}
+.btn-primary:hover{background:var(--primary-hover)}
+.btn-sec{background:var(--surface);color:var(--text);border-color:var(--border)}
+.btn-danger{color:var(--danger);background:rgba(239,68,68,.1)}
+.btn-warning{color:#92400e;background:rgba(245,158,11,.12)}
+.btn-success{color:#065f46;background:rgba(16,185,129,.12)}
+.app-shell{display:grid;grid-template-columns:var(--aside-w) 1fr;grid-template-rows:auto 1fr;height:100vh;overflow:hidden}
+.app-topbar{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;padding:.875rem 2rem;background:var(--surface);border-bottom:1px solid var(--border);gap:.75rem;z-index:20}
+.app-aside{grid-column:1;grid-row:2;overflow-y:auto;background:var(--surface);border-right:1px solid var(--border);padding:1rem;display:flex;flex-direction:column;gap:.75rem}
+.app-main{grid-column:2;grid-row:2;overflow-y:auto;padding:1.5rem 2rem}
+.brand{display:flex;align-items:center;gap:1rem;min-width:0}
+.brand-text h1{font-size:1.25rem;font-weight:700;white-space:nowrap}
+.brand-text p{color:var(--text-muted);font-size:.8rem;white-space:nowrap}
+.header-actions{display:flex;gap:.5rem;align-items:center;flex-shrink:0}
+.user-chip{display:inline-flex;align-items:center;gap:.4rem;background:rgba(99,102,241,.1);color:var(--primary);border:1px solid rgba(99,102,241,.25);border-radius:999px;padding:.3rem .85rem;font-size:.
