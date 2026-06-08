@@ -111,22 +111,12 @@
       const isMobile = window.innerWidth <= 640;
       const minBar   = isMobile ? 8  : 18;
       const maxBar   = isMobile ? 18 : 40;
-      // no mobile usamos a largura real disponível para calcular
       const space    = isMobile ? Math.max(160, window.innerWidth - 48) : 600;
       const thickness = Math.max(minBar, Math.min(maxBar, Math.floor(space / (n||1))));
-      // no mobile também permite scroll se houver muitos itens
       const minCanvasWidth = n > 0 ? Math.max(0, n * (thickness + 14)) : 0;
       return { thickness, minCanvasWidth };
     }
 
-    /**
-     * renderCurvaS — renderiza o gráfico de barras da Curva S de forma padronizada.
-     * @param {string}   canvasId    — id do elemento <canvas>
-     * @param {string}   scrollWrapId — id do wrapper que receberá overflow-x
-     * @param {Array}    itens       — array de itens com item e percentualExecutado
-     * @param {Chart|null} prevChart — instância anterior a destruir
-     * @returns {Chart}              — nova instância do Chart
-     */
     function renderCurvaS(canvasId, scrollWrapId, itens, prevChart){
       const canvas = $(canvasId);
       if(!canvas) return prevChart;
@@ -586,7 +576,6 @@
       $('countAll').textContent = fmtMoney(vcAditivo);
       $('countDone').textContent = fmtMoney(acumTotal);
       $('countPct').textContent  = pct.toFixed(2)+'%';
-      // usa função padronizada
       chartInstance = renderCurvaS('sCurveChart', 'sCurveScrollWrap', rows, chartInstance);
     }
 
@@ -648,6 +637,56 @@
       return { valorContratoAditivo, acumuladoTotal };
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // FALLBACK: busca NO PERIODO e ACUMULADO em sub-linhas de
+    // cabeçalhos mesclados (ex: planilhas tipo "MEDIÇÕES UBS")
+    // Só ativa quando a regra principal não encontrou med ou acum.
+    // Prioriza ocorrências APÓS a coluna de Valor de Contrato
+    // para pegar valores em R$ e não quantidades.
+    // ══════════════════════════════════════════════════════════════
+    function fallbackColsFromSubHeaders(data, dataStart, colsAtual){
+      const cols = Object.assign({}, colsAtual);
+      const RE_MED_FB  = /no.{0,10}period|periodo/;
+      const RE_ACUM_FB = /acumulado/;
+      const RE_SALDO_FB = /^saldo$/;
+      const headerRows = data.slice(0, dataStart < 0 ? data.length : dataStart);
+
+      // Coleta TODAS as ocorrências de cada label em todas as linhas
+      const medCandidates  = [];
+      const acumCandidates = [];
+      const saldoCandidates = [];
+
+      for(let r = 0; r < headerRows.length; r++){
+        const row = headerRows[r] || [];
+        for(let c = 0; c < row.length; c++){
+          const t = norm(row[c]);
+          if(!t) continue;
+          if(RE_MED_FB.test(t))  medCandidates.push(c);
+          if(RE_ACUM_FB.test(t)) acumCandidates.push(c);
+          if(RE_SALDO_FB.test(t)) saldoCandidates.push(c);
+        }
+      }
+
+      // Pega o valor de referência: coluna de Valor Contrato já mapeada
+      const vcRef = cols.vc >= 0 ? cols.vc : 0;
+
+      // Para cada campo não encontrado, prefere candidato após vcRef;
+      // se não houver nenhum após vcRef, usa o último encontrado.
+      function bestCandidate(candidates, currentCol){
+        if(currentCol >= 0) return currentCol; // já foi encontrado pela regra principal
+        if(!candidates.length) return -1;
+        const afterVc = candidates.filter(c => c > vcRef);
+        if(afterVc.length) return afterVc[0]; // primeiro após valor contrato
+        return candidates[candidates.length - 1]; // último disponível
+      }
+
+      cols.med   = bestCandidate(medCandidates,  cols.med);
+      cols.acum  = bestCandidate(acumCandidates, cols.acum);
+      cols.saldo = bestCandidate(saldoCandidates, cols.saldo);
+
+      return cols;
+    }
+
     async function readExcelFile(file){
       if(!file)throw new Error('Nenhum arquivo fornecido.');
       const buffer=await file.arrayBuffer();
@@ -656,6 +695,8 @@
       if(!target)throw new Error('Nenhuma aba encontrada.');
       const ws=wb.Sheets[target];
       const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
+
+      // ── Regra principal (preservada integralmente) ──
       const RE={desc:/discrimina|descri|servico/,vc:/valor.{0,25}contrato|total.{0,25}contrato/,med:/no.{0,10}period|no.{0,10}mes|^medicao$|^realizado$|periodo/,acum:/acumulado/,saldo:/^saldo$/};
       let cols={desc:-1,vc:-1,med:-1,acum:-1,saldo:-1},dataStart=-1;
       for(let r=0;r<data.length;r++){
@@ -663,7 +704,14 @@
         if(/^\d+$/.test(String(row[0]??'').trim())){dataStart=r;break;}
         for(let c=0;c<row.length;c++){const t=norm(row[c]);if(!t)continue;if(RE.desc.test(t))cols.desc=c;if(RE.vc.test(t))cols.vc=c;if(RE.med.test(t))cols.med=c;if(RE.acum.test(t))cols.acum=c;if(RE.saldo.test(t))cols.saldo=c;}
       }
+
+      // ── Fallback: só ativa se med OU acum não foram encontrados ──
+      if(cols.med < 0 || cols.acum < 0){
+        cols = fallbackColsFromSubHeaders(data, dataStart, cols);
+      }
+
       if(cols.vc<0&&dataStart>=0){const fr=data[dataStart]||[];const nc=[];for(let c=1;c<fr.length;c++)if(isNum(fr[c]))nc.push(c);const vi=nc.findIndex(c=>Number(fr[c])>0);if(vi>=0){cols.vc=nc[vi];if(cols.med<0)cols.med=nc[vi+1]??cols.vc+1;if(cols.acum<0)cols.acum=nc[vi+2]??cols.vc+2;if(cols.saldo<0)cols.saldo=nc[vi+3]??cols.vc+3;}else{cols.vc=12;cols.med=13;cols.acum=14;cols.saldo=15;}}
+
       const items=[];
       for(let r=0;r<data.length;r++){
         const row=data[r]||[];const itemStr=String(row[0]??'').trim();if(!/^\d+$/.test(itemStr))continue;
@@ -743,298 +791,4 @@
     $('addObraBtn').onclick=()=>loadFromJsonOrExcel(false);
     $('toggleTheme').onclick=()=>{document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';if(rows.length) chartInstance = renderCurvaS('sCurveChart','sCurveScrollWrap',rows,chartInstance);};
     $('exportCsv').onclick=()=>{const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];const body=rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}"`).join(',')).join('\n');const blob=new Blob([fields.join(',')+'\n'+body],{type:'text/csv;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='cronograma.csv';a.click();URL.revokeObjectURL(a.href);};
-    $('saveJson').onclick=()=>{const o=currentObra();const name=($('projName').value.trim()||'projeto');const payload={obra:name,medicaoAtual:o?.medicaoAtual||'',itens:rows};const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name.replace(/[^a-zA-Z0-9\-_]/g,'-').toLowerCase()+'.json';a.click();URL.revokeObjectURL(a.href);};
-
-    setupNovaAtividade();
-  </script>
-  <style>
-    :root{--bg:#f7f9fc;--surface:#fff;--surface-hover:#f1f5f9;--text:#0f172a;--text-muted:#64748b;--border:rgba(15,23,42,.1);--border-focus:#6366f1;--primary:#4f46e5;--primary-hover:#4338ca;--success:#10b981;--danger:#ef4444;--warning:#f59e0b;--radius-sm:.5rem;--radius-md:.75rem;--radius-lg:1rem;--shadow-sm:0 1px 2px rgba(0,0,0,.05);--shadow-md:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px -1px rgba(0,0,0,.06);--shadow-lg:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -2px rgba(0,0,0,.05);--font:'Satoshi',system-ui,sans-serif;}
-    [data-theme="dark"]{--bg:#0f172a;--surface:#1e293b;--surface-hover:#334155;--text:#f8fafc;--text-muted:#94a3b8;--border:rgba(255,255,255,.1);--border-focus:#818cf8;--primary:#6366f1;--primary-hover:#818cf8;}
-    *{box-sizing:border-box;margin:0;padding:0}body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:1.5;min-height:100vh;transition:background .2s}
-    .login-wrapper{display:flex;min-height:100vh;align-items:center;justify-content:center;padding:1rem;background:linear-gradient(135deg,#f3e8ff,#eff6ff 45%,#ecfdf5)}
-    [data-theme="dark"] .login-wrapper{background:linear-gradient(135deg,#1e1b4b,#172554 45%,#064e3b)}
-    .login-card{background:var(--surface);width:100%;max-width:400px;padding:2.5rem;border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);border:1px solid var(--border)}
-    .brand-login{display:flex;flex-direction:column;align-items:center;gap:1rem;margin-bottom:2rem;text-align:center}
-    .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;padding:.625rem 1.25rem;border-radius:var(--radius-sm);font-weight:600;font-size:.875rem;font-family:inherit;cursor:pointer;transition:all .2s;border:1px solid transparent}
-    .btn-primary{background:var(--primary);color:#fff;box-shadow:var(--shadow-sm)}.btn-primary:hover{background:var(--primary-hover);transform:translateY(-1px)}.btn-primary:disabled{opacity:.7;cursor:not-allowed;transform:none}
-    .btn-sec{background:var(--surface);color:var(--text);border-color:var(--border)}.btn-sec:hover{background:var(--surface-hover)}
-    .btn-danger{color:var(--danger);background:rgba(239,68,68,.1)}.btn-danger:hover{background:rgba(239,68,68,.2)}
-    .btn-warning{color:#92400e;background:rgba(245,158,11,.12)}.btn-warning:hover{background:rgba(245,158,11,.22)}
-    .btn-success{color:#065f46;background:rgba(16,185,129,.12)}.btn-success:hover{background:rgba(16,185,129,.22)}
-    [data-theme="dark"] .btn-warning{color:#fcd34d}[data-theme="dark"] .btn-success{color:#6ee7b7}
-    .container{max-width:1440px;margin:0 auto;padding:2rem}
-    .header{display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem;flex-wrap:nowrap;gap:.75rem}
-    .brand{display:flex;align-items:center;gap:1rem;min-width:0;flex-shrink:1}
-    .brand-text h1{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;white-space:nowrap}
-    .brand-text p{color:var(--text-muted);font-size:.875rem;white-space:nowrap}
-    .header-actions{display:flex;gap:.5rem;align-items:center;flex-shrink:0;flex-wrap:nowrap}
-    .logo{width:48px;height:48px;background:linear-gradient(135deg,var(--primary),#818cf8);color:#fff;border-radius:var(--radius-md);display:grid;place-items:center;font-weight:900;font-size:1.25rem;box-shadow:var(--shadow-md);flex-shrink:0}
-    .logo-large{width:64px;height:64px;font-size:1.5rem}
-    .admin-layout{display:grid;grid-template-columns:220px 1fr;gap:1.5rem;align-items:start}
-    .admin-sidebar{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1rem;position:sticky;top:1.5rem;max-height:calc(100vh - 3rem);overflow-y:auto}
-    .admin-sidebar h3{font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.75rem}
-    .colab-sidebar-item{padding:.75rem;border-radius:var(--radius-sm);cursor:pointer;border:1px solid transparent;margin-bottom:.375rem;transition:.15s}
-    .colab-sidebar-item:hover{background:var(--surface-hover)}
-    .colab-sidebar-item.active{background:rgba(99,102,241,.1);border-color:var(--primary);color:var(--primary)}
-    .admin-stats-grid{display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:1rem;margin-bottom:1.5rem;}
-    .stat-card.compact{min-height:100px;padding:1rem 1.1rem;justify-content:space-between;}
-    .stat-card.compact .stat-value{font-size:1.2rem;line-height:1.1;}
-    .stat-card.compact .stat-label{font-size:.75rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;}
-    .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:1.5rem}
-    .stat-card{background:var(--surface);padding:1.25rem;border-radius:var(--radius-lg);border:1px solid var(--border);display:flex;flex-direction:column;gap:.25rem;box-shadow:var(--shadow-sm)}
-    .stat-value{font-size:2rem;font-weight:900;line-height:1;color:var(--text)}.stat-label{font-size:.875rem;color:var(--text-muted);font-weight:500}
-    .dashboard{display:grid;grid-template-columns:260px 1fr;gap:2rem}
-    .panel{background:var(--surface);border-radius:var(--radius-lg);border:1px solid var(--border);box-shadow:var(--shadow-sm);padding:1.5rem;margin-bottom:1.5rem}
-    .nav{display:flex;flex-direction:column;gap:.5rem;position:sticky;top:2rem;max-height:calc(100vh - 4rem);overflow-y:auto;padding-right:.25rem}
-    .nav-item{display:flex;justify-content:space-between;padding:.75rem 1rem;border-radius:var(--radius-sm);font-weight:500;color:var(--text-muted)}
-    .nav-item.active{background:rgba(99,102,241,.1);color:var(--primary);font-weight:700}
-    .badge{background:var(--surface-hover);padding:.125rem .5rem;border-radius:999px;font-size:.75rem;border:1px solid var(--border);white-space:nowrap}
-    .nav-item.active .badge{background:#fff;color:var(--primary);border-color:transparent}
-    .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem}
-    .form-group{display:flex;flex-direction:column;gap:.375rem;margin-bottom:1rem}
-    .form-group label{font-size:.8125rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
-    .form-control{padding:.625rem .875rem;border-radius:var(--radius-sm);border:1px solid var(--border);background:var(--bg);color:var(--text);font-family:inherit;font-size:.875rem;transition:.2s;outline:none;width:100%}
-    .form-control:focus{border-color:var(--border-focus);box-shadow:0 0 0 3px rgba(99,102,241,.15);background:var(--surface)}
-    .form-control[readonly]{background:var(--surface-hover);color:var(--text-muted);cursor:default}
-    /* Curva S — scroll padronizado para mobile e desktop */
-    .chart-scroll-wrap{width:100%;overflow-x:hidden;-webkit-overflow-scrolling:touch;}
-    .chart-container{height:300px;width:100%;position:relative}
-    .table-container{overflow-x:auto;margin-top:1rem;-webkit-overflow-scrolling:touch;border-radius:var(--radius-md)}
-    .th-sticky{position:sticky;top:0;z-index:10;background:var(--surface);box-shadow:0 1px 0 var(--border)}
-    .td-desc{white-space:normal !important;overflow-wrap:break-word;word-break:normal;min-width:120px;max-width:220px;line-height:1.4}
-    table{width:100%;border-collapse:separate;border-spacing:0;min-width:580px}
-    th{text-align:left;padding:1rem;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);border-bottom:1px solid var(--border);background:var(--surface)}
-    td{padding:1rem;font-size:.875rem;border-bottom:1px solid var(--border);transition:background .2s;white-space:nowrap}
-    tr:last-child td{border-bottom:none}tbody tr:hover td{background:var(--surface-hover)}
-    td[contenteditable="true"]{outline:none;cursor:text}td[contenteditable="true"]:focus{background:var(--bg);box-shadow:inset 0 0 0 2px var(--primary);border-radius:4px}
-    .flex-between{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem}.mt-4{margin-top:1rem}.mb-4{margin-bottom:1rem}
-    .error-msg{color:var(--danger);font-size:.875rem;margin-top:.5rem;display:none;padding:.5rem;background:rgba(239,68,68,.08);border-radius:var(--radius-sm)}
-    .obra-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;margin-bottom:1rem;box-shadow:var(--shadow-sm)}
-    .obra-card-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.75rem}
-    .obra-card-title{font-weight:700;font-size:1rem}
-    .obra-card-sub{font-size:.8rem;color:var(--text-muted);margin-top:.25rem}
-    .obra-card-pct{font-size:1.5rem;font-weight:900;color:var(--primary);white-space:nowrap}
-    .obra-progress-bar{height:6px;background:var(--surface-hover);border-radius:999px;overflow:hidden;margin-bottom:.75rem}
-    .obra-progress-fill{height:100%;background:var(--primary);border-radius:999px;transition:width .4s}
-    .obra-card-footer{display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.8125rem;color:var(--text-muted)}
-    .colab-item{display:flex;justify-content:space-between;align-items:center;padding:.75rem;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:.5rem;background:var(--bg);gap:.5rem;flex-wrap:wrap}
-    #btnTopo{position:fixed;bottom:1.5rem;right:1.5rem;z-index:999;width:46px;height:46px;border-radius:50%;background:var(--primary);color:#fff;border:none;font-size:1.2rem;cursor:pointer;box-shadow:var(--shadow-md);opacity:0;transition:opacity .3s,transform .2s;display:flex;align-items:center;justify-content:center;pointer-events:none;}
-    #btnTopo.visible{opacity:1;pointer-events:auto;}
-    #btnTopo:hover{transform:translateY(-3px);background:var(--primary-hover)}
-    @media(max-width:1100px){
-      .admin-layout{grid-template-columns:1fr}
-      .admin-sidebar{position:static;max-height:none;overflow-y:visible}
-      .admin-stats-grid{grid-template-columns:repeat(2, minmax(0, 1fr))}
-      .dashboard{grid-template-columns:1fr}
-      .nav{position:static;max-height:none;overflow-y:visible}
-    }
-    @media(max-width:640px){
-      .container{padding:1rem}
-      .header-admin-mobile{flex-wrap:wrap !important}
-      .header-admin-mobile .brand{width:100%}
-      .header-admin-mobile .header-actions{width:100%;justify-content:flex-end}
-      .header{margin-bottom:1.25rem;gap:.5rem}
-      .brand-text h1{font-size:1rem !important}
-      .brand-text p{font-size:.72rem !important}
-      .btn{padding:.45rem .7rem;font-size:.75rem}
-      .admin-stats-grid{grid-template-columns:repeat(2, minmax(0, 1fr));gap:.75rem;margin-bottom:1rem;}
-      .stat-card.compact{min-height:88px;padding:.85rem}
-      .stat-card.compact .stat-value{font-size:1rem}
-      .stat-card.compact .stat-label{font-size:.7rem}
-      .stats-grid{grid-template-columns:repeat(2, minmax(0, 1fr));gap:.75rem}
-      .stat-value{font-size:1.4rem}
-      .panel{padding:1rem;margin-bottom:1rem}
-      .obra-card{padding:1rem}
-      .obra-card-pct{font-size:1.2rem}
-      .obra-card-footer{gap:.75rem;font-size:.75rem}
-      table{min-width:480px}
-      th{padding:.55rem .5rem;font-size:.68rem}
-      td{padding:.55rem .5rem;font-size:.72rem}
-      .td-desc{min-width:90px;max-width:140px;font-size:.7rem}
-      /* Curva S mobile: altura reduzida, scroll liberado quando necessário */
-      .chart-container{height:240px}
-      .chart-scroll-wrap{overflow-x:auto !important;-webkit-overflow-scrolling:touch !important;}
-      .admin-colabpanel-grid{grid-template-columns:1fr !important}
-      .admin-sidebar{position:static !important;max-height:none !important;overflow-y:visible !important}
-      .nav{position:static !important;max-height:none !important;overflow-y:visible !important}
-      #btnTopo{bottom:1rem;right:1rem;width:42px;height:42px;font-size:1rem}
-    }
-  </style>
-</head>
-<body>
-
-<button id="btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})" title="Voltar ao início">↑</button>
-<script>
-  window.addEventListener('scroll',()=>{
-    const b=document.getElementById('btnTopo');
-    if(b) b.classList.toggle('visible', window.scrollY>200);
-  });
-</script>
-
-<!-- LOGIN -->
-<div id="loginView" class="login-wrapper">
-  <div class="login-card">
-    <div class="brand-login">
-      <div class="logo logo-large">RA</div>
-      <div><h1 style="font-size:1.5rem;font-weight:700">Cronograma PRO</h1><p style="color:var(--text-muted);font-size:.875rem">Acesse sua conta</p></div>
-    </div>
-    <form id="loginForm">
-      <div class="form-group"><label>E-mail</label><input type="email" id="loginEmail" class="form-control" placeholder="seu@email.com" required></div>
-      <div class="form-group"><label>Senha</label><input type="password" id="loginSenha" class="form-control" placeholder="••••••••" required></div>
-      <div id="loginError" class="error-msg"></div>
-      <button type="submit" class="btn btn-primary" id="loginBtn" style="width:100%;padding:.875rem;margin-top:.75rem">Entrar</button>
-    </form>
-  </div>
-</div>
-
-<!-- ADMIN VIEW -->
-<div id="adminView" style="display:none">
-  <div class="container">
-    <header class="header header-admin-mobile">
-      <div class="brand">
-        <div class="logo">RA</div>
-        <div class="brand-text">
-          <h1>Cronograma PRO</h1>
-          <p>Visão Geral do Gestor</p>
-        </div>
-      </div>
-      <div class="header-actions">
-        <button class="btn btn-sec" id="adminToggleColab">👥 Gerenciar Colaboradores</button>
-        <button class="btn btn-sec" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark'">Tema</button>
-        <button class="btn btn-sec" id="logoutBtnAdmin" style="color:var(--danger)">Sair</button>
-      </div>
-    </header>
-
-    <div id="adminColabPanel" class="panel" style="display:none">
-      <div class="flex-between mb-4"><h2>👥 Gerenciar Colaboradores</h2></div>
-      <div class="admin-colabpanel-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem">
-        <div>
-          <h3 style="font-size:.9rem;margin-bottom:.5rem;color:var(--text-muted)">CADASTRAR / REATIVAR COLABORADOR</h3>
-          <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:1rem">Para reativar um colaborador removido, informe o mesmo e-mail e defina uma nova senha.</p>
-          <form id="addColabForm">
-            <div class="form-group"><label>Nome</label><input type="text" id="colabNome" class="form-control" placeholder="Ex.: João Silva" required></div>
-            <div class="form-group"><label>E-mail</label><input type="email" id="colabEmail" class="form-control" placeholder="joao@email.com" required></div>
-            <div class="form-group"><label>Senha</label><input type="password" id="colabSenha" class="form-control" placeholder="mínimo 6 caracteres" minlength="6" required></div>
-            <div id="colabMsgError" class="error-msg"></div>
-            <button type="submit" class="btn btn-primary" id="addColabBtn" style="width:100%;margin-top:.5rem">Cadastrar colaborador</button>
-          </form>
-        </div>
-        <div>
-          <h3 style="font-size:.9rem;margin-bottom:1rem;color:var(--text-muted)">COLABORADORES ATIVOS</h3>
-          <div id="colabList"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="stats-grid" id="adminStats"></div>
-    <div class="admin-layout">
-      <div class="admin-sidebar">
-        <h3>Colaboradores</h3>
-        <div id="adminColabSidebar"><p style="color:var(--text-muted);font-size:.8rem">Carregando...</p></div>
-      </div>
-      <div>
-        <div id="adminDetailPanel" class="panel">
-          <p style="color:var(--text-muted);padding:.5rem">Selecione um colaborador ao lado para ver as obras.</p>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- COLABORADOR VIEW -->
-<div id="appView" style="display:none">
-  <div class="container">
-    <header class="header">
-      <div class="brand"><div class="logo">RA</div><div class="brand-text"><h1>Cronograma PRO</h1><p>Minhas Obras</p></div></div>
-      <div class="header-actions">
-        <button class="btn btn-sec" id="toggleTheme">Tema</button>
-        <button class="btn btn-sec" id="logoutBtnUser" style="color:var(--danger)">Sair</button>
-      </div>
-    </header>
-    <div class="dashboard">
-      <aside>
-        <div class="nav">
-          <div class="nav-item active"><span>Dashboard</span><span class="badge" id="countAll" style="font-size:.65rem">R$ 0</span></div>
-          <div class="nav-item"><span>Acumulado</span><span class="badge" id="countDone" style="color:var(--success);font-size:.65rem">R$ 0</span></div>
-          <div class="nav-item"><span>Progresso</span><span class="badge" id="countPct">0%</span></div>
-          <div class="panel mt-4" style="padding:1rem">
-            <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">AÇÕES DE ARQUIVO</h3>
-            <div style="display:flex;flex-direction:column;gap:.5rem">
-              <button class="btn btn-sec" id="loadFile" style="width:100%">Importar arquivo</button>
-              <button class="btn btn-primary" id="saveJson" style="width:100%">Exportar JSON</button>
-            </div>
-          </div>
-          <div class="panel" style="padding:1rem;margin-top:0">
-            <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">OBRAS SALVAS</h3>
-            <div id="obrasBox" style="display:flex;flex-direction:column;gap:.75rem"></div>
-            <div style="margin-top:1rem"><button class="btn btn-primary" id="addObraBtn" style="width:100%">Adicionar nova obra</button></div>
-          </div>
-          <!-- Nova Atividade abaixo de Obras Salvas -->
-          <div class="panel" style="padding:1rem;margin-top:0">
-            <h3 style="font-size:.875rem;margin-bottom:1rem;color:var(--text-muted)">NOVA ATIVIDADE</h3>
-            <div style="display:flex;flex-direction:column;gap:.5rem">
-              <div class="form-group" style="margin-bottom:.25rem">
-                <label>Nº Item</label>
-                <input type="text" id="fItem" class="form-control" placeholder="Ex.: 1, 1.1">
-              </div>
-              <div class="form-group" style="margin-bottom:.25rem">
-                <label>Descrição</label>
-                <input type="text" id="fName" class="form-control" placeholder="Ex.: Alvenaria de vedação">
-              </div>
-              <div class="form-group" style="margin-bottom:.25rem">
-                <label>Valor Contrato (R$)</label>
-                <input type="text" id="fValorContrato" class="form-control" placeholder="0,00" inputmode="decimal">
-              </div>
-              <div class="form-group" style="margin-bottom:.25rem">
-                <label>Medição (R$)</label>
-                <input type="text" id="fMedicao" class="form-control" placeholder="0,00" inputmode="decimal">
-              </div>
-              <div class="form-group" style="margin-bottom:.25rem">
-                <label>Acumulado (R$)</label>
-                <input type="text" id="fAcumulado" class="form-control" placeholder="0,00" inputmode="decimal">
-              </div>
-              <div class="form-group" style="margin-bottom:.25rem">
-                <label>Saldo (R$) <span style="font-size:.7rem;color:var(--primary)">(auto)</span></label>
-                <input type="text" id="fSaldo" class="form-control" placeholder="calculado" readonly>
-              </div>
-              <div class="form-group" style="margin-bottom:.25rem">
-                <label>% Executada <span style="font-size:.7rem;color:var(--primary)">(auto)</span></label>
-                <input type="text" id="fPct" class="form-control" placeholder="calculado" readonly>
-              </div>
-              <button class="btn btn-primary" id="addRow" style="width:100%;margin-top:.25rem">➕ Adicionar ao Índice</button>
-            </div>
-          </div>
-        </div>
-      </aside>
-      <main>
-        <div class="panel"><div class="flex-between mb-4"><h2>Configurações do Projeto</h2></div><div class="form-grid"><div class="form-group" style="grid-column:1/-1"><label>Nome do Projeto</label><input type="text" id="projName" class="form-control" placeholder="Nome do projeto"></div><div class="form-group"><label>Cliente / Setor</label><input type="text" id="projClient" class="form-control" placeholder="Ex.: Diretoria de Obras"></div><div class="form-group"><label>Escopo / Fase</label><input type="text" id="projScope" class="form-control" placeholder="Ex.: BM 10"></div></div></div>
-
-        <!-- Curva S — largura total, scroll padronizado -->
-        <div class="panel" style="margin-bottom:1.5rem">
-          <h2 class="mb-4">Curva S — Progresso Físico</h2>
-          <div class="chart-scroll-wrap" id="sCurveScrollWrap"><div class="chart-container"><canvas id="sCurveChart"></canvas></div></div>
-        </div>
-
-        <div class="stats-grid" id="stats"></div>
-        <div class="panel">
-          <div class="flex-between"><h2>Índice / Itens Principais</h2><div><button class="btn btn-sec" id="fillSample" style="margin-right:.5rem">Limpar</button><button class="btn btn-sec" id="exportCsv">Exportar CSV</button></div></div>
-          <div class="table-container">
-            <table><thead><tr>
-              <th class="th-sticky">Item</th>
-              <th class="th-sticky">Descrição</th>
-              <th class="th-sticky" style="text-align:right">Valor Contrato</th>
-              <th class="th-sticky" style="text-align:right">Medição</th>
-              <th class="th-sticky" style="text-align:right">Acumulado</th>
-              <th class="th-sticky" style="text-align:right">Saldo</th>
-              <th class="th-sticky" style="text-align:right">% Executada</th>
-              <th class="th-sticky"></th>
-            </tr></thead><tbody id="tbody"></tbody></table>
-          </div>
-        </div>
-      </main>
-    </div>
-  </div>
-</div>
-
-</body>
-</html>
+    $('saveJson').onclick=()=>{const o=currentObra();const name=($('projName').value.trim()||'projeto');const payload={obra:name,medicaoAtual:o?.m
