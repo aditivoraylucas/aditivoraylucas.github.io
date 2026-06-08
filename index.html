@@ -89,25 +89,49 @@ function detectSheet(wb){
 
 /*
  * ─── DETECÇÃO DE COLUNAS ────────────────────────────────────────────────────
- * REGRA PRINCIPAL:
- *   1. Percorre todas as linhas procurando a linha que contém a palavra "ITEM"
- *      (ou variações: nº, n°, item) em alguma célula.
- *   2. Nessa mesma linha identifica as posições de:
- *      Descrição, Valor Contrato, Medição, Acumulado, Saldo.
- *   3. Essa linha de cabeçalho é a referência absoluta para todas as planilhas.
- *      O que muda entre planilhas é apenas qual coluna contém cada informação.
- *   4. Fallback: se alguma coluna não for encontrada pelo nome, usa posição
- *      numérica relativa (primeira coluna numérica = vc, segunda = med, etc.)
+ *
+ * REGRA PARA VALOR DE CONTRATO (vc):
+ *   Usa sistema de PRIORIDADE + SOBRESCRITA.
+ *   Cada padrão tem um peso (menor = mais genérico, maior = mais específico).
+ *   Ao varrer a linha de cabeçalho da ESQUERDA para a DIREITA:
+ *     - Se o novo match tem prioridade MAIOR que o atual  → sobrescreve sempre.
+ *     - Se o novo match tem prioridade IGUAL ao atual     → sobrescreve (último ganha).
+ *     - Se o novo match tem prioridade MENOR que o atual  → ignora.
+ *
+ *   Exemplo: linha com "VALOR UNIT. COM BDI" (pri=1), depois
+ *   "VALOR TOTAL DO CONTRATO ATUALIZADO REAJUSTE 1" (pri=4), depois
+ *   "VALOR TOTAL DO CONTRATO ATUALIZADO REAJUSTE 2" (pri=4)
+ *   → usa a coluna de "REAJUSTE 2" (última de mesma prioridade máxima).
+ *
+ * PRIORIDADES (vc):
+ *   1 → valor unitário / vl unit  (mais genérico — descartado se existir algo melhor)
+ *   2 → "valor contrato" simples / vl ct / vlr ct
+ *   3 → "valor de contrato" / "valor total contrato"
+ *   4 → "valor de contrato com reajuste" / "valor total contrato atualizado"
+ *   5 → "valor de contrato com aditivo" / "valor ct / ta"
+ *
+ * As demais colunas (desc, med, acum, saldo) mantêm lógica de PRIMEIRO match.
  */
 function detectColumns(data){
   const RE = {
     item:  /^(item|n[°º\.°]|num\.?|no\.?)$/i,
     desc:  /discrimina|descri[çc]|servic[oa]|servi[çc]|especific|designa/i,
-    vc:    /valor\s*(total\s*)?(do\s*)?(contrato|ct|contract)|vl\.?\s*(do\s*)?(contrato|ct)|vlr\.?\s*(do\s*)?(contrato|ct)|v\.?\s*contrato|vl\s*ct/i,
     med:   /no[\s.]*(per[ií]odo|mes|m[eê]s)|^medic[aã]o$|^realizado$|periodo|esta[\s.]*medi|med\.?\s*atual|\bmed\b|medi[çc]/i,
     acum:  /acumulado|acum\.?/i,
     saldo: /saldo/i
   };
+
+  // Padrões de Valor de Contrato com prioridade (maior número = mais específico = vence)
+  const VC_PATTERNS = [
+    { pri: 1, re: /valor\s*(unit[aá]r|unit\.?)\b/i },
+    { pri: 1, re: /vl\.?\s*unit|vlr\.?\s*unit/i },
+    { pri: 2, re: /vl\.?\s*(do\s*)?(contrato|ct)|vlr\.?\s*(do\s*)?(contrato|ct)|v\.?\s*contrato|vl\s*ct/i },
+    { pri: 3, re: /valor\s+(de\s+)?contrato\b(?!\s+(com|atualizado|reajuste|aditivo))/i },
+    { pri: 3, re: /valor\s+total\s+(do\s+)?contrato\b(?!\s+(com|atualizado|reajuste|aditivo))/i },
+    { pri: 4, re: /valor\s*(total\s*)?(do\s*)?contrato\s*(com\s*)?(atualizado|reajuste)/i },
+    { pri: 5, re: /valor\s*ct\s*[\/\\]\s*ta/i },
+    { pri: 5, re: /valor\s*(de\s+)?contrato\s*(com\s*)?(aditivo|ta\b)/i },
+  ];
 
   // Encontra a linha que contém "ITEM" — essa é a linha de cabeçalho dos dados
   let headerRowIdx = -1;
@@ -124,7 +148,6 @@ function detectColumns(data){
     if(headerRowIdx >= 0) break;
   }
 
-  // Se não achou linha com ITEM, tenta encontrar a primeira linha com número inteiro
   if(headerRowIdx < 0){
     for(let r = 0; r < Math.min(60, data.length); r++){
       const row = data[r] || [];
@@ -140,35 +163,38 @@ function detectColumns(data){
   }
 
   const cols = { item: itemCol, desc:-1, vc:-1, med:-1, acum:-1, saldo:-1 };
+  let vcPri = -1; // prioridade atual do melhor match de vc
 
-  // Lê as colunas na MESMA linha do ITEM (cabeçalho)
-  if(headerRowIdx >= 0){
-    const hrow = data[headerRowIdx] || [];
-    for(let c = 0; c < hrow.length; c++){
-      const t = norm(hrow[c]);
+  function applyRow(row){
+    for(let c = 0; c < row.length; c++){
+      const t = norm(row[c]);
       if(!t || c === itemCol) continue;
+
+      // desc / med / acum / saldo: primeiro match vence
       if(RE.desc.test(t)  && cols.desc  < 0) cols.desc  = c;
-      if(RE.vc.test(t)    && cols.vc    < 0) cols.vc    = c;
       if(RE.med.test(t)   && cols.med   < 0) cols.med   = c;
       if(RE.acum.test(t)  && cols.acum  < 0) cols.acum  = c;
       if(RE.saldo.test(t) && cols.saldo < 0) cols.saldo = c;
-    }
 
-    // Também verifica linhas anteriores ao cabeçalho (multi-linha de header)
-    for(let r = Math.max(0, headerRowIdx - 3); r < headerRowIdx; r++){
-      const row = data[r] || [];
-      for(let c = 0; c < row.length; c++){
-        const t = norm(row[c]);
-        if(!t) continue;
-        if(RE.desc.test(t)  && cols.desc  < 0) cols.desc  = c;
-        if(RE.vc.test(t)    && cols.vc    < 0) cols.vc    = c;
-        if(RE.med.test(t)   && cols.med   < 0) cols.med   = c;
-        if(RE.acum.test(t)  && cols.acum  < 0) cols.acum  = c;
-        if(RE.saldo.test(t) && cols.saldo < 0) cols.saldo = c;
+      // vc: prioridade + sobrescrita (último de mesma/maior pri ganha)
+      for(const {pri, re} of VC_PATTERNS){
+        if(re.test(t)){
+          if(pri >= vcPri){ cols.vc = c; vcPri = pri; }
+          break; // cada coluna é testada por ordem de pri, para no primeiro match
+        }
       }
     }
+  }
 
-    // Fallback numérico: pega a primeira linha de dados e usa colunas numéricas
+  if(headerRowIdx >= 0){
+    // Verifica linhas anteriores ao cabeçalho (multi-linha de header)
+    for(let r = Math.max(0, headerRowIdx - 3); r < headerRowIdx; r++){
+      applyRow(data[r] || []);
+    }
+    // Linha principal do cabeçalho
+    applyRow(data[headerRowIdx] || []);
+
+    // Fallback numérico
     const firstDataRow = data[headerRowIdx + 1] || [];
     const missing = ['vc','med','acum','saldo'].filter(k => cols[k] < 0);
     if(missing.length > 0){
@@ -183,7 +209,6 @@ function detectColumns(data){
       });
     }
 
-    // Se desc ainda não foi encontrado, pega a primeira coluna texto depois de item
     if(cols.desc < 0 && itemCol >= 0){
       const fdr = data[headerRowIdx + 1] || [];
       const vcLimit = cols.vc > 0 ? cols.vc : itemCol + 12;
@@ -322,11 +347,9 @@ async function readExcelFile(file){
   const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
   if(!data.length) throw new Error(`A aba "${sheetName}" está vazia.`);
 
-  // Detecta colunas pela linha do ITEM (nova lógica central)
   const cols = detectColumns(data);
   const itemCol = cols.item >= 0 ? cols.item : 0;
 
-  // Identifica a primeira linha de dados (primeiro número inteiro na coluna item)
   let firstDataRowIdx = -1;
   for(let r = 0; r < data.length; r++){
     if(/^\d+$/.test(String(data[r][itemCol]??'').trim())){
@@ -342,7 +365,6 @@ async function readExcelFile(file){
     const itemStr = String(row[itemCol]??'').trim();
     if(!/^\d+$/.test(itemStr)) continue;
 
-    // Descrição: da coluna detectada, ou primeira célula texto após item
     let descricao = '';
     if(cols.desc >= 0) descricao = String(row[cols.desc]??'').trim();
     if(!descricao){
@@ -353,7 +375,6 @@ async function readExcelFile(file){
       }
     }
 
-    // Valores: sempre da mesma linha do item, colunas detectadas pelo cabeçalho
     const vc   = cols.vc   >= 0 ? (Number(row[cols.vc])   || 0) : 0;
     const med  = cols.med  >= 0 ? (Number(row[cols.med])  || 0) : 0;
     const acum = cols.acum >= 0 ? (Number(row[cols.acum]) || 0) : 0;
@@ -916,6 +937,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:
 .btn-danger{color:var(--danger);background:rgba(239,68,68,.1)}
 .btn-warning{color:#92400e;background:rgba(245,158,11,.12)}
 .btn-success{color:#065f46;background:rgba(16,185,129,.12)}
+
+/* ── Layout principal ── */
 .app-shell{display:grid;grid-template-columns:var(--aside-w) 1fr;grid-template-rows:auto 1fr;height:100vh;overflow:hidden}
 .app-topbar{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;padding:.875rem 2rem;background:var(--surface);border-bottom:1px solid var(--border);gap:.75rem;z-index:20}
 .app-aside{grid-column:1;grid-row:2;overflow-y:auto;background:var(--surface);border-right:1px solid var(--border);padding:1rem;display:flex;flex-direction:column;gap:.75rem}
@@ -965,17 +988,43 @@ tr:hover td{background:var(--surface-hover)}
 .add-form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.75rem;align-items:end}
 .btnTopo{position:fixed;bottom:1.5rem;right:1.5rem;z-index:100;width:2.5rem;height:2.5rem;border-radius:50%;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .3s;font-size:1.1rem;padding:0}
 .btnTopo.visible{opacity:1;pointer-events:all}
+
+/* ── Mobile: aside colapsável ── */
 @media(max-width:900px){
-  .app-shell{grid-template-columns:1fr;grid-template-rows:auto auto 1fr}
-  .app-aside{grid-column:1;grid-row:2;border-right:none;border-bottom:1px solid var(--border);padding:.75rem}
-  .app-main{grid-column:1;grid-row:3;padding:1rem}
+  .app-shell{
+    grid-template-columns:1fr;
+    grid-template-rows:auto auto 1fr;
+    height:100vh;
+  }
+  .app-aside{
+    grid-column:1;grid-row:2;
+    border-right:none;border-bottom:1px solid var(--border);
+    padding:.75rem 1rem;
+    flex-direction:row;flex-wrap:wrap;gap:.5rem;
+    overflow-y:visible;overflow-x:auto;
+    max-height:none;
+  }
+  .app-aside .panel{flex:1 1 220px;min-width:200px;padding:.75rem}
+  .app-main{grid-column:1;grid-row:3;padding:1rem;overflow-y:auto}
   .admin-layout{grid-template-columns:1fr}
 }
 @media(max-width:640px){
-  .app-topbar{padding:.75rem 1rem;flex-wrap:wrap}
-  .brand-text h1{font-size:1rem}
+  .app-topbar{padding:.65rem .875rem;flex-wrap:wrap;gap:.5rem}
+  .brand-text h1{font-size:.95rem}
+  .brand-text p{display:none}
+  .user-chip{font-size:.75rem;padding:.25rem .6rem}
+  .app-aside{flex-direction:column;gap:.5rem;padding:.75rem}
+  .app-aside .panel{flex:none;width:100%}
   .app-main{padding:.75rem}
+  .stats-grid{grid-template-columns:repeat(2,1fr);gap:.6rem;margin-bottom:1rem}
   .stat-value{font-size:1.1rem}
+  .stat-label{font-size:.65rem}
+  .panel{padding:1rem}
+  .add-form-grid{grid-template-columns:1fr 1fr;gap:.5rem}
+  th,td{padding:.4rem .6rem;font-size:.72rem}
+  .td-desc{max-width:120px}
+  .chart-container{height:160px}
+  .btnTopo{bottom:1rem;right:.75rem}
 }
 </style>
 </head>
