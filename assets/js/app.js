@@ -353,29 +353,38 @@ function showToast(msg,isError=false){
   clearTimeout(t._timer); t._timer=setTimeout(()=>{ t.style.opacity='0'; },isError?5000:3500);
 }
 
+/* Curva S — nunca força minWidth no mobile */
 function renderCurvaS(canvasId,wrapId,itens,prev){
   const canvas=$(canvasId); if(!canvas) return prev;
   if(prev) prev.destroy();
   const dark=document.documentElement.dataset.theme==='dark';
   const gc=dark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)';
   const tc=dark?'#94a3b8':'#64748b';
-  const mobile=window.innerWidth<=640;
-  const n=itens.length;
-  const thickness=Math.max(mobile?8:18,Math.min(mobile?18:40,Math.floor((mobile?Math.max(160,window.innerWidth-48):600)/(n||1))));
-  const minW=n>0?Math.max(0,n*(thickness+14)):0;
+  const mobile=window.innerWidth<=900;
   const wrap=$(wrapId);
+  /* no mobile nunca expande o canvas além do container */
   if(wrap){
-    if(minW>wrap.offsetWidth){ wrap.style.overflowX='auto'; canvas.style.minWidth=minW+'px'; }
-    else{ wrap.style.overflowX='hidden'; canvas.style.minWidth=''; }
+    wrap.style.overflowX='hidden';
+    canvas.style.minWidth='';
+    canvas.style.width='100%';
   }
+  const n=itens.length;
+  /* barThickness adaptativo mas sem forçar expansão */
+  const containerW=wrap?wrap.offsetWidth:600;
+  const thickness=mobile
+    ? Math.max(4, Math.floor((containerW-16)/(n||1))-2)
+    : Math.max(18,Math.min(40,Math.floor(600/(n||1))));
   return new Chart(canvas.getContext('2d'),{
     type:'bar',
     data:{ labels:itens.map(r=>String(r.item||'')),
       datasets:[{ label:'% Executado', data:itens.map(r=>Number(r.percentualExecutado)||0),
-        backgroundColor:'rgba(99,102,241,0.2)',borderColor:'#6366f1',borderWidth:1,borderRadius:3,barThickness:thickness }] },
-    options:{ responsive:true, maintainAspectRatio:false,
+        backgroundColor:'rgba(99,102,241,0.2)',borderColor:'#6366f1',borderWidth:1,borderRadius:3,
+        barThickness: mobile ? 'flex' : thickness }] },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
       scales:{ y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},
-        x:{grid:{display:false},ticks:{color:tc,font:{size:mobile?9:10},maxRotation:45,minRotation:0}} },
+        x:{grid:{display:false},ticks:{color:tc,font:{size:mobile?8:10},maxRotation:mobile?90:45,minRotation:0}} },
       plugins:{legend:{labels:{color:tc}}} }
   });
 }

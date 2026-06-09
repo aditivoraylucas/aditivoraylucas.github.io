@@ -83,7 +83,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:
 .stat-value{font-size:1.5rem;font-weight:700;color:var(--text)}
 .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1.5rem}
 
-/* Admin stats grid: 4 col linha 1, 3 col linha 2 */
+/* Admin stats grid */
 .admin-stats-grid{
   display:grid;
   grid-template-columns:repeat(4,1fr);
@@ -103,7 +103,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:
 .form-control{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:.5rem .75rem;font-size:.875rem;font-family:inherit;color:var(--text);width:100%;transition:border-color .15s}
 .form-control:focus{outline:none;border-color:var(--border-focus)}
 
-/* Tabela */
+/* Tabela — desktop */
 .table-container{overflow-x:auto;border-radius:var(--radius-sm);border:1px solid var(--border)}
 table{width:100%;border-collapse:collapse;font-size:.8rem}
 th,td{padding:.55rem .85rem;border-bottom:1px solid var(--border);white-space:nowrap}
@@ -112,10 +112,18 @@ th{background:var(--bg);font-weight:600;font-size:.72rem;text-transform:uppercas
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--surface-hover)}
 .td-desc{max-width:260px;overflow:hidden;text-overflow:ellipsis}
+/* coluna Item: largura mínima (desktop) */
+table th:first-child,
+table td:first-child{
+  width:2.5rem;
+  min-width:2rem;
+  text-align:center;
+  white-space:nowrap;
+}
 
 /* Gráfico */
 .chart-container{position:relative;height:220px}
-.chart-scroll-wrap{overflow-x:auto}
+.chart-scroll-wrap{overflow-x:hidden;width:100%}
 
 /* Cards de obra */
 .obra-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:1rem 1.25rem;box-shadow:var(--shadow-sm);transition:box-shadow .2s}
@@ -161,6 +169,9 @@ tr:hover td{background:var(--surface-hover)}
 
 /* ══════════════════════════════════════ MOBILE (<=900px) ══════════════════════════════════════ */
 @media(max-width:900px){
+  /* zoom global 85% — tudo fica menor e cabe na tela */
+  html{ font-size:85%; }
+
   .app-shell{
     display:flex;
     flex-direction:column;
@@ -191,48 +202,71 @@ tr:hover td{background:var(--surface-hover)}
     grid-row:unset;
     width:100%;
     overflow:visible;
-    padding:1rem;
+    padding:.75rem;
   }
-  .stats-grid{grid-template-columns:repeat(2,1fr);gap:.6rem;margin-bottom:1rem;}
-  .admin-stats-grid{grid-template-columns:repeat(2,1fr);gap:.6rem;}
+  .stats-grid{grid-template-columns:repeat(2,1fr);gap:.5rem;margin-bottom:.75rem;}
+  .admin-stats-grid{grid-template-columns:repeat(2,1fr);gap:.5rem;}
   .admin-stats-grid::after{display:none;}
-  .stat-value{font-size:1.1rem;}
-  .stat-label{font-size:.65rem;}
-  .panel{padding:1rem;}
+  .stat-value{font-size:1rem;}
+  .stat-label{font-size:.6rem;}
+  .panel{padding:.75rem;}
 
-  /* ── Curva S: sem scroll, gráfico responde à largura do container ── */
+  /* ── Curva S: NUNCA sai para o lado ── */
   .chart-scroll-wrap{
-    overflow:hidden;
-    width:100%;
-  }
-  .chart-container{
-    height:180px;
-    width:100%;
-    min-width:0;
-  }
-  .chart-container canvas{
+    overflow:hidden !important;
+    width:100% !important;
     max-width:100% !important;
   }
-
-  /* ── Tabela: sem scroll, colunas menos importantes ocultas ── */
-  .table-container{
+  .chart-container{
+    position:relative;
+    height:160px;
+    width:100% !important;
+    min-width:0 !important;
+    max-width:100% !important;
     overflow:hidden;
+  }
+  .chart-container canvas{
+    width:100% !important;
+    max-width:100% !important;
+    min-width:0 !important;
+  }
+
+  /* ── Tabela: COMPLETA, sem ocultar colunas, layout fixo com zoom ── */
+  .table-container{
+    overflow-x:hidden;
     width:100%;
   }
   table{
     width:100%;
     table-layout:fixed;
+    font-size:.6rem;
   }
   th,td{
-    padding:.35rem .45rem;
-    font-size:.68rem;
+    padding:.25rem .2rem;
     white-space:normal;
     word-break:break-word;
+    overflow-wrap:break-word;
+    vertical-align:top;
   }
-  /* Oculta colunas Medição e Saldo no mobile (3ª e 5ª colunas de dados) */
-  th:nth-child(4), td:nth-child(4),
-  th:nth-child(6), td:nth-child(6){
-    display:none;
+  /* col Item: mínima */
+  table th:first-child,
+  table td:first-child{
+    width:1.6rem;
+    min-width:1.4rem;
+    text-align:center;
+    padding:.25rem .1rem;
+    word-break:keep-all;
+  }
+  /* col Descrição: maior fatia */
+  table th:nth-child(2),
+  table td:nth-child(2){
+    width:28%;
+  }
+  /* demais colunas numéricas: distribuição igual */
+  table th:nth-child(n+3),
+  table td:nth-child(n+3){
+    width:auto;
+    text-align:right;
   }
   .td-desc{
     max-width:none;
@@ -244,16 +278,16 @@ tr:hover td{background:var(--surface-hover)}
   .btnTopo{bottom:1rem;right:.75rem;}
   .admin-layout{grid-template-columns:1fr;}
   .brand-text p{display:none;}
-  .brand-text h1{font-size:.95rem;}
-  .user-chip{font-size:.75rem;padding:.25rem .6rem;}
-  .proj-banner{gap:.75rem;padding:.75rem 1rem;}
+  .brand-text h1{font-size:.9rem;}
+  .user-chip{font-size:.7rem;padding:.2rem .5rem;}
+  .proj-banner{gap:.5rem;padding:.6rem .75rem;}
   .proj-banner-sep{display:none;}
   .proj-banner-item .val{max-width:100%;}
 }
 
 @media(max-width:400px){
+  html{ font-size:78%; }
   .stats-grid{grid-template-columns:1fr;}
   .admin-stats-grid{grid-template-columns:1fr;}
   .add-form-grid{grid-template-columns:1fr;}
-  th,td{padding:.3rem .35rem;font-size:.62rem;}
 }
