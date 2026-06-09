@@ -97,11 +97,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:
   display:block;
 }
 
-/* Lista de colaboradores no mobile (abaixo dos cards) — oculta no desktop */
-.admin-colab-mobile-list{
-  display:none;
-}
-
 /* Formulários */
 .form-group{display:flex;flex-direction:column;gap:.35rem}
 .form-group label{font-size:.8rem;font-weight:600;color:var(--text-muted)}
@@ -117,7 +112,6 @@ th{background:var(--bg);font-weight:600;font-size:.72rem;text-transform:uppercas
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--surface-hover)}
 .td-desc{max-width:260px;overflow:hidden;text-overflow:ellipsis}
-/* coluna Item: largura mínima (desktop) */
 table th:first-child,
 table td:first-child{
   width:2.5rem;
@@ -174,9 +168,7 @@ table td:first-child{
 
 /* ══════════════════════════════════════ MOBILE (<=900px) ══════════════════════════════════════ */
 @media(max-width:900px){
-  /* zoom global 85% */
   html{ font-size:85%; }
-
   .app-shell{
     display:flex;
     flex-direction:column;
@@ -215,23 +207,6 @@ table td:first-child{
   .stat-value{font-size:1rem;}
   .stat-label{font-size:.6rem;}
   .panel{padding:.75rem;}
-
-  /* Colaboradores admin visíveis no mobile abaixo dos 4 cards */
-  .admin-colab-mobile-list{
-    display:block;
-    background:var(--surface);
-    border:1px solid var(--border);
-    border-radius:var(--radius-md);
-    padding:.75rem;
-    margin-bottom:1rem;
-    box-shadow:var(--shadow-sm);
-  }
-  /* Ocultar sidebar lateral no mobile (já está no aside) */
-  #adminAside{
-    display:none !important;
-  }
-
-  /* ── Curva S: NUNCA sai para o lado ── */
   .chart-scroll-wrap{
     overflow:hidden !important;
     width:100% !important;
@@ -250,8 +225,6 @@ table td:first-child{
     max-width:100% !important;
     min-width:0 !important;
   }
-
-  /* ── Tabela mobile: font 0.52rem + nowrap nas numéricas ── */
   .table-container{
     overflow-x:hidden;
     width:100%;
@@ -268,14 +241,12 @@ table td:first-child{
     overflow-wrap:break-word;
     vertical-align:top;
   }
-  /* colunas numéricas: sem quebra de linha */
   table th:nth-child(n+3),
   table td:nth-child(n+3){
     white-space:nowrap;
     text-align:right;
     width:auto;
   }
-  /* col Item: mínima */
   table th:first-child,
   table td:first-child{
     width:1.4rem;
@@ -284,7 +255,6 @@ table td:first-child{
     padding:.2rem .1rem;
     word-break:keep-all;
   }
-  /* col Descrição: maior fatia */
   table th:nth-child(2),
   table td:nth-child(2){
     width:26%;
@@ -294,7 +264,6 @@ table td:first-child{
     white-space:normal;
     word-break:break-word;
   }
-
   .add-form-grid{grid-template-columns:1fr 1fr;gap:.5rem;}
   .btnTopo{bottom:1rem;right:.75rem;}
   .admin-layout{grid-template-columns:1fr;}
