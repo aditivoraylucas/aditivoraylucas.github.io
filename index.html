@@ -424,6 +424,10 @@ function updateDashboard(){
   if($('countAll'))  $('countAll').textContent=money(vc);
   if($('countDone')) $('countDone').textContent=money(ac);
   if($('countPct'))  $('countPct').textContent=pct(p);
+  /* atualiza também o bloco de projeto na main */
+  if($('mainProjName'))       $('mainProjName').textContent      = o?.nomeProjeto||o?.nome||'-';
+  if($('mainProjContratada')) $('mainProjContratada').textContent = o?.contratada||'-';
+  if($('mainProjScope'))      $('mainProjScope').textContent      = o?.medicaoAtual||'-';
   state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser);
 }
 
@@ -801,7 +805,7 @@ init();
   --shadow-md:0 4px 6px -1px rgba(0,0,0,.1),0 2px 4px -1px rgba(0,0,0,.06);
   --shadow-lg:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -2px rgba(0,0,0,.05);
   --font:'Satoshi',system-ui,sans-serif;
-  --aside-w:270px;
+  --aside-w:240px;
 }
 [data-theme="dark"]{
   --bg:#0f172a;--surface:#1e293b;--surface-hover:#334155;
@@ -868,7 +872,38 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:
 .stat-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
 .stat-value{font-size:1.5rem;font-weight:700;color:var(--text)}
 .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1rem;margin-bottom:1.5rem}
-.admin-stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.75rem;margin-bottom:1.5rem}
+
+/* ── Admin stats: 4 colunas na 1ª linha, 3 na 2ª ── */
+.admin-stats-grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:.75rem;
+  margin-bottom:1.5rem;
+}
+.admin-stats-grid .stat-card.compact:nth-child(n+5){
+  grid-column:auto;
+}
+.admin-stats-grid .stat-card.compact:nth-child(5){
+  grid-column:1;
+}
+/* forçar 2ª linha com 3 colunas centralizadas */
+.admin-stats-grid{
+  grid-template-columns:repeat(4,1fr);
+}
+/* itens 5, 6, 7 ocupam 3 colunas distribuídas numa linha separada */
+.admin-stats-grid .stat-card.compact:nth-child(5),
+.admin-stats-grid .stat-card.compact:nth-child(6),
+.admin-stats-grid .stat-card.compact:nth-child(7){
+  grid-column:auto;
+}
+/* subgrid row 2 centralizado via pseudo-wrapper — usamos column-span trick */
+.admin-stats-grid::after{
+  content:'';
+  grid-column:4;
+  grid-row:2;
+  display:block;
+}
+
 .form-group{display:flex;flex-direction:column;gap:.35rem}
 .form-group label{font-size:.8rem;font-weight:600;color:var(--text-muted)}
 .form-control{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:.5rem .75rem;font-size:.875rem;font-family:inherit;color:var(--text);width:100%;transition:border-color .15s}
@@ -901,6 +936,24 @@ tr:hover td{background:var(--surface-hover)}
 .add-form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.75rem;align-items:end}
 .btnTopo{position:fixed;bottom:1.5rem;right:1.5rem;z-index:100;width:2.5rem;height:2.5rem;border-radius:50%;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .3s;font-size:1.1rem;padding:0}
 .btnTopo.visible{opacity:1;pointer-events:all}
+
+/* ── Bloco Projeto no topo da main ── */
+.proj-banner{
+  display:flex;
+  align-items:center;
+  gap:1.5rem;
+  flex-wrap:wrap;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius-md);
+  padding:.875rem 1.25rem;
+  margin-bottom:1.25rem;
+  box-shadow:var(--shadow-sm);
+}
+.proj-banner-item{display:flex;flex-direction:column;gap:.15rem;min-width:0}
+.proj-banner-item .lbl{font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted)}
+.proj-banner-item .val{font-size:.9rem;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
+.proj-banner-sep{width:1px;height:2rem;background:var(--border);flex-shrink:0}
 
 /* ════════════════════════════════════════════════════
    LAYOUT MOBILE (≤ 900 px)
@@ -947,19 +1000,36 @@ tr:hover td{background:var(--surface-hover)}
     grid-template-columns:repeat(2,1fr);
     gap:.6rem;
   }
+  .admin-stats-grid::after{ display:none; }
   .stat-value{ font-size:1.1rem; }
   .stat-label{ font-size:.65rem; }
   .panel{ padding:1rem; }
-  .table-container{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
+  /* Curva S e tabela: altura fixa, scroll interno, nunca quebra */
+  .chart-scroll-wrap{
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+    max-width:100%;
+  }
+  .chart-container{
+    height:200px;
+    min-width:420px;
+  }
+  .table-container{
+    overflow-x:auto;
+    -webkit-overflow-scrolling:touch;
+    max-width:100%;
+  }
   th,td{ padding:.4rem .6rem; font-size:.72rem; }
   .td-desc{ max-width:140px; }
-  .chart-container{ height:180px; }
   .add-form-grid{ grid-template-columns:1fr 1fr; gap:.5rem; }
   .btnTopo{ bottom:1rem; right:.75rem; }
   .admin-layout{ grid-template-columns:1fr; }
   .brand-text p{ display:none; }
   .brand-text h1{ font-size:.95rem; }
   .user-chip{ font-size:.75rem; padding:.25rem .6rem; }
+  .proj-banner{ gap:.75rem; padding:.75rem 1rem; }
+  .proj-banner-sep{ display:none; }
+  .proj-banner-item .val{ max-width:100%; }
 }
 
 @media(max-width:400px){
@@ -1022,19 +1092,12 @@ tr:hover td{background:var(--surface-hover)}
       </div>
     </header>
 
+    <!-- aside compactado: só Obras + Ações -->
     <aside class="app-aside">
       <div class="panel" style="padding:1rem">
         <div class="section-title" style="margin-bottom:.75rem">📁 Obras</div>
         <div id="obrasBox"></div>
         <button id="addObraBtn" class="btn btn-primary" style="width:100%;margin-top:.75rem">＋ Nova Obra</button>
-      </div>
-      <div class="panel" style="padding:1rem">
-        <div class="section-title">🏗️ Projeto</div>
-        <div style="display:flex;flex-direction:column;gap:.6rem;margin-top:.5rem">
-          <div class="form-group"><label>Nome do projeto</label><input id="projName" class="form-control" placeholder="Nome da obra"/></div>
-          <div class="form-group"><label>Contratada</label><input id="projContratada" class="form-control" placeholder="Empresa executora"/></div>
-          <div class="form-group"><label>Medição atual</label><input id="projScope" class="form-control" readonly style="background:var(--bg)"/></div>
-        </div>
       </div>
       <div class="panel" style="padding:1rem">
         <div class="section-title">🔧 Ações</div>
@@ -1045,9 +1108,32 @@ tr:hover td{background:var(--surface-hover)}
           <button id="fillSample" class="btn btn-danger" style="width:100%">🗑 Limpar itens</button>
         </div>
       </div>
+      <!-- campos hidden para manter compatibilidade com o JS -->
+      <input id="projName"       type="hidden"/>
+      <input id="projContratada" type="hidden"/>
+      <input id="projScope"      type="hidden" readonly/>
     </aside>
 
     <main class="app-main">
+
+      <!-- Bloco Projeto no topo da área principal -->
+      <div class="proj-banner" id="projBanner">
+        <div class="proj-banner-item">
+          <span class="lbl">🏗️ Projeto</span>
+          <span class="val" id="mainProjName">—</span>
+        </div>
+        <div class="proj-banner-sep"></div>
+        <div class="proj-banner-item">
+          <span class="lbl">Contratada</span>
+          <span class="val" id="mainProjContratada">—</span>
+        </div>
+        <div class="proj-banner-sep"></div>
+        <div class="proj-banner-item">
+          <span class="lbl">Medição atual</span>
+          <span class="val" id="mainProjScope">—</span>
+        </div>
+      </div>
+
       <div class="stats-grid" id="stats"></div>
 
       <div class="panel" style="margin-bottom:1.25rem">
@@ -1065,83 +1151,4 @@ tr:hover td{background:var(--surface-hover)}
           <div class="form-group"><label>Valor Contrato</label><input id="fValorContrato" class="form-control" placeholder="0,00"/></div>
           <div class="form-group"><label>Medição</label><input id="fMedicao" class="form-control" placeholder="0,00"/></div>
           <div class="form-group"><label>Acumulado</label><input id="fAcumulado" class="form-control" placeholder="0,00"/></div>
-          <div class="form-group"><label>Saldo</label><input id="fSaldo" class="form-control" readonly style="background:var(--bg)"/></div>
-          <div class="form-group"><label>% Exec.</label><input id="fPct" class="form-control" readonly style="background:var(--bg)"/></div>
-          <div class="form-group" style="justify-content:flex-end"><button id="addRow" class="btn btn-primary" style="width:100%">Adicionar</button></div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <h3 style="margin-bottom:1rem">📋 Índice de Itens</h3>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Descrição</th>
-                <th style="text-align:right">Valor Contrato</th>
-                <th style="text-align:right">Medição</th>
-                <th style="text-align:right">Acumulado</th>
-                <th style="text-align:right">Saldo</th>
-                <th style="text-align:right">% Exec.</th>
-                <th style="text-align:right">Ações</th>
-              </tr>
-            </thead>
-            <tbody id="tbody"></tbody>
-          </table>
-        </div>
-      </div>
-      <button id="btnTopo" class="btn btn-sec btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
-    </main>
-  </div>
-</div>
-
-<!-- ADMIN VIEW -->
-<div id="adminView" style="display:none">
-  <div style="background:var(--surface);border-bottom:1px solid var(--border);padding:.875rem 2rem;display:flex;justify-content:space-between;align-items:center;gap:.75rem;position:sticky;top:0;z-index:20">
-    <div class="brand">
-      <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
-        <rect width="48" height="48" rx="10" fill="#4f46e5"/>
-        <path d="M14 34V18l10-6 10 6v16" stroke="#fff" stroke-width="2.5" stroke-linejoin="round" fill="none"/>
-        <rect x="20" y="24" width="8" height="10" rx="1.5" fill="#fff"/>
-      </svg>
-      <div class="brand-text"><h1>Cronograma PRO</h1><p>Painel Admin</p></div>
-    </div>
-    <div class="header-actions">
-      <button id="toggleThemeAdmin" class="btn btn-sec" style="padding:.5rem .75rem" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark'">🌙</button>
-      <button id="logoutBtnAdmin" class="btn btn-sec" style="padding:.5rem .75rem">Sair</button>
-    </div>
-  </div>
-
-  <div style="padding:1.5rem 2rem;max-width:1400px;margin:0 auto">
-    <div class="stats-grid" id="adminStats" style="margin-bottom:1.5rem"></div>
-
-    <div class="panel" style="margin-bottom:1.5rem">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:.5rem">
-        <h2 style="font-size:1.1rem;font-weight:700">👥 Colaboradores</h2>
-        <button id="adminToggleColab" class="btn btn-sec" style="font-size:.8rem">+ Novo colaborador</button>
-      </div>
-      <div id="adminColabPanel" style="display:none;margin-bottom:1.25rem">
-        <form id="addColabForm" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.75rem;align-items:end">
-          <div class="form-group"><label>Nome</label><input id="colabNome" class="form-control" placeholder="Nome completo" required/></div>
-          <div class="form-group"><label>E-mail</label><input id="colabEmail" class="form-control" type="email" placeholder="email@exemplo.com" required/></div>
-          <div class="form-group"><label>Senha</label><input id="colabSenha" class="form-control" type="password" placeholder="Mínimo 6 caracteres" required minlength="6"/></div>
-          <div class="form-group" style="justify-content:flex-end"><button id="addColabBtn" type="submit" class="btn btn-primary" style="width:100%">Cadastrar colaborador</button></div>
-          <div id="colabMsgError" style="display:none;color:var(--danger);font-size:.8rem;grid-column:1/-1;background:rgba(239,68,68,.08);padding:.5rem .75rem;border-radius:var(--radius-sm)"></div>
-        </form>
-      </div>
-      <div id="colabList"></div>
-    </div>
-
-    <div class="panel">
-      <h2 style="font-size:1.1rem;font-weight:700;margin-bottom:1rem">📊 Obras por Colaborador</h2>
-      <div class="admin-layout">
-        <div id="adminColabSidebar" style="background:var(--bg);border-radius:var(--radius-sm);padding:.5rem;border:1px solid var(--border)"></div>
-        <div id="adminDetailPanel"><p style="color:var(--text-muted);padding:1rem">Selecione um colaborador ao lado.</p></div>
-      </div>
-    </div>
-  </div>
-</div>
-
-</body>
-</html>
+          <div class="form-group"><label>Saldo</label><input id="fSaldo
