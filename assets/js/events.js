@@ -32,15 +32,21 @@ export async function importFile(replace=false){
         rows=Array.isArray(obj)?normalizeRows(obj):normalizeRows(obj.itens);
         if(!rows.length&&!Array.isArray(obj)&&!Array.isArray(obj.itens)) throw new Error('JSON inválido.');
       } else { obj=await readExcelFile(file); rows=normalizeRows(obj.itens); }
+
       const obraId=replace&&state.selectedObraId?state.selectedObraId:('obra_'+Date.now());
       const obraNome=baseName(file.name)||obj?.nome||'Nova obra';
       const obra={ id:obraId, nome:obraNome, nomeProjeto:obj?.nomeProjeto||obj?.obra||obraNome,
         contratada:obj?.contratada||'', arquivoNome:file.name, origem:ext,
         medicaoAtual:obj?.medicaoAtual||'', itens:rows, resumo:obj?.resumo||{percentual:0} };
-      // Preserva cronograma e dataInicio se já existirem
-      const existente=currentObra();
-      if(existente?.cronograma)  obra.cronograma  = existente.cronograma;
-      if(existente?.dataInicio)  obra.dataInicio  = existente.dataInicio;
+
+      // Só preserva cronograma/dataInicio se estiver ATUALIZANDO a mesma obra (replace=true)
+      // Ao criar uma obra nova (replace=false) jamais copia dados de outra obra
+      if(replace){
+        const existente=currentObra();
+        if(existente?.cronograma) obra.cronograma = existente.cronograma;
+        if(existente?.dataInicio) obra.dataInicio  = existente.dataInicio;
+      }
+
       await saveObra(obra);
       state.selectedObraId=obraId;
       showToast(`✅ ${rows.length} itens importados`);
@@ -126,11 +132,15 @@ export function bindEvents(){
   });
   const logoutAdmin=$('logoutBtnAdmin'); if(logoutAdmin) logoutAdmin.addEventListener('click',()=>{ cleanup(); signOut(auth); });
   const logoutUser=$('logoutBtnUser');   if(logoutUser)  logoutUser.addEventListener('click',()=>{ cleanup(); signOut(auth); });
+
   const toggleThemeBtn=$('toggleTheme');
   if(toggleThemeBtn) toggleThemeBtn.onclick=()=>{
     document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';
-    if(state.rows.length) state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser,currentObra()?.cronograma);
+    // Passa dataInicio da obra atual para não perder o cronograma ao trocar o tema
+    const o=currentObra();
+    if(state.rows.length) state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser,o?.cronograma,o?.dataInicio);
   };
+
   const menuBtn=$('menuBtn');
   if(menuBtn) menuBtn.onclick=()=>{
     const aside=document.querySelector('#appView .app-aside');
@@ -150,11 +160,9 @@ export function bindEvents(){
   const loadFileBtn=$('loadFile');     if(loadFileBtn)  loadFileBtn.onclick=()=>importFile(false);
   const addObraBtn=$('addObraBtn');    if(addObraBtn)   addObraBtn.onclick=()=>importFile(false);
 
-  // Botão importar cronograma
   const loadCronoBtn=$('loadCronograma');
   if(loadCronoBtn) loadCronoBtn.onclick=()=>importCronograma();
 
-  // Campo data início contrato
   const projDataInicio=$('projDataInicio');
   if(projDataInicio) projDataInicio.addEventListener('change',async()=>{
     const o=currentObra(); if(!o) return;
