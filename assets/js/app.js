@@ -543,15 +543,15 @@ function renderAdminDetail(){
   const vc=Number(obra.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
   const ac=Number(obra.resumo?.acumuladoTotal)||it.reduce((a,i)=>a+Number(i.acumulado||0),0);
   const p=calcPctGeral(obra.resumo,it);
-  const tAcu=it.reduce((a,i)=>a+Number(i.acumulado||0),0);
   const tMed=it.reduce((a,i)=>a+Number(i.medicao||0),0);
+  const contratadaNome=obra.contratada||'-';
   html+=
     `<div class="admin-stats-grid">
        <div class="stat-card compact"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value">${money(vc)}</span></div>
        <div class="stat-card compact"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="color:var(--success)">${money(ac)}</span></div>
        <div class="stat-card compact"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
        <div class="stat-card compact"><span class="stat-label">Medição Atual</span><span class="stat-value">${esc(obra.medicaoAtual||'-')}</span></div>
-       <div class="stat-card compact"><span class="stat-label">Acumulado (itens)</span><span class="stat-value">${money(tAcu)}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Contratada</span><span class="stat-value" style="font-size:.85rem;word-break:break-word">${esc(contratadaNome)}</span></div>
        <div class="stat-card compact"><span class="stat-label">Medição</span><span class="stat-value">${money(tMed)}</span></div>
        <div class="stat-card compact"><span class="stat-label">Saldo</span><span class="stat-value">${money(vc-ac)}</span></div>
      </div>
