@@ -20,14 +20,12 @@ function calcDataFim(dataInicio, totalMeses){
   if(!dataInicio || !totalMeses) return null;
   const d = new Date(dataInicio + 'T00:00:00');
   d.setMonth(d.getMonth() + totalMeses);
-  // último dia do mês anterior = dia do fim do contrato
   d.setDate(d.getDate() - 1);
   return d.toISOString().slice(0, 10);
 }
 
 /* ─────────────────────────────────────────────────────────
    renderCurvaS — gráfico com linha de planejado sobreposta
-   Não altera nenhum dado de medição existente.
 ───────────────────────────────────────────────────────── */
 export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData){
   const canvas=$(canvasId); if(!canvas) return prev;
@@ -38,82 +36,45 @@ export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData){
   const mobile=window.innerWidth<=900;
   const wrap=$(wrapId);
   if(wrap){ wrap.style.overflowX='hidden'; canvas.style.minWidth=''; canvas.style.width='100%'; }
-
   const n=itens.length;
   const containerW=wrap?wrap.offsetWidth:600;
   const thickness=mobile
     ? Math.max(4,Math.floor((containerW-16)/(n||1))-2)
     : Math.max(18,Math.min(40,Math.floor(600/(n||1))));
-
   const datasets=[{
-    type:'bar',
-    label:'% Executado',
+    type:'bar', label:'% Executado',
     data: itens.map(r=>Number(r.percentualExecutado)||0),
-    backgroundColor:'rgba(99,102,241,0.2)',
-    borderColor:'#6366f1',
-    borderWidth:1,
-    borderRadius:3,
-    barThickness: mobile?'flex':thickness,
-    order:2
+    backgroundColor:'rgba(99,102,241,0.2)', borderColor:'#6366f1',
+    borderWidth:1, borderRadius:3, barThickness:mobile?'flex':thickness, order:2
   }];
-
-  const obra = currentObra();
-  const timeline = (cronogramaData && obra?.dataInicio)
-    ? buildCronogramaTimeline(obra.dataInicio, cronogramaData)
-    : null;
-
-  let labels = itens.map(r=>String(r.item||''));
-
-  if(timeline && timeline.length){
-    const totalVC = itens.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
-    const totalAcu= itens.reduce((a,r)=>a+(Number(r.acumulado)||0),0);
-    const realPctGeral = totalVC>0 ? +(totalAcu/totalVC*100).toFixed(2) : 0;
+  const obra=currentObra();
+  const timeline=(cronogramaData&&obra?.dataInicio)
+    ?buildCronogramaTimeline(obra.dataInicio,cronogramaData):null;
+  let labels=itens.map(r=>String(r.item||''));
+  if(timeline&&timeline.length){
+    const totalVC=itens.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
+    const totalAcu=itens.reduce((a,r)=>a+(Number(r.acumulado)||0),0);
+    const realPctGeral=totalVC>0?+(totalAcu/totalVC*100).toFixed(2):0;
     let acumPlan=0;
-    const planData = timeline.map(t=>{ acumPlan+=t.planejadoPct; return +acumPlan.toFixed(2); });
-    const nMeses = timeline.length;
-    const realData = timeline.map((t,i)=>{
-      if(!t.passado) return null;
-      return +(realPctGeral / nMeses * (i+1)).toFixed(2);
-    });
-    labels = timeline.map(t=>t.label);
+    const planData=timeline.map(t=>{acumPlan+=t.planejadoPct;return +acumPlan.toFixed(2);});
+    const nMeses=timeline.length;
+    const realData=timeline.map((t,i)=>t.passado?+(realPctGeral/nMeses*(i+1)).toFixed(2):null);
+    labels=timeline.map(t=>t.label);
     datasets.length=0;
-    datasets.push({
-      type:'line',
-      label:'Planejado (%)',
-      data: planData,
-      borderColor:'#f59e0b',
-      backgroundColor:'rgba(245,158,11,0.08)',
-      borderWidth:2,
-      pointRadius:3,
-      tension:0.3,
-      fill:false,
-      order:1
-    },{
-      type:'line',
-      label:'Executado Real (%)',
-      data: realData,
-      borderColor:'#10b981',
-      backgroundColor:'rgba(16,185,129,0.1)',
-      borderWidth:2,
-      pointRadius:3,
-      tension:0.3,
-      fill:false,
-      spanGaps:false,
-      order:0
-    });
+    datasets.push(
+      {type:'line',label:'Planejado (%)',data:planData,borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,0.08)',borderWidth:2,pointRadius:3,tension:0.3,fill:false,order:1},
+      {type:'line',label:'Executado Real (%)',data:realData,borderColor:'#10b981',backgroundColor:'rgba(16,185,129,0.1)',borderWidth:2,pointRadius:3,tension:0.3,fill:false,spanGaps:false,order:0}
+    );
   }
-
   return new Chart(canvas.getContext('2d'),{
-    type:'bar',
-    data:{ labels, datasets },
+    type:'bar', data:{labels,datasets},
     options:{
-      responsive:true,
-      maintainAspectRatio:false,
+      responsive:true, maintainAspectRatio:false,
       scales:{
-        y:{ beginAtZero:true, max:100, grid:{color:gc}, ticks:{color:tc,callback:v=>v+'%'} },
-        x:{ grid:{display:false}, ticks:{color:tc,font:{size:mobile?8:10},maxRotation:mobile?90:45,minRotation:0} }
+        y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},
+        x:{grid:{display:false},ticks:{color:tc,font:{size:mobile?8:10},maxRotation:mobile?90:45,minRotation:0}}
       },
-      plugins:{ legend:{labels:{color:tc}} }
+      plugins:{legend:{labels:{color:tc}}}
     }
   });
 }
@@ -131,8 +92,7 @@ export function renderTable(){
   tbody.innerHTML=state.rows.map((r,i)=>{
     const p=Number(r.percentualExecutado||0);
     const pctColor=p>=99.95?'color:var(--success);font-weight:700':'font-weight:700';
-    return `
-    <tr data-i="${i}">
+    return `<tr data-i="${i}">
       <td contenteditable="true" data-k="item">${esc(r.item)}</td>
       <td contenteditable="true" data-k="descricao" class="td-desc">${esc(r.descricao)}</td>
       <td contenteditable="true" data-k="valorContrato" style="text-align:right">${money(r.valorContrato)}</td>
@@ -145,23 +105,41 @@ export function renderTable(){
   }).join('');
 }
 
+/* ── Dashboard do colaborador (painel fixo superior) ── */
 export function updateDashboard(){
   const o=currentObra();
-  const vc=Number(o?.resumo?.valorContratoAditivo)||state.rows.reduce((a,r)=>a+Number(r.valorContrato||0),0);
-  const ac=Number(o?.resumo?.acumuladoTotal)||state.rows.reduce((a,r)=>a+Number(r.acumulado||0),0);
-  const estaMed=Number(o?.resumo?.estaMedicao)||state.rows.reduce((a,r)=>a+Number(r.medicao||0),0);
-  const p=calcPctGeral(o?.resumo,state.rows);
+  const vc     = Number(o?.resumo?.valorContratoAditivo)||state.rows.reduce((a,r)=>a+Number(r.valorContrato||0),0);
+  const ac     = Number(o?.resumo?.acumuladoTotal)     ||state.rows.reduce((a,r)=>a+Number(r.acumulado||0),0);
+  const estaMed= Number(o?.resumo?.estaMedicao)        ||state.rows.reduce((a,r)=>a+Number(r.medicao||0),0);
+  const p      = calcPctGeral(o?.resumo, state.rows);
+
+  /* — Cards do painel fixo: "Soma dos Contratos" substitui "Valor CT / Aditivo" — */
+  const LABEL_STYLE = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
+  const VAL_STYLE   = 'font-size:.95rem;font-weight:700;margin-top:.2rem';
   if($('stats')) $('stats').innerHTML=
-    `<div class="stat-card"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value" style="font-size:1rem">${money(vc)}</span></div>
-     <div class="stat-card"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="font-size:1rem;color:var(--success)">${money(ac)}</span></div>
-     <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
-     <div class="stat-card"><span class="stat-label">Esta Medição</span><span class="stat-value" style="font-size:1rem">${money(estaMed)}</span></div>`;
-  if($('countAll'))  $('countAll').textContent=money(vc);
-  if($('countDone')) $('countDone').textContent=money(ac);
-  if($('countPct'))  $('countPct').textContent=pct(p);
-  if($('mainProjName'))       $('mainProjName').textContent       = o?.nomeProjeto||o?.nome||'-';
-  if($('mainProjContratada')) $('mainProjContratada').textContent  = o?.contratada||'-';
-  if($('mainProjScope'))      $('mainProjScope').textContent       = o?.medicaoAtual||'-';
+    `<div class="stat-card">
+       <span class="stat-label" style="${LABEL_STYLE}">Soma dos Contratos</span>
+       <span class="stat-value" style="${VAL_STYLE}">${money(vc)}</span>
+     </div>
+     <div class="stat-card">
+       <span class="stat-label" style="${LABEL_STYLE}">Acumulado Total</span>
+       <span class="stat-value" style="${VAL_STYLE};color:var(--success)">${money(ac)}</span>
+     </div>
+     <div class="stat-card">
+       <span class="stat-label" style="${LABEL_STYLE}">% Geral</span>
+       <span class="stat-value" style="${VAL_STYLE}">${pct(p)}</span>
+     </div>
+     <div class="stat-card">
+       <span class="stat-label" style="${LABEL_STYLE}">Esta Medição</span>
+       <span class="stat-value" style="${VAL_STYLE}">${money(estaMed)}</span>
+     </div>`;
+
+  if($('countAll'))  $('countAll').textContent  = money(vc);
+  if($('countDone')) $('countDone').textContent = money(ac);
+  if($('countPct'))  $('countPct').textContent  = pct(p);
+  if($('mainProjName'))       $('mainProjName').textContent      = o?.nomeProjeto||o?.nome||'-';
+  if($('mainProjContratada')) $('mainProjContratada').textContent = o?.contratada||'-';
+  if($('mainProjScope'))      $('mainProjScope').textContent      = o?.medicaoAtual||'-';
   state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser,o?.cronograma);
 }
 
@@ -192,7 +170,7 @@ export function renderObrasBox(){
     const restantes=state.obras.filter(o=>o.id!==idToDelete);
     state.selectedObraId=restantes.length?restantes[0].id:null;
     if(state.selectedObraId){ const o=state.obras.find(x=>x.id===state.selectedObraId); if(o) applySelected(o); }
-    else{ state.rows=[]; const pn=$('projName'); if(pn) pn.value=''; const pc=$('projContratada'); if(pc) pc.value=''; const ps=$('projScope'); if(ps) ps.value=''; }
+    else{ state.rows=[]; ['projName','projContratada','projScope'].forEach(id=>{const el=$(id);if(el)el.value='';}); }
     renderAll();
   };
 }
@@ -214,11 +192,14 @@ export function renderAdminStats(){
     });
   });
   const p=tvc>0?+(tac/tvc*100).toFixed(2):0;
+  /* Painel fixo do admin — mantém "Soma dos Contratos" também */
+  const LS='font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
+  const VS='font-size:.95rem;font-weight:700;margin-top:.2rem';
   if($('adminStats')) $('adminStats').innerHTML=
-    `<div class="stat-card"><span class="stat-label">Total de Obras</span><span class="stat-value">${tot}</span></div>
-     <div class="stat-card"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value" style="font-size:1rem">${money(tvc)}</span></div>
-     <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
-     <div class="stat-card"><span class="stat-label">Acumulado Geral</span><span class="stat-value" style="font-size:1.1rem">${money(tac)}</span></div>`;
+    `<div class="stat-card"><span class="stat-label" style="${LS}">Total de Obras</span><span class="stat-value" style="${VS}">${tot}</span></div>
+     <div class="stat-card"><span class="stat-label" style="${LS}">Soma dos Contratos</span><span class="stat-value" style="${VS}">${money(tvc)}</span></div>
+     <div class="stat-card"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>
+     <div class="stat-card"><span class="stat-label" style="${LS}">Acumulado Geral</span><span class="stat-value" style="${VS}">${money(tac)}</span></div>`;
 }
 
 export function renderColabList(){
@@ -239,8 +220,8 @@ export function renderColabList(){
 
 function colabSidebarHTML(colabs){
   if(!colabs.length) return '<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem">Nenhum colaborador.</p>';
-  if(state.adminSelectedUid && state.allUsers[state.adminSelectedUid]){
-    const u=state.allUsers[state.adminSelectedUid], n=(u.obras||[]).length;
+  if(state.adminSelectedUid&&state.allUsers[state.adminSelectedUid]){
+    const u=state.allUsers[state.adminSelectedUid],n=(u.obras||[]).length;
     return `<button class="btn btn-sec" onclick="adminDeselectColab()" style="width:100%;margin-bottom:.75rem;font-size:.8rem">← Todos</button>
        <div class="colab-sidebar-item active">
          <div style="font-weight:600;font-size:.875rem">${u.blocked?'🔒 ':''}${esc(u.nome)}</div>
@@ -275,7 +256,7 @@ export function adminObraCardHTML(obra){
       <div class="obra-card-pct">${pct(p)}</div></div>
     <div class="obra-progress-bar"><div class="obra-progress-fill" style="width:${Math.min(100,p)}%"></div></div>
     <div class="obra-card-footer">
-      <span>CT/Aditivo: ${money(vc)}</span><span>Acumulado: ${money(ac)}</span><span>Saldo: ${money(vc-ac)}</span>
+      <span>Soma Contratos: ${money(vc)}</span><span>Acumulado: ${money(ac)}</span><span>Saldo: ${money(vc-ac)}</span>
     </div></div>`;
 }
 
@@ -298,37 +279,74 @@ export function renderAdminDetail(){
   }
   const obra=obrasList.find(o=>o.id===state.adminSelectedObraId);
   if(!obra){ panel.innerHTML=html+'<p style="color:var(--text-muted)">Obra não encontrada.</p>'; return; }
-  const it=Array.isArray(obra.itens)?obra.itens:[];
-  const vc=Number(obra.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
-  const ac=Number(obra.resumo?.acumuladoTotal)||it.reduce((a,i)=>a+Number(i.acumulado||0),0);
-  const estaMed=Number(obra.resumo?.estaMedicao)||it.reduce((a,i)=>a+Number(i.medicao||0),0);
-  const p=calcPctGeral(obra.resumo,it);
-  const contratadaNome=obra.contratada||'-';
+  const it   = Array.isArray(obra.itens)?obra.itens:[];
+  const vc   = Number(obra.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
+  const ac   = Number(obra.resumo?.acumuladoTotal)     ||it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+  const estaMed = Number(obra.resumo?.estaMedicao)     ||it.reduce((a,i)=>a+Number(i.medicao||0),0);
+  const p    = calcPctGeral(obra.resumo, it);
+  const saldo= vc - ac;
+  const contratadaNome = obra.contratada||'-';
+  const dataInicioStr  = fmtDate(obra.dataInicio);
+  const totalMeses     = Array.isArray(obra.cronograma)?obra.cronograma.length:0;
+  const dataFimISO     = calcDataFim(obra.dataInicio, totalMeses);
+  const dataFimStr     = dataFimISO ? fmtDate(dataFimISO) : '-';
+  const temCrono       = Array.isArray(obra.cronograma)&&obra.cronograma.length>0;
 
-  // Datas
-  const dataInicioStr = fmtDate(obra.dataInicio);
-  const totalMeses = Array.isArray(obra.cronograma) ? obra.cronograma.length : 0;
-  const dataFimISO  = calcDataFim(obra.dataInicio, totalMeses);
-  const dataFimStr  = dataFimISO ? fmtDate(dataFimISO) : '-';
+  /* Estilos padronizados para todos os cards do admin */
+  const LS = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
+  const VS = 'font-size:.95rem;font-weight:700;margin-top:.15rem';
+  const VS_SM = 'font-size:.82rem;font-weight:700;margin-top:.15rem;word-break:break-word';
 
-  const temCrono=Array.isArray(obra.cronograma)&&obra.cronograma.length>0;
-  html+=
+  /* ─── Linha 1: Contratada | Esta Medição | Data Início | Prazo Final
+         Linha 2: Valor CT   | Acumulado   | Saldo       | % Geral     ─── */
+  html +=
     `<div class="admin-stats-grid">
-       <div class="stat-card compact"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value">${money(vc)}</span></div>
-       <div class="stat-card compact"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="color:var(--success)">${money(ac)}</span></div>
-       <div class="stat-card compact"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
-       <div class="stat-card compact"><span class="stat-label">Esta Medição</span><span class="stat-value">${money(estaMed)}</span></div>
-       <div class="stat-card compact"><span class="stat-label">Contratada</span><span class="stat-value" style="font-size:.85rem;word-break:break-word">${esc(contratadaNome)}</span></div>
-       <div class="stat-card compact"><span class="stat-label">📅 Início do Contrato</span><span class="stat-value" style="font-size:.95rem">${dataInicioStr}</span></div>
-       <div class="stat-card compact"><span class="stat-label">🏁 Término Previsto</span><span class="stat-value" style="font-size:.95rem">${dataFimStr}</span></div>
-       <div class="stat-card compact"><span class="stat-label">Saldo</span><span class="stat-value">${money(vc-ac)}</span></div>
+
+       <!-- Linha 1 -->
+       <div class="stat-card compact">
+         <span class="stat-label" style="${LS}">Contratada</span>
+         <span class="stat-value" style="${VS_SM}">${esc(contratadaNome)}</span>
+       </div>
+       <div class="stat-card compact">
+         <span class="stat-label" style="${LS}">Esta Medição</span>
+         <span class="stat-value" style="${VS}">${money(estaMed)}</span>
+       </div>
+       <div class="stat-card compact">
+         <span class="stat-label" style="${LS}">📅 Início do Contrato</span>
+         <span class="stat-value" style="${VS}">${dataInicioStr}</span>
+       </div>
+       <div class="stat-card compact">
+         <span class="stat-label" style="${LS}">🏁 Término Previsto</span>
+         <span class="stat-value" style="${VS}">${dataFimStr}</span>
+       </div>
+
+       <!-- Linha 2 -->
+       <div class="stat-card compact">
+         <span class="stat-label" style="${LS}">Valor CT / Aditivo</span>
+         <span class="stat-value" style="${VS}">${money(vc)}</span>
+       </div>
+       <div class="stat-card compact">
+         <span class="stat-label" style="${LS}">Acumulado Total</span>
+         <span class="stat-value" style="${VS};color:var(--success)">${money(ac)}</span>
+       </div>
+       <div class="stat-card compact">
+         <span class="stat-label" style="${LS}">Saldo</span>
+         <span class="stat-value" style="${VS}">${money(saldo)}</span>
+       </div>
+       <div class="stat-card compact">
+         <span class="stat-label" style="${LS}">% Geral</span>
+         <span class="stat-value" style="${VS}">${pct(p)}</span>
+       </div>
+
      </div>
+
      <div class="panel" style="margin-bottom:1.5rem">
-       <h3 style="margin-bottom:1rem">Curva S${temCrono&&obra.dataInicio?' — Planejado vs Executado':' — Progresso Físico'}</h3>
+       <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S${temCrono&&obra.dataInicio?' — Planejado vs Executado':' — Progresso Físico'}</h3>
        <div class="chart-scroll-wrap" id="adminCurvaSwrap"><div class="chart-container"><canvas id="adminCurvaS"></canvas></div></div>
      </div>
+
      <div class="panel">
-       <h3 style="margin-bottom:1rem">Índice de Itens</h3>
+       <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Índice de Itens</h3>
        <div class="table-container"><table>
          <thead><tr>
            <th class="th-sticky" data-label="ITEM" data-full="Item"></th>
@@ -343,16 +361,18 @@ export function renderAdminDetail(){
            const rp=Number(r.percentualExecutado||0);
            const rpc=rp>=99.95?'color:var(--success);font-weight:700':'font-weight:700';
            return `<tr>
-           <td>${esc(r.item)}</td><td class="td-desc">${esc(r.descricao)}</td>
-           <td style="text-align:right">${money(r.valorContrato)}</td>
-           <td style="text-align:right">${money(r.medicao)}</td>
-           <td style="text-align:right">${money(r.acumulado)}</td>
-           <td style="text-align:right">${money(r.saldo)}</td>
-           <td style="text-align:right;${rpc}">${rp.toFixed(2)}%</td>
-         </tr>`;
+             <td style="font-size:.82rem">${esc(r.item)}</td>
+             <td class="td-desc" style="font-size:.82rem">${esc(r.descricao)}</td>
+             <td style="text-align:right;font-size:.82rem">${money(r.valorContrato)}</td>
+             <td style="text-align:right;font-size:.82rem">${money(r.medicao)}</td>
+             <td style="text-align:right;font-size:.82rem">${money(r.acumulado)}</td>
+             <td style="text-align:right;font-size:.82rem">${money(r.saldo)}</td>
+             <td style="text-align:right;font-size:.82rem;${rpc}">${rp.toFixed(2)}%</td>
+           </tr>`;
          }).join('')}</tbody>
        </table></div>
      </div>`;
+
   panel.innerHTML=html;
   requestAnimationFrame(()=>{
     state.chartAdmin=renderCurvaS('adminCurvaS','adminCurvaSwrap',it,state.chartAdmin,obra.cronograma);
