@@ -584,8 +584,7 @@ function renderAdminDetail(){
            <td style="text-align:right">${money(r.medicao)}</td>
            <td style="text-align:right">${money(r.acumulado)}</td>
            <td style="text-align:right">${money(r.saldo)}</td>
-           <td style="text-align:right;font-weight:700;color:${Number(r.percentualExecutado)>=99.5?'var(--success)':'var(--text)'}">
-             ${Number(r.percentualExecutado||0).toFixed(2)}%</td>
+           <td style="text-align:right;font-weight:700;color:${Number(r.percentualExecutado)>=99.5?'var(--success)':'var(--text)'}">${Number(r.percentualExecutado||0).toFixed(2)}%</td>
          </tr>`).join('')}</tbody>
        </table></div>
      </div>`;
@@ -658,7 +657,8 @@ function setupNovaAtividade(){
     else{ $('fSaldo').value=''; $('fPct').value=''; }
   };
   ['fValorContrato','fMedicao','fAcumulado'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input',recalc); });
-  $('addRow').onclick=()=>{
+  const addRowBtn=$('addRow');
+  if(addRowBtn) addRowBtn.onclick=()=>{
     const item=$('fItem').value.trim(), desc=$('fName').value.trim();
     if(!item&&!desc){ showToast('⚠️ Preencha item ou descrição.',true); return; }
     const vc=parseMoney($('fValorContrato').value), med=parseMoney($('fMedicao').value), acu=parseMoney($('fAcumulado').value);
@@ -680,13 +680,13 @@ function bindEvents(){
     catch{ $('loginError').textContent='E-mail ou senha inválidos.'; $('loginError').style.display='block'; }
     finally{ btn.disabled=false; btn.textContent='Entrar'; }
   });
-  $('logoutBtnAdmin').addEventListener('click',()=>{ cleanup(); signOut(auth); });
-  $('logoutBtnUser').addEventListener('click',()=>{ cleanup(); signOut(auth); });
-  $('toggleTheme').onclick=()=>{
+  const logoutAdmin=$('logoutBtnAdmin'); if(logoutAdmin) logoutAdmin.addEventListener('click',()=>{ cleanup(); signOut(auth); });
+  const logoutUser=$('logoutBtnUser');   if(logoutUser)  logoutUser.addEventListener('click',()=>{ cleanup(); signOut(auth); });
+  const toggleThemeBtn=$('toggleTheme');
+  if(toggleThemeBtn) toggleThemeBtn.onclick=()=>{
     document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';
     if(state.rows.length) state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser);
   };
-  // botão hambúrguer (mobile) — abre/fecha aside
   const menuBtn=$('menuBtn');
   if(menuBtn) menuBtn.onclick=()=>{
     const aside=document.querySelector('#appView .app-aside');
@@ -694,48 +694,55 @@ function bindEvents(){
     const open=aside.classList.toggle('aside-open');
     menuBtn.textContent=open?'✕':'☰';
   };
-  $('adminToggleColab').onclick=()=>{ const p=$('adminColabPanel'); p.style.display=p.style.display==='none'?'block':'none'; };
-  $('loadFile').onclick=()=>importFile(false);
-  $('addObraBtn').onclick=()=>importFile(false);
-  $('fillSample').onclick=()=>{
+  const adminToggleColab=$('adminToggleColab');
+  if(adminToggleColab) adminToggleColab.onclick=()=>{ const p=$('adminColabPanel'); if(p) p.style.display=p.style.display==='none'?'block':'none'; };
+  const loadFileBtn=$('loadFile');     if(loadFileBtn)  loadFileBtn.onclick=()=>importFile(false);
+  const addObraBtn=$('addObraBtn');    if(addObraBtn)   addObraBtn.onclick=()=>importFile(false);
+  const fillSampleBtn=$('fillSample'); if(fillSampleBtn) fillSampleBtn.onclick=()=>{
     if(!confirm('Limpar todos os itens?')) return;
     state.rows=[]; const o=currentObra(); if(o){ o.itens=[]; saveObra(o); } renderAll();
   };
-  $('exportCsv').onclick=()=>{
+  const exportCsvBtn=$('exportCsv');
+  if(exportCsvBtn) exportCsvBtn.onclick=()=>{
     const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];
     const body=state.rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}"`).join(',')).join('\n');
     const blob=new Blob([fields.join(',')+' \n'+body],{type:'text/csv;charset=utf-8'});
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='cronograma.csv'; a.click(); URL.revokeObjectURL(a.href);
   };
-  $('saveJson').onclick=()=>{
+  const saveJsonBtn=$('saveJson');
+  if(saveJsonBtn) saveJsonBtn.onclick=()=>{
     const o=currentObra(), name=$('projName').value.trim()||'projeto';
     const blob=new Blob([JSON.stringify({obra:name,medicaoAtual:o?.medicaoAtual||'',itens:state.rows},null,2)],{type:'application/json;charset=utf-8'});
     const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name.replace(/[^a-zA-Z0-9\-_]/g,'-').toLowerCase()+'.json'; a.click(); URL.revokeObjectURL(a.href);
   };
-  $('projContratada').addEventListener('input',()=>{
+  const projContratada=$('projContratada');
+  if(projContratada) projContratada.addEventListener('input',()=>{
     const o=currentObra(); if(!o) return;
     o.contratada=$('projContratada').value.trim(); scheduleSave();
   });
-  $('tbody').addEventListener('input',e=>{
-    const t=e.target, tr=t.closest('tr'); if(!tr) return;
-    const i=+tr.dataset.i, k=t.dataset.k; if(!k) return;
-    if(['valorContrato','medicao','acumulado','saldo','percentualExecutado'].includes(k))
-      state.rows[i][k]=Number(t.textContent.replace(',','.').replace(/[^\d.-]/g,''))||0;
-    else state.rows[i][k]=t.textContent.trim();
-    updateDashboard(); scheduleSave();
-  });
-  $('tbody').addEventListener('focusout',e=>{
-    const t=e.target, tr=t.closest('tr'); if(!tr) return;
-    const i=+tr.dataset.i, k=t.dataset.k;
-    if(k&&['valorContrato','medicao','acumulado','saldo'].includes(k)) t.textContent=money(state.rows[i][k]);
-    else if(k==='percentualExecutado') t.textContent=Number(state.rows[i][k]).toFixed(2);
-  });
-  $('tbody').addEventListener('click',e=>{
-    const b=e.target.closest('button[data-del]'); if(!b) return;
-    state.rows.splice(+b.dataset.del,1);
-    const o=currentObra(); if(o){ o.itens=state.rows; saveObra(o); }
-    renderAll();
-  });
+  const tbody=$('tbody');
+  if(tbody){
+    tbody.addEventListener('input',e=>{
+      const t=e.target, tr=t.closest('tr'); if(!tr) return;
+      const i=+tr.dataset.i, k=t.dataset.k; if(!k) return;
+      if(['valorContrato','medicao','acumulado','saldo','percentualExecutado'].includes(k))
+        state.rows[i][k]=Number(t.textContent.replace(',','.').replace(/[^\d.-]/g,''))||0;
+      else state.rows[i][k]=t.textContent.trim();
+      updateDashboard(); scheduleSave();
+    });
+    tbody.addEventListener('focusout',e=>{
+      const t=e.target, tr=t.closest('tr'); if(!tr) return;
+      const i=+tr.dataset.i, k=t.dataset.k;
+      if(k&&['valorContrato','medicao','acumulado','saldo'].includes(k)) t.textContent=money(state.rows[i][k]);
+      else if(k==='percentualExecutado') t.textContent=Number(state.rows[i][k]).toFixed(2);
+    });
+    tbody.addEventListener('click',e=>{
+      const b=e.target.closest('button[data-del]'); if(!b) return;
+      state.rows.splice(+b.dataset.del,1);
+      const o=currentObra(); if(o){ o.itens=state.rows; saveObra(o); }
+      renderAll();
+    });
+  }
   window.addEventListener('scroll',()=>{ const b=$('btnTopo'); if(b) b.classList.toggle('visible',window.scrollY>200); });
 }
 
@@ -852,7 +859,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:
 .brand-text h1{font-size:1.25rem;font-weight:700;white-space:nowrap}
 .brand-text p{color:var(--text-muted);font-size:.8rem;white-space:nowrap}
 .header-actions{display:flex;gap:.5rem;align-items:center;flex-shrink:0}
-/* botão hambúrguer — oculto no desktop */
 .menu-btn{display:none;background:none;border:none;cursor:pointer;font-size:1.4rem;padding:.25rem .5rem;color:var(--text);line-height:1}
 .user-chip{display:inline-flex;align-items:center;gap:.4rem;background:rgba(99,102,241,.1);color:var(--primary);border:1px solid rgba(99,102,241,.25);border-radius:999px;padding:.3rem .85rem;font-size:.875rem;font-weight:600}
 .panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-md);padding:1.5rem;box-shadow:var(--shadow-sm)}
@@ -898,12 +904,8 @@ tr:hover td{background:var(--surface-hover)}
 
 /* ════════════════════════════════════════════════════
    LAYOUT MOBILE (≤ 900 px)
-   Estratégia: app-shell vira fluxo normal (sem altura
-   fixa), aside colapsável via botão ☰ no topbar,
-   main ocupa 100% da largura e rola livremente.
    ════════════════════════════════════════════════════ */
 @media(max-width:900px){
-  /* Shell: fluxo normal, sem grid de 2 colunas */
   .app-shell{
     display:flex;
     flex-direction:column;
@@ -911,16 +913,13 @@ tr:hover td{background:var(--surface-hover)}
     min-height:100vh;
     overflow:visible;
   }
-  /* Topbar fixo no topo */
   .app-topbar{
     position:sticky;
     top:0;
     z-index:50;
     padding:.65rem 1rem;
   }
-  /* Hambúrguer visível */
   .menu-btn{ display:inline-flex; }
-  /* Aside: oculta por padrão, desliza de cima */
   .app-aside{
     display:none;
     width:100%;
@@ -932,7 +931,6 @@ tr:hover td{background:var(--surface-hover)}
     overflow:visible;
   }
   .app-aside.aside-open{ display:flex; }
-  /* Main: fluxo normal, padding confortável */
   .app-main{
     grid-column:unset;
     grid-row:unset;
@@ -940,7 +938,6 @@ tr:hover td{background:var(--surface-hover)}
     overflow:visible;
     padding:1rem;
   }
-  /* Stats: 2 colunas no mobile */
   .stats-grid{
     grid-template-columns:repeat(2,1fr);
     gap:.6rem;
@@ -953,25 +950,18 @@ tr:hover td{background:var(--surface-hover)}
   .stat-value{ font-size:1.1rem; }
   .stat-label{ font-size:.65rem; }
   .panel{ padding:1rem; }
-  /* Tabela: scroll horizontal interno */
   .table-container{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
   th,td{ padding:.4rem .6rem; font-size:.72rem; }
   .td-desc{ max-width:140px; }
-  /* Gráfico: altura menor mas presente */
   .chart-container{ height:180px; }
-  /* Formulário de nova atividade: 2 cols */
   .add-form-grid{ grid-template-columns:1fr 1fr; gap:.5rem; }
-  /* Botão topo */
   .btnTopo{ bottom:1rem; right:.75rem; }
-  /* Admin layout: 1 coluna */
   .admin-layout{ grid-template-columns:1fr; }
-  /* Textos do topbar */
   .brand-text p{ display:none; }
   .brand-text h1{ font-size:.95rem; }
   .user-chip{ font-size:.75rem; padding:.25rem .6rem; }
 }
 
-/* Telas muito pequenas (< 400 px): stats em 1 coluna */
 @media(max-width:400px){
   .stats-grid{ grid-template-columns:1fr; }
   .admin-stats-grid{ grid-template-columns:1fr; }
@@ -1017,7 +1007,6 @@ tr:hover td{background:var(--surface-hover)}
   <div class="app-shell">
     <header class="app-topbar">
       <div class="brand">
-        <!-- Hambúrguer — visível apenas no mobile via CSS -->
         <button id="menuBtn" class="menu-btn" aria-label="Menu">☰</button>
         <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
           <rect width="48" height="48" rx="10" fill="#4f46e5"/>
@@ -1033,7 +1022,6 @@ tr:hover td{background:var(--surface-hover)}
       </div>
     </header>
 
-    <!-- Aside: ferramentas / projeto / ações -->
     <aside class="app-aside">
       <div class="panel" style="padding:1rem">
         <div class="section-title" style="margin-bottom:.75rem">📁 Obras</div>
@@ -1059,12 +1047,9 @@ tr:hover td{background:var(--surface-hover)}
       </div>
     </aside>
 
-    <!-- Main: dashboard completo -->
     <main class="app-main">
-      <!-- Cards de resumo -->
       <div class="stats-grid" id="stats"></div>
 
-      <!-- Gráfico Curva S -->
       <div class="panel" style="margin-bottom:1.25rem">
         <h3 style="margin-bottom:1rem">Curva S — Progresso Físico</h3>
         <div class="chart-scroll-wrap" id="sCurveScrollWrap">
@@ -1072,7 +1057,6 @@ tr:hover td{background:var(--surface-hover)}
         </div>
       </div>
 
-      <!-- Formulário nova atividade -->
       <div class="panel" style="margin-bottom:1.25rem">
         <h3 style="margin-bottom:1rem">➕ Nova atividade</h3>
         <div class="add-form-grid">
@@ -1087,7 +1071,6 @@ tr:hover td{background:var(--surface-hover)}
         </div>
       </div>
 
-      <!-- Índice de Itens -->
       <div class="panel">
         <h3 style="margin-bottom:1rem">📋 Índice de Itens</h3>
         <div class="table-container">
@@ -1099,3 +1082,66 @@ tr:hover td{background:var(--surface-hover)}
                 <th style="text-align:right">Valor Contrato</th>
                 <th style="text-align:right">Medição</th>
                 <th style="text-align:right">Acumulado</th>
+                <th style="text-align:right">Saldo</th>
+                <th style="text-align:right">% Exec.</th>
+                <th style="text-align:right">Ações</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+      <button id="btnTopo" class="btn btn-sec btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
+    </main>
+  </div>
+</div>
+
+<!-- ADMIN VIEW -->
+<div id="adminView" style="display:none">
+  <div style="background:var(--surface);border-bottom:1px solid var(--border);padding:.875rem 2rem;display:flex;justify-content:space-between;align-items:center;gap:.75rem;position:sticky;top:0;z-index:20">
+    <div class="brand">
+      <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+        <rect width="48" height="48" rx="10" fill="#4f46e5"/>
+        <path d="M14 34V18l10-6 10 6v16" stroke="#fff" stroke-width="2.5" stroke-linejoin="round" fill="none"/>
+        <rect x="20" y="24" width="8" height="10" rx="1.5" fill="#fff"/>
+      </svg>
+      <div class="brand-text"><h1>Cronograma PRO</h1><p>Painel Admin</p></div>
+    </div>
+    <div class="header-actions">
+      <button id="toggleThemeAdmin" class="btn btn-sec" style="padding:.5rem .75rem" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark'">🌙</button>
+      <button id="logoutBtnAdmin" class="btn btn-sec" style="padding:.5rem .75rem">Sair</button>
+    </div>
+  </div>
+
+  <div style="padding:1.5rem 2rem;max-width:1400px;margin:0 auto">
+    <div class="stats-grid" id="adminStats" style="margin-bottom:1.5rem"></div>
+
+    <div class="panel" style="margin-bottom:1.5rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;flex-wrap:wrap;gap:.5rem">
+        <h2 style="font-size:1.1rem;font-weight:700">👥 Colaboradores</h2>
+        <button id="adminToggleColab" class="btn btn-sec" style="font-size:.8rem">+ Novo colaborador</button>
+      </div>
+      <div id="adminColabPanel" style="display:none;margin-bottom:1.25rem">
+        <form id="addColabForm" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:.75rem;align-items:end">
+          <div class="form-group"><label>Nome</label><input id="colabNome" class="form-control" placeholder="Nome completo" required/></div>
+          <div class="form-group"><label>E-mail</label><input id="colabEmail" class="form-control" type="email" placeholder="email@exemplo.com" required/></div>
+          <div class="form-group"><label>Senha</label><input id="colabSenha" class="form-control" type="password" placeholder="Mínimo 6 caracteres" required minlength="6"/></div>
+          <div class="form-group" style="justify-content:flex-end"><button id="addColabBtn" type="submit" class="btn btn-primary" style="width:100%">Cadastrar colaborador</button></div>
+          <div id="colabMsgError" style="display:none;color:var(--danger);font-size:.8rem;grid-column:1/-1;background:rgba(239,68,68,.08);padding:.5rem .75rem;border-radius:var(--radius-sm)"></div>
+        </form>
+      </div>
+      <div id="colabList"></div>
+    </div>
+
+    <div class="panel">
+      <h2 style="font-size:1.1rem;font-weight:700;margin-bottom:1rem">📊 Obras por Colaborador</h2>
+      <div class="admin-layout">
+        <div id="adminColabSidebar" style="background:var(--bg);border-radius:var(--radius-sm);padding:.5rem;border:1px solid var(--border)"></div>
+        <div id="adminDetailPanel"><p style="color:var(--text-muted);padding:1rem">Selecione um colaborador ao lado.</p></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
