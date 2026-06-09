@@ -126,12 +126,12 @@ export function setImportFileFn(fn){ importFileFn = fn; }
 
 /* ---- ADMIN ---- */
 export function renderAdminStats(){
-  let tot=0,tit=0,tvc=0,tac=0;
+  let tot=0,tvc=0,tac=0;
   Object.values(state.allUsers).forEach(u=>{
     if(u.role==='admin') return;
     (u.obras||[]).forEach(o=>{
-      tot++; const it=Array.isArray(o.itens)?o.itens:[];
-      tit+=it.length;
+      tot++;
+      const it=Array.isArray(o.itens)?o.itens:[];
       tvc+=Number(o.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
       tac+=Number(o.resumo?.acumuladoTotal)||it.reduce((a,i)=>a+Number(i.acumulado||0),0);
     });
@@ -139,7 +139,7 @@ export function renderAdminStats(){
   const p=tvc>0?+(tac/tvc*100).toFixed(2):0;
   if($('adminStats')) $('adminStats').innerHTML=
     `<div class="stat-card"><span class="stat-label">Total de Obras</span><span class="stat-value">${tot}</span></div>
-     <div class="stat-card"><span class="stat-label">Total de Itens</span><span class="stat-value">${tit}</span></div>
+     <div class="stat-card"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value" style="font-size:1rem">${money(tvc)}</span></div>
      <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
      <div class="stat-card"><span class="stat-label">Acumulado Geral</span><span class="stat-value" style="font-size:1.1rem">${money(tac)}</span></div>`;
 }
