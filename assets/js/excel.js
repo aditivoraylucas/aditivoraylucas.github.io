@@ -132,18 +132,47 @@ function findValorContrato(rows){
   return candidates[0].v;
 }
 
+/**
+ * Extrai o valor monetário de "Esta Medição" / "Medição Atual" do cabeçalho.
+ * Busca o rótulo e pega o primeiro número > 0 à direita ou abaixo.
+ */
+function findEstaMedicao(rows){
+  const RE = /esta[\s.]*medi|medi[çc][aã]o[\s.]*atual|medi[çc][aã]o[\s.]*n[°º]/i;
+  for(let r = 0; r < rows.length; r++){
+    const row = rows[r] || [];
+    for(let c = 0; c < row.length; c++){
+      const cell = String(row[c] ?? '').trim();
+      if(!cell || !RE.test(cell)) continue;
+      // Tenta à direita na mesma linha
+      for(let cc = c + 1; cc < Math.min(c + 10, row.length); cc++){
+        const v = Number(row[cc]); if(v > 0) return v;
+      }
+      // Tenta linha abaixo
+      for(let rr = r + 1; rr <= r + 4 && rr < rows.length; rr++){
+        const v = Number(rows[rr]?.[c]); if(v > 0) return v;
+        for(let cc = c - 1; cc <= c + 3; cc++){
+          if(cc < 0) continue;
+          const v2 = Number(rows[rr]?.[cc]); if(v2 > 0) return v2;
+        }
+      }
+    }
+  }
+  return 0;
+}
+
 function extractMetaFromHeaders(data, firstDataRowIdx){
-  const RE_ACUM = /acumulado/i, RE_MED=/esta.?medi|medi.?atual/i, RE_CONT=/contratada/i;
+  const RE_ACUM = /acumulado/i, RE_CONT=/contratada/i;
   let acu=0, contratada='';
   const rows = firstDataRowIdx>0 ? data.slice(0,firstDataRowIdx) : data.slice(0,Math.min(50,data.length));
   const vca = findValorContrato(rows);
+  const estaMedicao = findEstaMedicao(rows);
   let acumColHeader=-1, acumRowHeader=-1;
   for(let r=0; r<rows.length; r++){
     const row=rows[r]||[]; let hasAcum=false, hasMedOrSaldo=false, acumC=-1;
     for(let c=0; c<row.length; c++){
       const t=norm(row[c]); if(!t) continue;
       if(RE_ACUM.test(t)){ hasAcum=true; acumC=c; }
-      if(RE_MED.test(t)||/saldo/i.test(t)) hasMedOrSaldo=true;
+      if(/esta[\s.]*medi|medi.?atual/i.test(t)||/saldo/i.test(t)) hasMedOrSaldo=true;
     }
     if(hasAcum&&hasMedOrSaldo){ acumColHeader=acumC; acumRowHeader=r; break; }
   }
@@ -185,7 +214,7 @@ function extractMetaFromHeaders(data, firstDataRowIdx){
       }
     }
   }
-  return { valorContratoAditivo:vca, acumuladoTotal:acu, contratada };
+  return { valorContratoAditivo:vca, acumuladoTotal:acu, contratada, estaMedicao };
 }
 
 export function normalizeRows(list){
@@ -239,10 +268,17 @@ export async function readExcelFile(file){
   const sumAcum=items.reduce((a,i)=>a+i.acumulado,0);
   const vca=meta.valorContratoAditivo||sumVC;
   const acu=meta.acumuladoTotal>0?meta.acumuladoTotal:sumAcum;
+  // estaMedicao: valor do cabeçalho tem prioridade; fallback soma da coluna medicao dos itens
+  const estaMed = meta.estaMedicao > 0 ? meta.estaMedicao : items.reduce((a,i)=>a+i.medicao,0);
   return {
     nome:baseName(file.name), nomeProjeto:wb.Props?.Title||baseName(file.name)||'Nova obra',
     medicaoAtual:sheetName, contratada:meta.contratada||'',
     itens:items, warnings,
-    resumo:{ total:sumVC, acumulado:sumAcum, percentual:vca>0?+(acu/vca*100).toFixed(2):0, valorContratoAditivo:vca, acumuladoTotal:acu }
+    resumo:{
+      total:sumVC, acumulado:sumAcum,
+      percentual:vca>0?+(acu/vca*100).toFixed(2):0,
+      valorContratoAditivo:vca, acumuladoTotal:acu,
+      estaMedicao: +estaMed.toFixed(2)
+    }
   };
 }

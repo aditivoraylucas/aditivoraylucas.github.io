@@ -10,10 +10,25 @@ export function scheduleSave(){
 }
 export function currentObra(){ return state.obras.find(o => o.id === state.selectedObraId); }
 
-/* ────────────────────────────────────────────────────────────
+/* ---- helpers de data ---- */
+function fmtDate(str){
+  if(!str) return '-';
+  const d = new Date(str + 'T00:00:00');
+  return isNaN(d) ? str : d.toLocaleDateString('pt-BR');
+}
+function calcDataFim(dataInicio, totalMeses){
+  if(!dataInicio || !totalMeses) return null;
+  const d = new Date(dataInicio + 'T00:00:00');
+  d.setMonth(d.getMonth() + totalMeses);
+  // último dia do mês anterior = dia do fim do contrato
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/* ─────────────────────────────────────────────────────────
    renderCurvaS — gráfico com linha de planejado sobreposta
    Não altera nenhum dado de medição existente.
-──────────────────────────────────────────────────────────── */
+───────────────────────────────────────────────────────── */
 export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData){
   const canvas=$(canvasId); if(!canvas) return prev;
   if(prev) prev.destroy();
@@ -30,7 +45,6 @@ export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData){
     ? Math.max(4,Math.floor((containerW-16)/(n||1))-2)
     : Math.max(18,Math.min(40,Math.floor(600/(n||1))));
 
-  // Dataset base: barras do executado (inalterado)
   const datasets=[{
     type:'bar',
     label:'% Executado',
@@ -43,7 +57,6 @@ export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData){
     order:2
   }];
 
-  // Dataset linha planejada — só adiciona se houver cronograma + dataInicio
   const obra = currentObra();
   const timeline = (cronogramaData && obra?.dataInicio)
     ? buildCronogramaTimeline(obra.dataInicio, cronogramaData)
@@ -52,24 +65,18 @@ export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData){
   let labels = itens.map(r=>String(r.item||''));
 
   if(timeline && timeline.length){
-    // Reorganiza eixo X por mês (timeline) e adiciona acumulado planejado vs executado real acumulado
     const totalVC = itens.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
     const totalAcu= itens.reduce((a,r)=>a+(Number(r.acumulado)||0),0);
     const realPctGeral = totalVC>0 ? +(totalAcu/totalVC*100).toFixed(2) : 0;
-
-    // Acumula % planejado mês a mês
     let acumPlan=0;
     const planData = timeline.map(t=>{ acumPlan+=t.planejadoPct; return +acumPlan.toFixed(2); });
-
-    // % real: distribui linearmente pelos meses para comparação visual
     const nMeses = timeline.length;
     const realData = timeline.map((t,i)=>{
       if(!t.passado) return null;
       return +(realPctGeral / nMeses * (i+1)).toFixed(2);
     });
-
     labels = timeline.map(t=>t.label);
-    datasets.length=0; // substitui datasets no modo cronograma
+    datasets.length=0;
     datasets.push({
       type:'line',
       label:'Planejado (%)',
@@ -116,7 +123,6 @@ export function applySelected(o){
   const pn=$('projName'); if(pn) pn.value=o.nomeProjeto||o.nome||'Nova obra';
   const pc=$('projContratada'); if(pc) pc.value=o.contratada||'';
   const ps=$('projScope'); if(ps) ps.value=o.medicaoAtual||'';
-  // preenche campo data início
   const di=$('projDataInicio'); if(di) di.value=o.dataInicio||'';
 }
 
@@ -143,12 +149,13 @@ export function updateDashboard(){
   const o=currentObra();
   const vc=Number(o?.resumo?.valorContratoAditivo)||state.rows.reduce((a,r)=>a+Number(r.valorContrato||0),0);
   const ac=Number(o?.resumo?.acumuladoTotal)||state.rows.reduce((a,r)=>a+Number(r.acumulado||0),0);
+  const estaMed=Number(o?.resumo?.estaMedicao)||state.rows.reduce((a,r)=>a+Number(r.medicao||0),0);
   const p=calcPctGeral(o?.resumo,state.rows);
   if($('stats')) $('stats').innerHTML=
     `<div class="stat-card"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value" style="font-size:1rem">${money(vc)}</span></div>
      <div class="stat-card"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="font-size:1rem;color:var(--success)">${money(ac)}</span></div>
      <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
-     <div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.2rem">${esc(o?.medicaoAtual||'-')}</span></div>`;
+     <div class="stat-card"><span class="stat-label">Esta Medição</span><span class="stat-value" style="font-size:1rem">${money(estaMed)}</span></div>`;
   if($('countAll'))  $('countAll').textContent=money(vc);
   if($('countDone')) $('countDone').textContent=money(ac);
   if($('countPct'))  $('countPct').textContent=pct(p);
@@ -294,19 +301,26 @@ export function renderAdminDetail(){
   const it=Array.isArray(obra.itens)?obra.itens:[];
   const vc=Number(obra.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
   const ac=Number(obra.resumo?.acumuladoTotal)||it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+  const estaMed=Number(obra.resumo?.estaMedicao)||it.reduce((a,i)=>a+Number(i.medicao||0),0);
   const p=calcPctGeral(obra.resumo,it);
-  const tMed=it.reduce((a,i)=>a+Number(i.medicao||0),0);
   const contratadaNome=obra.contratada||'-';
-  const dataInicioStr=obra.dataInicio?new Date(obra.dataInicio+'T00:00:00').toLocaleDateString('pt-BR'):'-';
+
+  // Datas
+  const dataInicioStr = fmtDate(obra.dataInicio);
+  const totalMeses = Array.isArray(obra.cronograma) ? obra.cronograma.length : 0;
+  const dataFimISO  = calcDataFim(obra.dataInicio, totalMeses);
+  const dataFimStr  = dataFimISO ? fmtDate(dataFimISO) : '-';
+
   const temCrono=Array.isArray(obra.cronograma)&&obra.cronograma.length>0;
   html+=
     `<div class="admin-stats-grid">
        <div class="stat-card compact"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value">${money(vc)}</span></div>
        <div class="stat-card compact"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="color:var(--success)">${money(ac)}</span></div>
        <div class="stat-card compact"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
-       <div class="stat-card compact"><span class="stat-label">Medição Atual</span><span class="stat-value">${esc(obra.medicaoAtual||'-')}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Esta Medição</span><span class="stat-value">${money(estaMed)}</span></div>
        <div class="stat-card compact"><span class="stat-label">Contratada</span><span class="stat-value" style="font-size:.85rem;word-break:break-word">${esc(contratadaNome)}</span></div>
-       <div class="stat-card compact"><span class="stat-label">Início Contrato</span><span class="stat-value" style="font-size:.95rem">${dataInicioStr}</span></div>
+       <div class="stat-card compact"><span class="stat-label">📅 Início do Contrato</span><span class="stat-value" style="font-size:.95rem">${dataInicioStr}</span></div>
+       <div class="stat-card compact"><span class="stat-label">🏁 Término Previsto</span><span class="stat-value" style="font-size:.95rem">${dataFimStr}</span></div>
        <div class="stat-card compact"><span class="stat-label">Saldo</span><span class="stat-value">${money(vc-ac)}</span></div>
      </div>
      <div class="panel" style="margin-bottom:1.5rem">
