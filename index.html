@@ -18,17 +18,37 @@
   <div class="login-wrapper" style="width:100%">
     <div class="login-card">
       <div class="brand-login">
-        <svg width="52" height="52" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+
+        <!-- LOGO LOGIN (grande, 64px) -->
+        <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
           <defs>
-            <linearGradient id="raGradLogin" x1="0" y1="0" x2="52" y2="52" gradientUnits="userSpaceOnUse">
-              <stop offset="0%" stop-color="#6366f1"/>
-              <stop offset="100%" stop-color="#8b5cf6"/>
+            <linearGradient id="bgL" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#1e293b"/>
+              <stop offset="100%" stop-color="#0f172a"/>
+            </linearGradient>
+            <linearGradient id="goldL" x1="12" y1="20" x2="52" y2="56" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#fbbf24"/>
+              <stop offset="100%" stop-color="#d97706"/>
             </linearGradient>
           </defs>
-          <rect width="52" height="52" rx="14" fill="url(#raGradLogin)"/>
-          <text x="26" y="36" text-anchor="middle" font-family="Georgia,serif" font-weight="700" font-size="22" letter-spacing="1" fill="white">RA</text>
-          <rect x="10" y="40" width="32" height="2" rx="1" fill="rgba(255,255,255,0.35)"/>
+          <!-- fundo grafite -->
+          <rect width="64" height="64" rx="16" fill="url(#bgL)"/>
+          <!-- andaime: barras verticais -->
+          <line x1="14" y1="10" x2="14" y2="54" stroke="rgba(251,191,36,0.22)" stroke-width="2" stroke-linecap="round"/>
+          <line x1="50" y1="10" x2="50" y2="54" stroke="rgba(251,191,36,0.22)" stroke-width="2" stroke-linecap="round"/>
+          <!-- andaime: barras horizontais -->
+          <line x1="10" y1="18" x2="54" y2="18" stroke="rgba(251,191,36,0.18)" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10" y1="30" x2="54" y2="30" stroke="rgba(251,191,36,0.18)" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10" y1="42" x2="54" y2="42" stroke="rgba(251,191,36,0.18)" stroke-width="1.5" stroke-linecap="round"/>
+          <!-- linha base (chão) dourada sólida -->
+          <line x1="10" y1="54" x2="54" y2="54" stroke="url(#goldL)" stroke-width="2.5" stroke-linecap="round"/>
+          <!-- letras RA douradas -->
+          <text x="32" y="46" text-anchor="middle"
+                font-family="Georgia,serif" font-weight="700"
+                font-size="26" letter-spacing="2"
+                fill="url(#goldL)">RA</text>
         </svg>
+
         <div>
           <h2 style="font-size:1.5rem;font-weight:800">Cronograma PRO</h2>
           <p style="color:var(--text-muted);font-size:.875rem">Gestão de obras e medições</p>
@@ -56,17 +76,32 @@
     <header class="app-topbar">
       <div class="brand">
         <button id="menuBtn" class="menu-btn" aria-label="Menu">☰</button>
-        <svg width="34" height="34" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+
+        <!-- LOGO TOPBAR (38px) -->
+        <svg width="38" height="38" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
           <defs>
-            <linearGradient id="raGradUser" x1="0" y1="0" x2="52" y2="52" gradientUnits="userSpaceOnUse">
-              <stop offset="0%" stop-color="#6366f1"/>
-              <stop offset="100%" stop-color="#8b5cf6"/>
+            <linearGradient id="bgU" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#1e293b"/>
+              <stop offset="100%" stop-color="#0f172a"/>
+            </linearGradient>
+            <linearGradient id="goldU" x1="12" y1="20" x2="52" y2="56" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#fbbf24"/>
+              <stop offset="100%" stop-color="#d97706"/>
             </linearGradient>
           </defs>
-          <rect width="52" height="52" rx="13" fill="url(#raGradUser)"/>
-          <text x="26" y="35" text-anchor="middle" font-family="Georgia,serif" font-weight="700" font-size="21" letter-spacing="1" fill="white">RA</text>
-          <rect x="10" y="40" width="32" height="2" rx="1" fill="rgba(255,255,255,0.35)"/>
+          <rect width="64" height="64" rx="14" fill="url(#bgU)"/>
+          <line x1="14" y1="10" x2="14" y2="54" stroke="rgba(251,191,36,0.22)" stroke-width="2" stroke-linecap="round"/>
+          <line x1="50" y1="10" x2="50" y2="54" stroke="rgba(251,191,36,0.22)" stroke-width="2" stroke-linecap="round"/>
+          <line x1="10" y1="18" x2="54" y2="18" stroke="rgba(251,191,36,0.18)" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10" y1="30" x2="54" y2="30" stroke="rgba(251,191,36,0.18)" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10" y1="42" x2="54" y2="42" stroke="rgba(251,191,36,0.18)" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10" y1="54" x2="54" y2="54" stroke="url(#goldU)" stroke-width="2.5" stroke-linecap="round"/>
+          <text x="32" y="46" text-anchor="middle"
+                font-family="Georgia,serif" font-weight="700"
+                font-size="26" letter-spacing="2"
+                fill="url(#goldU)">RA</text>
         </svg>
+
         <div class="brand-text"><h1>Cronograma PRO</h1><p>Gestão de Obras</p></div>
       </div>
       <div class="header-actions">
@@ -168,17 +203,32 @@
     <header class="app-topbar">
       <div class="brand">
         <button id="menuBtnAdmin" class="menu-btn" aria-label="Menu Admin">☰</button>
-        <svg width="34" height="34" viewBox="0 0 52 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+
+        <!-- LOGO TOPBAR ADMIN (38px) -->
+        <svg width="38" height="38" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
           <defs>
-            <linearGradient id="raGradAdmin" x1="0" y1="0" x2="52" y2="52" gradientUnits="userSpaceOnUse">
-              <stop offset="0%" stop-color="#6366f1"/>
-              <stop offset="100%" stop-color="#8b5cf6"/>
+            <linearGradient id="bgA" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#1e293b"/>
+              <stop offset="100%" stop-color="#0f172a"/>
+            </linearGradient>
+            <linearGradient id="goldA" x1="12" y1="20" x2="52" y2="56" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#fbbf24"/>
+              <stop offset="100%" stop-color="#d97706"/>
             </linearGradient>
           </defs>
-          <rect width="52" height="52" rx="13" fill="url(#raGradAdmin)"/>
-          <text x="26" y="35" text-anchor="middle" font-family="Georgia,serif" font-weight="700" font-size="21" letter-spacing="1" fill="white">RA</text>
-          <rect x="10" y="40" width="32" height="2" rx="1" fill="rgba(255,255,255,0.35)"/>
+          <rect width="64" height="64" rx="14" fill="url(#bgA)"/>
+          <line x1="14" y1="10" x2="14" y2="54" stroke="rgba(251,191,36,0.22)" stroke-width="2" stroke-linecap="round"/>
+          <line x1="50" y1="10" x2="50" y2="54" stroke="rgba(251,191,36,0.22)" stroke-width="2" stroke-linecap="round"/>
+          <line x1="10" y1="18" x2="54" y2="18" stroke="rgba(251,191,36,0.18)" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10" y1="30" x2="54" y2="30" stroke="rgba(251,191,36,0.18)" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10" y1="42" x2="54" y2="42" stroke="rgba(251,191,36,0.18)" stroke-width="1.5" stroke-linecap="round"/>
+          <line x1="10" y1="54" x2="54" y2="54" stroke="url(#goldA)" stroke-width="2.5" stroke-linecap="round"/>
+          <text x="32" y="46" text-anchor="middle"
+                font-family="Georgia,serif" font-weight="700"
+                font-size="26" letter-spacing="2"
+                fill="url(#goldA)">RA</text>
         </svg>
+
         <div class="brand-text"><h1>Cronograma PRO</h1><p>Painel Administrativo</p></div>
       </div>
       <div class="header-actions">
