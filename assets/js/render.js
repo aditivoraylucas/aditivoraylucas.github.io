@@ -156,25 +156,31 @@ export function renderColabList(){
      </div>`).join('');
 }
 
-export function renderAdminSidebar(){
-  const box=$('adminColabSidebar'); if(!box) return;
-  const colabs=Object.entries(state.allUsers).filter(([,u])=>u.role!=='admin');
-  if(!colabs.length){ box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem">Nenhum colaborador.</p>'; return; }
-  if(state.adminSelectedUid&&state.allUsers[state.adminSelectedUid]){
+/* Gera o HTML dos itens da lista de colaboradores (reutilizado na sidebar e no mobile) */
+function colabSidebarHTML(colabs){
+  if(!colabs.length) return '<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem">Nenhum colaborador.</p>';
+  if(state.adminSelectedUid && state.allUsers[state.adminSelectedUid]){
     const u=state.allUsers[state.adminSelectedUid], n=(u.obras||[]).length;
-    box.innerHTML=
-      `<button class="btn btn-sec" onclick="adminDeselectColab()" style="width:100%;margin-bottom:.75rem;font-size:.8rem">← Todos</button>
+    return `<button class="btn btn-sec" onclick="adminDeselectColab()" style="width:100%;margin-bottom:.75rem;font-size:.8rem">← Todos</button>
        <div class="colab-sidebar-item active">
          <div style="font-weight:600;font-size:.875rem">${u.blocked?'🔒 ':''}${esc(u.nome)}</div>
          <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n!==1?'s':''}</div>
        </div>`;
-    return;
   }
-  box.innerHTML=colabs.map(([uid,u])=>
+  return colabs.map(([uid,u])=>
     `<div class="colab-sidebar-item" style="${u.blocked?'opacity:.55':''}" onclick="adminSelectColab('${uid}')">
        <div style="font-weight:600;font-size:.875rem">${u.blocked?'🔒 ':''}${esc(u.nome)}</div>
        <div style="font-size:.75rem;color:var(--text-muted)">${(u.obras||[]).length} obra${(u.obras||[]).length!==1?'s':''}</div>
      </div>`).join('');
+}
+
+export function renderAdminSidebar(){
+  const colabs=Object.entries(state.allUsers).filter(([,u])=>u.role!=='admin');
+  const html=colabSidebarHTML(colabs);
+  /* sidebar desktop */
+  const box=$('adminColabSidebar'); if(box) box.innerHTML=html;
+  /* lista mobile (abaixo dos cards) */
+  const mob=$('adminColabSidebarMobile'); if(mob) mob.innerHTML=html;
 }
 
 export function adminObraCardHTML(obra){
