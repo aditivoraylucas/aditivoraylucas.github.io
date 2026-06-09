@@ -195,9 +195,12 @@ export function bindEvents(){
     tbody.addEventListener('input',e=>{
       const t=e.target, tr=t.closest('tr'); if(!tr) return;
       const i=+tr.dataset.i, k=t.dataset.k; if(!k) return;
-      if(['valorContrato','medicao','acumulado','saldo','percentualExecutado'].includes(k))
-        state.rows[i][k]=Number(t.textContent.replace(',','.').replace(/[^\d.-]/g,''))||0;
-      else state.rows[i][k]=t.textContent.trim();
+      if(['valorContrato','medicao','acumulado','saldo'].includes(k))
+        state.rows[i][k] = parseMoney(t.textContent);
+      else if(k==='percentualExecutado')
+        state.rows[i][k] = Number(t.textContent.trim().replace(',','.')) || 0;
+      else
+        state.rows[i][k] = t.textContent.trim();
       updateDashboard(); scheduleSave();
     });
     tbody.addEventListener('focusout',e=>{
