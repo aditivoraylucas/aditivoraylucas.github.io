@@ -105,35 +105,20 @@ export function renderTable(){
   }).join('');
 }
 
-/* ── Dashboard do colaborador (painel fixo superior) ── */
+/* ── Dashboard do colaborador (painel fixo) — mantém "Valor CT / Aditivo" ── */
 export function updateDashboard(){
   const o=currentObra();
   const vc     = Number(o?.resumo?.valorContratoAditivo)||state.rows.reduce((a,r)=>a+Number(r.valorContrato||0),0);
   const ac     = Number(o?.resumo?.acumuladoTotal)     ||state.rows.reduce((a,r)=>a+Number(r.acumulado||0),0);
   const estaMed= Number(o?.resumo?.estaMedicao)        ||state.rows.reduce((a,r)=>a+Number(r.medicao||0),0);
   const p      = calcPctGeral(o?.resumo, state.rows);
-
-  /* — Cards do painel fixo: "Soma dos Contratos" substitui "Valor CT / Aditivo" — */
-  const LABEL_STYLE = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
-  const VAL_STYLE   = 'font-size:.95rem;font-weight:700;margin-top:.2rem';
+  const LS = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
+  const VS = 'font-size:.95rem;font-weight:700;margin-top:.2rem';
   if($('stats')) $('stats').innerHTML=
-    `<div class="stat-card">
-       <span class="stat-label" style="${LABEL_STYLE}">Soma dos Contratos</span>
-       <span class="stat-value" style="${VAL_STYLE}">${money(vc)}</span>
-     </div>
-     <div class="stat-card">
-       <span class="stat-label" style="${LABEL_STYLE}">Acumulado Total</span>
-       <span class="stat-value" style="${VAL_STYLE};color:var(--success)">${money(ac)}</span>
-     </div>
-     <div class="stat-card">
-       <span class="stat-label" style="${LABEL_STYLE}">% Geral</span>
-       <span class="stat-value" style="${VAL_STYLE}">${pct(p)}</span>
-     </div>
-     <div class="stat-card">
-       <span class="stat-label" style="${LABEL_STYLE}">Esta Medição</span>
-       <span class="stat-value" style="${VAL_STYLE}">${money(estaMed)}</span>
-     </div>`;
-
+    `<div class="stat-card"><span class="stat-label" style="${LS}">Valor CT / Aditivo</span><span class="stat-value" style="${VS}">${money(vc)}</span></div>
+     <div class="stat-card"><span class="stat-label" style="${LS}">Acumulado Total</span><span class="stat-value" style="${VS};color:var(--success)">${money(ac)}</span></div>
+     <div class="stat-card"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>
+     <div class="stat-card"><span class="stat-label" style="${LS}">Esta Medição</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>`;
   if($('countAll'))  $('countAll').textContent  = money(vc);
   if($('countDone')) $('countDone').textContent = money(ac);
   if($('countPct'))  $('countPct').textContent  = pct(p);
@@ -180,6 +165,8 @@ let importFileFn = ()=>{};
 export function setImportFileFn(fn){ importFileFn = fn; }
 
 /* ── ADMIN ── */
+
+/* Painel fixo do admin — "Soma dos Contratos" (visão global de todas as obras) */
 export function renderAdminStats(){
   let tot=0,tvc=0,tac=0;
   Object.values(state.allUsers).forEach(u=>{
@@ -192,7 +179,6 @@ export function renderAdminStats(){
     });
   });
   const p=tvc>0?+(tac/tvc*100).toFixed(2):0;
-  /* Painel fixo do admin — mantém "Soma dos Contratos" também */
   const LS='font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
   const VS='font-size:.95rem;font-weight:700;margin-top:.2rem';
   if($('adminStats')) $('adminStats').innerHTML=
@@ -242,6 +228,7 @@ export function renderAdminSidebar(){
   const mob=$('adminColabSidebarMobile'); if(mob) mob.innerHTML=html;
 }
 
+/* Card de obra na listagem — mantém "CT/Aditivo" */
 export function adminObraCardHTML(obra){
   const it=Array.isArray(obra.itens)?obra.itens:[];
   const vc=Number(obra.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
@@ -256,7 +243,7 @@ export function adminObraCardHTML(obra){
       <div class="obra-card-pct">${pct(p)}</div></div>
     <div class="obra-progress-bar"><div class="obra-progress-fill" style="width:${Math.min(100,p)}%"></div></div>
     <div class="obra-card-footer">
-      <span>Soma Contratos: ${money(vc)}</span><span>Acumulado: ${money(ac)}</span><span>Saldo: ${money(vc-ac)}</span>
+      <span>CT/Aditivo: ${money(vc)}</span><span>Acumulado: ${money(ac)}</span><span>Saldo: ${money(vc-ac)}</span>
     </div></div>`;
 }
 
@@ -279,72 +266,40 @@ export function renderAdminDetail(){
   }
   const obra=obrasList.find(o=>o.id===state.adminSelectedObraId);
   if(!obra){ panel.innerHTML=html+'<p style="color:var(--text-muted)">Obra não encontrada.</p>'; return; }
-  const it   = Array.isArray(obra.itens)?obra.itens:[];
-  const vc   = Number(obra.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
-  const ac   = Number(obra.resumo?.acumuladoTotal)     ||it.reduce((a,i)=>a+Number(i.acumulado||0),0);
-  const estaMed = Number(obra.resumo?.estaMedicao)     ||it.reduce((a,i)=>a+Number(i.medicao||0),0);
-  const p    = calcPctGeral(obra.resumo, it);
-  const saldo= vc - ac;
+  const it      = Array.isArray(obra.itens)?obra.itens:[];
+  const vc      = Number(obra.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
+  const ac      = Number(obra.resumo?.acumuladoTotal)     ||it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+  const estaMed = Number(obra.resumo?.estaMedicao)        ||it.reduce((a,i)=>a+Number(i.medicao||0),0);
+  const p       = calcPctGeral(obra.resumo, it);
+  const saldo   = vc - ac;
   const contratadaNome = obra.contratada||'-';
   const dataInicioStr  = fmtDate(obra.dataInicio);
   const totalMeses     = Array.isArray(obra.cronograma)?obra.cronograma.length:0;
   const dataFimISO     = calcDataFim(obra.dataInicio, totalMeses);
   const dataFimStr     = dataFimISO ? fmtDate(dataFimISO) : '-';
   const temCrono       = Array.isArray(obra.cronograma)&&obra.cronograma.length>0;
+  const LS   = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
+  const VS   = 'font-size:.95rem;font-weight:700;margin-top:.15rem';
+  const VSSM = 'font-size:.82rem;font-weight:700;margin-top:.15rem;word-break:break-word';
 
-  /* Estilos padronizados para todos os cards do admin */
-  const LS = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
-  const VS = 'font-size:.95rem;font-weight:700;margin-top:.15rem';
-  const VS_SM = 'font-size:.82rem;font-weight:700;margin-top:.15rem;word-break:break-word';
-
-  /* ─── Linha 1: Contratada | Esta Medição | Data Início | Prazo Final
-         Linha 2: Valor CT   | Acumulado   | Saldo       | % Geral     ─── */
+  /* Detalhe da obra — "Valor CT / Aditivo" (não é o painel fixo) */
   html +=
     `<div class="admin-stats-grid">
-
-       <!-- Linha 1 -->
-       <div class="stat-card compact">
-         <span class="stat-label" style="${LS}">Contratada</span>
-         <span class="stat-value" style="${VS_SM}">${esc(contratadaNome)}</span>
-       </div>
-       <div class="stat-card compact">
-         <span class="stat-label" style="${LS}">Esta Medição</span>
-         <span class="stat-value" style="${VS}">${money(estaMed)}</span>
-       </div>
-       <div class="stat-card compact">
-         <span class="stat-label" style="${LS}">📅 Início do Contrato</span>
-         <span class="stat-value" style="${VS}">${dataInicioStr}</span>
-       </div>
-       <div class="stat-card compact">
-         <span class="stat-label" style="${LS}">🏁 Término Previsto</span>
-         <span class="stat-value" style="${VS}">${dataFimStr}</span>
-       </div>
-
-       <!-- Linha 2 -->
-       <div class="stat-card compact">
-         <span class="stat-label" style="${LS}">Valor CT / Aditivo</span>
-         <span class="stat-value" style="${VS}">${money(vc)}</span>
-       </div>
-       <div class="stat-card compact">
-         <span class="stat-label" style="${LS}">Acumulado Total</span>
-         <span class="stat-value" style="${VS};color:var(--success)">${money(ac)}</span>
-       </div>
-       <div class="stat-card compact">
-         <span class="stat-label" style="${LS}">Saldo</span>
-         <span class="stat-value" style="${VS}">${money(saldo)}</span>
-       </div>
-       <div class="stat-card compact">
-         <span class="stat-label" style="${LS}">% Geral</span>
-         <span class="stat-value" style="${VS}">${pct(p)}</span>
-       </div>
-
+       <!-- Linha 1: informações do contrato -->
+       <div class="stat-card compact"><span class="stat-label" style="${LS}">Contratada</span><span class="stat-value" style="${VSSM}">${esc(contratadaNome)}</span></div>
+       <div class="stat-card compact"><span class="stat-label" style="${LS}">Esta Medição</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>
+       <div class="stat-card compact"><span class="stat-label" style="${LS}">📅 Início do Contrato</span><span class="stat-value" style="${VS}">${dataInicioStr}</span></div>
+       <div class="stat-card compact"><span class="stat-label" style="${LS}">🏁 Término Previsto</span><span class="stat-value" style="${VS}">${dataFimStr}</span></div>
+       <!-- Linha 2: financeiro -->
+       <div class="stat-card compact"><span class="stat-label" style="${LS}">Valor CT / Aditivo</span><span class="stat-value" style="${VS}">${money(vc)}</span></div>
+       <div class="stat-card compact"><span class="stat-label" style="${LS}">Acumulado Total</span><span class="stat-value" style="${VS};color:var(--success)">${money(ac)}</span></div>
+       <div class="stat-card compact"><span class="stat-label" style="${LS}">Saldo</span><span class="stat-value" style="${VS}">${money(saldo)}</span></div>
+       <div class="stat-card compact"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>
      </div>
-
      <div class="panel" style="margin-bottom:1.5rem">
        <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S${temCrono&&obra.dataInicio?' — Planejado vs Executado':' — Progresso Físico'}</h3>
        <div class="chart-scroll-wrap" id="adminCurvaSwrap"><div class="chart-container"><canvas id="adminCurvaS"></canvas></div></div>
      </div>
-
      <div class="panel">
        <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Índice de Itens</h3>
        <div class="table-container"><table>
@@ -372,7 +327,6 @@ export function renderAdminDetail(){
          }).join('')}</tbody>
        </table></div>
      </div>`;
-
   panel.innerHTML=html;
   requestAnimationFrame(()=>{
     state.chartAdmin=renderCurvaS('adminCurvaS','adminCurvaSwrap',it,state.chartAdmin,obra.cronograma);
