@@ -18,16 +18,21 @@ function fmtDate(str){
 }
 function calcDataFim(dataInicio, totalMeses){
   if(!dataInicio || !totalMeses) return null;
-  const d = new Date(dataInicio + 'T00:00:00');
-  d.setMonth(d.getMonth() + totalMeses);
-  d.setDate(d.getDate() - 1);
+  const [ano, mes] = dataInicio.split('-').map(Number);
+  const totalMes   = mes - 1 + totalMeses;
+  const fimAno     = ano + Math.floor(totalMes / 12);
+  const fimMes     = (totalMes % 12) + 1;
+  // último dia do mês anterior ao fim
+  const d = new Date(fimAno, fimMes - 1, 0);
   return d.toISOString().slice(0, 10);
 }
 
 /* ─────────────────────────────────────────────────────────
-   renderCurvaS — gráfico com linha de planejado sobreposta
+   renderCurvaS
+   RECEBE dataInicio explicitamente para funcionar tanto no painel
+   do colaborador quanto no painel admin (onde currentObra() é null).
 ───────────────────────────────────────────────────────── */
-export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData){
+export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData, dataInicio){
   const canvas=$(canvasId); if(!canvas) return prev;
   if(prev) prev.destroy();
   const dark=document.documentElement.dataset.theme==='dark';
@@ -47,12 +52,16 @@ export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData){
     backgroundColor:'rgba(99,102,241,0.2)', borderColor:'#6366f1',
     borderWidth:1, borderRadius:3, barThickness:mobile?'flex':thickness, order:2
   }];
-  const obra=currentObra();
-  const timeline=(cronogramaData&&obra?.dataInicio)
-    ?buildCronogramaTimeline(obra.dataInicio,cronogramaData):null;
+
+  // dataInicio passado como parâmetro; fallback para currentObra (painel do colab)
+  const di = dataInicio || currentObra()?.dataInicio;
+  const timeline = (cronogramaData && di)
+    ? buildCronogramaTimeline(di, cronogramaData)
+    : null;
+
   let labels=itens.map(r=>String(r.item||''));
-  if(timeline&&timeline.length){
-    const totalVC=itens.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
+  if(timeline && timeline.length){
+    const totalVC =itens.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
     const totalAcu=itens.reduce((a,r)=>a+(Number(r.acumulado)||0),0);
     const realPctGeral=totalVC>0?+(totalAcu/totalVC*100).toFixed(2):0;
     let acumPlan=0;
@@ -125,7 +134,8 @@ export function updateDashboard(){
   if($('mainProjName'))       $('mainProjName').textContent      = o?.nomeProjeto||o?.nome||'-';
   if($('mainProjContratada')) $('mainProjContratada').textContent = o?.contratada||'-';
   if($('mainProjScope'))      $('mainProjScope').textContent      = o?.medicaoAtual||'-';
-  state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser,o?.cronograma);
+  // passa dataInicio explicitamente
+  state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser,o?.cronograma,o?.dataInicio);
 }
 
 export function renderObrasBox(){
@@ -282,15 +292,12 @@ export function renderAdminDetail(){
   const VS   = 'font-size:.95rem;font-weight:700;margin-top:.15rem';
   const VSSM = 'font-size:.82rem;font-weight:700;margin-top:.15rem;word-break:break-word';
 
-  /* Detalhe da obra — "Valor CT / Aditivo" (não é o painel fixo) */
   html +=
     `<div class="admin-stats-grid">
-       <!-- Linha 1: informações do contrato -->
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Contratada</span><span class="stat-value" style="${VSSM}">${esc(contratadaNome)}</span></div>
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Esta Medição</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>
        <div class="stat-card compact"><span class="stat-label" style="${LS}">📅 Início do Contrato</span><span class="stat-value" style="${VS}">${dataInicioStr}</span></div>
        <div class="stat-card compact"><span class="stat-label" style="${LS}">🏁 Término Previsto</span><span class="stat-value" style="${VS}">${dataFimStr}</span></div>
-       <!-- Linha 2: financeiro -->
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Valor CT / Aditivo</span><span class="stat-value" style="${VS}">${money(vc)}</span></div>
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Acumulado Total</span><span class="stat-value" style="${VS};color:var(--success)">${money(ac)}</span></div>
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Saldo</span><span class="stat-value" style="${VS}">${money(saldo)}</span></div>
@@ -329,7 +336,8 @@ export function renderAdminDetail(){
      </div>`;
   panel.innerHTML=html;
   requestAnimationFrame(()=>{
-    state.chartAdmin=renderCurvaS('adminCurvaS','adminCurvaSwrap',it,state.chartAdmin,obra.cronograma);
+    // passa dataInicio da obra explicitamente — currentObra() seria null aqui
+    state.chartAdmin=renderCurvaS('adminCurvaS','adminCurvaSwrap',it,state.chartAdmin,obra.cronograma,obra.dataInicio);
   });
 }
 

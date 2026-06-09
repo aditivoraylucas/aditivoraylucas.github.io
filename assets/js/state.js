@@ -50,31 +50,44 @@ export function cleanup(adminSubs, allUsers){
 /* ── Cronograma Físico-Financeiro ── */
 /**
  * Dado dataInicio (string 'YYYY-MM-DD') e o array cronograma da obra,
- * retorna array de { label, planejadoPct, planejadoValor } alinhado ao mês atual.
- * O mês 1 começa no mês de dataInicio.
+ * retorna array de { label, planejadoPct, planejadoValor, passado }.
+ *
+ * Fix: usa ano/mês local explícito para evitar drift de fuso horário.
+ * Fix: passado inclui o mês atual (m <= mesesDecorridos + 1).
  */
 export function buildCronogramaTimeline(dataInicio, cronograma){
   if(!dataInicio || !Array.isArray(cronograma) || !cronograma.length) return [];
-  const inicio = new Date(dataInicio + 'T00:00:00');
-  const hoje   = new Date();
+
+  // Parseia a data de início como ano/mês LOCAL (sem converter para UTC)
+  const [iniAno, iniMes] = dataInicio.split('-').map(Number); // mes 1-based
+
+  const now     = new Date();
+  const hojeAno = now.getFullYear();
+  const hojeMes = now.getMonth() + 1; // 1-based
+
+  // Quantos meses se passaram desde o início até o mês atual (inclusive)
   const mesesDecorridos = Math.max(0,
-    (hoje.getFullYear() - inicio.getFullYear()) * 12 +
-    (hoje.getMonth()   - inicio.getMonth())
+    (hojeAno - iniAno) * 12 + (hojeMes - iniMes)
   );
-  // cronograma é array de { mes, planejadoPct, planejadoValor } com mes 1..N
+
   const maxMes = Math.max(...cronograma.map(c => c.mes));
   const result = [];
+
   for(let m = 1; m <= maxMes; m++){
-    const d = new Date(inicio);
-    d.setMonth(d.getMonth() + (m - 1));
-    const label = d.toLocaleDateString('pt-BR',{month:'short', year:'2-digit'});
+    // Calcula o mês/ano deste slot sem usar setMonth (evita overflow)
+    const totalMes = iniMes - 1 + (m - 1);       // 0-based offset
+    const slotAno  = iniAno + Math.floor(totalMes / 12);
+    const slotMes  = (totalMes % 12) + 1;          // 1-based
+    const slotDate = new Date(slotAno, slotMes - 1, 1);
+    const label    = slotDate.toLocaleDateString('pt-BR', { month:'short', year:'2-digit' });
+
     const entry = cronograma.find(c => c.mes === m);
     result.push({
       mes: m,
       label,
-      planejadoPct:   entry ? +entry.planejadoPct.toFixed(2)   : 0,
-      planejadoValor: entry ? +entry.planejadoValor.toFixed(2) : 0,
-      passado: m <= mesesDecorridos + 1
+      planejadoPct:   entry ? +Number(entry.planejadoPct).toFixed(2)   : 0,
+      planejadoValor: entry ? +Number(entry.planejadoValor).toFixed(2) : 0,
+      passado: m <= mesesDecorridos + 1  // inclui mês atual
     });
   }
   return result;
