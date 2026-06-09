@@ -1,0 +1,782 @@
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBc7jh4dai3OZIriKdFxguI44A73TRKYTI",
+  authDomain: "cronograma-pro-ray.firebaseapp.com",
+  projectId: "cronograma-pro-ray",
+  storageBucket: "cronograma-pro-ray.firebasestorage.app",
+  messagingSenderId: "358433192984",
+  appId: "1:358433192984:web:5af60313307f9bfadc176d"
+};
+const ADMIN_SENHA = "35343535";
+const app  = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db   = getFirestore(app);
+
+const $        = id => document.getElementById(id);
+const fmtMoney = v  => new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format(Number(v)||0);
+const esc      = s  => String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const parseMoney = s => Number(String(s||'').replace(/[R$\s.]/g,'').replace(',','.')) || 0;
+const norm     = v  => String(v??'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+const isNum    = v  => v !== '' && !isNaN(Number(v)) && isFinite(Number(v));
+const baseName = n  => String(n||'').replace(/\.[^.]+$/,'');
+const money    = fmtMoney;
+const pct      = n  => `${Number(n||0).toFixed(2)}%`;
+
+const EXCEL_EXTS = new Set(['xls','xlsx','xlsm','xlsb','xlam','xla','ods','csv']);
+
+const state = {
+  user: null, admin: false, userName: '',
+  obras: [], selectedObraId: null, rows: [],
+  allUsers: {}, adminSubs: {},
+  adminSelectedUid: null, adminSelectedObraId: null,
+  unsubUserObras: null, unsubAllUsers: null,
+  chartUser: null, chartAdmin: null,
+  saveTimer: null, colabFormReady: false
+};
+
+function currentObra(){ return state.obras.find(o => o.id === state.selectedObraId); }
+function cleanup(){
+  if(state.unsubUserObras) state.unsubUserObras();
+  if(state.unsubAllUsers)  state.unsubAllUsers();
+  Object.values(state.adminSubs).forEach(fn => fn && fn());
+  state.adminSubs = {}; state.allUsers = {};
+  state.adminSelectedUid = null; state.adminSelectedObraId = null;
+}
+function showView(name){
+  ['loginView','appView','adminView'].forEach(v => $(v).style.display = 'none');
+  $(name).style.display = name === 'loginView' ? 'flex' : 'block';
+}
+function calcPctGeral(resumo, itens){
+  const vca = Number(resumo?.valorContratoAditivo) || 0;
+  const acu = Number(resumo?.acumuladoTotal) || 0;
+  if(vca > 0 && acu > 0) return +(acu/vca*100).toFixed(2);
+  const tv = (itens||[]).reduce((a,i)=>a+(Number(i.valorContrato)||0),0);
+  const ta = (itens||[]).reduce((a,i)=>a+(Number(i.acumulado)||0),0);
+  return tv > 0 ? +(ta/tv*100).toFixed(2) : 0;
+}
+
+async function saveObra(obra){ await setDoc(doc(db,'users',state.user.uid,'obras',obra.id), obra); }
+async function deleteObra(id){ await deleteDoc(doc(db,'users',state.user.uid,'obras',id)); }
+function scheduleSave(){
+  clearTimeout(state.saveTimer);
+  state.saveTimer = setTimeout(async()=>{ const o=currentObra(); if(o){ o.itens=state.rows; await saveObra(o); } }, 1200);
+}
+
+function detectSheet(wb){
+  const matches = wb.SheetNames.filter(n => /^(BM|MED)\s*\d+/i.test(n));
+  if(matches.length){
+    return matches.sort((a,b)=>{
+      const na=parseInt(a.match(/\d+/)?.[0]||0), nb=parseInt(b.match(/\d+/)?.[0]||0);
+      return na-nb;
+    }).at(-1);
+  }
+  return wb.SheetNames.at(-1);
+}
+
+function detectColumns(data){
+  const RE_ITEM = /^(item|n[°º\.°]|num\.?|no\.?)$/i;
+  const RE = {
+    desc:  /discrimina|descri[çc]|servic[oa]|servi[çc]|especific|designa/i,
+    med:   /no[\s.]*(per[ií]odo|mes|m[eê]s)|^medic[aã]o$|^realizado$|periodo|esta[\s.]*medi|med\.?\s*atual|\bmed\b|medi[çc]/i,
+    acum:  /acumulado|acum\.?/i,
+    saldo: /saldo/i
+  };
+  const VC_PATTERNS = [
+    { pri: 1, re: /valor\s*(unit[aá]r|unit\.)?\b/i },
+    { pri: 1, re: /vl\.?\s*unit|vlr\.?\s*unit/i },
+    { pri: 2, re: /vl\.?\s*(do\s*)?(contrato|ct)\b|vlr\.?\s*(do\s*)?(contrato|ct)\b|v\.?\s*contrato\b|\bvl\s*ct\b/i },
+    { pri: 3, re: /valor\s+(de\s+)?contrato\b(?!\s+(com|atualizado|reajuste|aditivo))/i },
+    { pri: 3, re: /valor\s+total\s+(do\s+)?contrato\b(?!\s+(com|atualizado|reajuste|aditivo))/i },
+    { pri: 4, re: /valor\s*(total\s*)?(do\s*)?contrato\s*(com\s*)?(atualizado|reajuste)/i },
+    { pri: 5, re: /valor\s*ct\s*[\/\\]\s*ta/i },
+    { pri: 5, re: /valor\s*(de\s+)?contrato\s*(com\s*)?(aditivo|\bta\b)/i },
+  ];
+  let headerRowIdx = -1, itemCol = -1;
+  for(let r = 0; r < Math.min(80, data.length); r++){
+    const row = data[r] || [];
+    for(let c = 0; c < Math.min(15, row.length); c++){
+      if(RE_ITEM.test(norm(row[c]))){
+        headerRowIdx = r; itemCol = c; break;
+      }
+    }
+    if(headerRowIdx >= 0) break;
+  }
+  if(headerRowIdx < 0){
+    for(let r = 0; r < Math.min(80, data.length); r++){
+      const row = data[r] || [];
+      for(let c = 0; c < Math.min(5, row.length); c++){
+        if(/^\d+$/.test(String(row[c]??'').trim())){
+          headerRowIdx = Math.max(0, r - 1); itemCol = c; break;
+        }
+      }
+      if(headerRowIdx >= 0) break;
+    }
+  }
+  const cols = { item: itemCol, desc:-1, vc:-1, med:-1, acum:-1, saldo:-1 };
+  let vcPri = -1;
+  if(headerRowIdx < 0) return cols;
+  const blockStart = Math.max(0, headerRowIdx - 4);
+  const headerBlock = [];
+  for(let r = blockStart; r <= headerRowIdx; r++){
+    const row = data[r] || [];
+    if(r < headerRowIdx && /^\d+$/.test(String(row[itemCol]??'').trim())) continue;
+    headerBlock.push(row);
+  }
+  for(const row of headerBlock){
+    for(let c = 0; c < row.length; c++){
+      const t = norm(row[c]);
+      if(!t || c === itemCol) continue;
+      if(RE.desc.test(t)  && cols.desc  < 0) cols.desc  = c;
+      if(RE.med.test(t)   && cols.med   < 0) cols.med   = c;
+      if(RE.acum.test(t)  && cols.acum  < 0) cols.acum  = c;
+      if(RE.saldo.test(t) && cols.saldo < 0) cols.saldo = c;
+      for(const {pri, re} of VC_PATTERNS){
+        if(re.test(t)){
+          if(pri >= vcPri){ cols.vc = c; vcPri = pri; }
+          break;
+        }
+      }
+    }
+  }
+  const firstDataRow = data[headerRowIdx + 1] || [];
+  const missing = ['vc','med','acum','saldo'].filter(k => cols[k] < 0);
+  if(missing.length > 0){
+    const usedCols = new Set(Object.values(cols).filter(v => v >= 0));
+    const numCols = [];
+    for(let c = (itemCol >= 0 ? itemCol : 0) + 1; c < firstDataRow.length; c++){
+      if(!usedCols.has(c) && isNum(firstDataRow[c]) && Number(firstDataRow[c]) > 0) numCols.push(c);
+    }
+    missing.forEach((k, i) => { if(numCols[i] !== undefined) cols[k] = numCols[i]; });
+  }
+  if(cols.desc < 0 && itemCol >= 0){
+    const fdr = data[headerRowIdx + 1] || [];
+    const vcLimit = cols.vc > 0 ? cols.vc : itemCol + 12;
+    for(let c = itemCol + 1; c < vcLimit; c++){
+      if(!isNum(fdr[c]) && String(fdr[c]??'').trim()){ cols.desc = c; break; }
+    }
+  }
+  return cols;
+}
+
+function findValorContrato(rows){
+  const PATTERNS = [
+    [1, /valor\s*ct\s*[\/\\]\s*ta/i],
+    [2, /^valor\s+de\s+contrato$/i],
+    [3, /valor\s+de\s+contrato\s+atualizado/i],
+    [4, /valor\s+de\s+contrato\s+com\s+aditivo/i],
+    [5, /valor\s+de\s+contrato\s+com\s+reajuste(?!\s+e)/i],
+    [6, /valor\s+de\s+contrato\s+com\s+reajuste\s+e\s+aditivo/i],
+  ];
+  const candidates = [];
+  function tryGetValue(rows, r, c){
+    const row = rows[r] || [];
+    for(let cc = c+1; cc < Math.min(c+16, row.length); cc++){ const v = Number(row[cc]); if(v > 100) return v; }
+    for(let rr = r+1; rr <= r+5 && rr < rows.length; rr++){
+      const v = Number(rows[rr]?.[c]); if(v > 100) return v;
+      for(const cc of [c-1, c+1, c+2]){
+        if(cc < 0) continue;
+        const v2 = Number(rows[rr]?.[cc]); if(v2 > 100) return v2;
+      }
+    }
+    return 0;
+  }
+  for(let r = 0; r < rows.length; r++){
+    const row = rows[r] || [];
+    for(let c = 0; c < row.length; c++){
+      const cell = String(row[c] ?? '').trim(); if(!cell) continue;
+      for(const [pri, re] of PATTERNS){
+        if(re.test(cell)){ const v = tryGetValue(rows, r, c); if(v > 100) candidates.push({ pri, v }); }
+      }
+    }
+  }
+  if(!candidates.length) return 0;
+  candidates.sort((a,b) => a.pri - b.pri || b.v - a.v);
+  return candidates[0].v;
+}
+
+function extractMetaFromHeaders(data, firstDataRowIdx){
+  const RE_ACUM = /acumulado/i, RE_MED=/esta.?medi|medi.?atual/i, RE_CONT=/contratada/i;
+  let acu=0, contratada='';
+  const rows = firstDataRowIdx>0 ? data.slice(0,firstDataRowIdx) : data.slice(0,Math.min(50,data.length));
+  const vca = findValorContrato(rows);
+  let acumColHeader=-1, acumRowHeader=-1;
+  for(let r=0; r<rows.length; r++){
+    const row=rows[r]||[]; let hasAcum=false, hasMedOrSaldo=false, acumC=-1;
+    for(let c=0; c<row.length; c++){
+      const t=norm(row[c]); if(!t) continue;
+      if(RE_ACUM.test(t)){ hasAcum=true; acumC=c; }
+      if(RE_MED.test(t)||/saldo/i.test(t)) hasMedOrSaldo=true;
+    }
+    if(hasAcum&&hasMedOrSaldo){ acumColHeader=acumC; acumRowHeader=r; break; }
+  }
+  if(acumColHeader>=0&&acumRowHeader>=0){
+    for(let rr=acumRowHeader+1; rr<=acumRowHeader+5&&rr<rows.length; rr++){
+      const v=Number(rows[rr]?.[acumColHeader]); if(v>0){ acu=v; break; }
+    }
+    if(!acu){
+      for(let rr=acumRowHeader+1; rr<=acumRowHeader+5&&rr<rows.length; rr++){
+        for(const cc of [acumColHeader-1,acumColHeader+1]){
+          if(cc<0) continue; const v=Number(rows[rr]?.[cc]); if(v>0){ acu=v; break; }
+        }
+        if(acu) break;
+      }
+    }
+  }
+  if(!acu){
+    for(let r=0; r<rows.length; r++){
+      const row=rows[r]||[];
+      for(let c=0; c<row.length; c++){
+        const cell=String(row[c]??'').trim();
+        if(RE_ACUM.test(cell)){
+          for(let rr=r+1; rr<=r+3&&rr<rows.length; rr++){ const v=Number(rows[rr]?.[c]); if(v>0){ acu=v; break; } }
+          if(!acu){ for(let cc=c+1; cc<Math.min(c+8,row.length); cc++){ const v=Number(row[cc]); if(v>0){ acu=v; break; } } }
+        }
+        if(acu) break;
+      }
+      if(acu) break;
+    }
+  }
+  for(let r=0; r<rows.length; r++){
+    const row=rows[r]||[];
+    for(let c=0; c<row.length; c++){
+      const cell=String(row[c]??'').trim(); if(!cell) continue;
+      if(RE_CONT.test(cell)){
+        const after=cell.replace(/^.*contratada\s*:/i,'').trim();
+        if(after&&after.length>1) contratada=after;
+        else{ for(let cc=c+1; cc<Math.min(c+6,row.length); cc++){ const v=String(row[cc]??'').trim(); if(v&&!isNum(v)){ contratada=v; break; } } }
+      }
+    }
+  }
+  return { valorContratoAditivo:vca, acumuladoTotal:acu, contratada };
+}
+
+async function readExcelFile(file){
+  const buffer=await file.arrayBuffer();
+  const wb=XLSX.read(new Uint8Array(buffer),{type:'array',cellDates:false,cellNF:false,cellText:false});
+  const sheetName=detectSheet(wb);
+  if(!sheetName) throw new Error('Nenhuma aba encontrada na planilha.');
+  const ws=wb.Sheets[sheetName];
+  const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
+  if(!data.length) throw new Error(`A aba "${sheetName}" está vazia.`);
+  const cols=detectColumns(data);
+  const itemCol=cols.item>=0?cols.item:0;
+  let firstDataRowIdx=-1;
+  for(let r=0; r<data.length; r++){ if(/^\d+$/.test(String(data[r][itemCol]??'').trim())){ firstDataRowIdx=r; break; } }
+  const meta=extractMetaFromHeaders(data,firstDataRowIdx);
+  const items=[], warnings=[];
+  for(let r=0; r<data.length; r++){
+    const row=data[r]||[];
+    const itemStr=String(row[itemCol]??'').trim();
+    if(!/^\d+$/.test(itemStr)) continue;
+    let descricao='';
+    if(cols.desc>=0) descricao=String(row[cols.desc]??'').trim();
+    if(!descricao){
+      const lim=cols.vc>0?cols.vc:itemCol+12;
+      for(let c=itemCol+1; c<lim; c++){ const v=String(row[c]??'').trim(); if(v&&!isNum(row[c])){ descricao=v; break; } }
+    }
+    const vc  =cols.vc  >=0?(Number(row[cols.vc]  )||0):0;
+    const med =cols.med >=0?(Number(row[cols.med]) ||0):0;
+    const acum=cols.acum>=0?(Number(row[cols.acum])||0):0;
+    let saldo =cols.saldo>=0?(Number(row[cols.saldo])||0):0;
+    if(!saldo&&vc>0) saldo=vc-acum;
+    const p=vc>0?+(acum/vc*100).toFixed(2):0;
+    if(!descricao) warnings.push(`Item ${itemStr}: descrição não encontrada`);
+    if(!vc&&!acum) warnings.push(`Item ${itemStr}: valores zerados`);
+    items.push({ item:itemStr, descricao, valorContrato:+vc.toFixed(2), medicao:+med.toFixed(2), acumulado:+acum.toFixed(2), saldo:+saldo.toFixed(2), percentualExecutado:p });
+  }
+  if(!items.length) throw new Error(`Nenhum item numérico encontrado na aba "${sheetName}".`);
+  const sumVC=items.reduce((a,i)=>a+i.valorContrato,0);
+  const sumAcum=items.reduce((a,i)=>a+i.acumulado,0);
+  const vca=meta.valorContratoAditivo||sumVC;
+  const acu=meta.acumuladoTotal>0?meta.acumuladoTotal:sumAcum;
+  return {
+    nome:baseName(file.name), nomeProjeto:wb.Props?.Title||baseName(file.name)||'Nova obra',
+    medicaoAtual:sheetName, contratada:meta.contratada||'',
+    itens:items, warnings,
+    resumo:{ total:sumVC, acumulado:sumAcum, percentual:vca>0?+(acu/vca*100).toFixed(2):0, valorContratoAditivo:vca, acumuladoTotal:acu }
+  };
+}
+
+function normalizeRows(list){
+  return Array.isArray(list)?list.map(item=>({
+    item:item?.item??'',
+    descricao:item?.descricao??item?.descricaoServico??item?.name??'',
+    valorContrato:Number(item?.valorContrato??item?.valor_contrato??0)||0,
+    medicao:Number(item?.medicao??0)||0,
+    acumulado:Number(item?.acumulado??0)||0,
+    saldo:Number(item?.saldo??0)||0,
+    percentualExecutado:Number(item?.percentualExecutado??item?.percentual_executado??0)||0
+  })):[];
+}
+
+async function importFile(replace=false){
+  const input=document.createElement('input');
+  input.type='file';
+  input.accept=['.xlsx','.xls','.xlsm','.xlsb','.xlam','.xla','.ods','.csv','.json',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.ms-excel',
+    'application/vnd.ms-excel.sheet.macroEnabled.12','application/vnd.ms-excel.sheet.binary.macroEnabled.12',
+    'application/vnd.oasis.opendocument.spreadsheet','text/csv','application/json'].join(',');
+  input.onchange=async e=>{
+    if(!e.target.files.length) return;
+    const file=e.target.files[0];
+    const ext=file.name.split('.').pop().toLowerCase();
+    try{
+      let obj,rows=[];
+      if(EXCEL_EXTS.has(ext)){
+        obj=await readExcelFile(file); rows=normalizeRows(obj.itens);
+        if(obj.warnings?.length) console.warn('[Import]',obj.warnings.slice(0,5).join('\n'));
+      } else if(ext==='json'){
+        const text=await file.text(); obj=JSON.parse(text);
+        rows=Array.isArray(obj)?normalizeRows(obj):normalizeRows(obj.itens);
+        if(!rows.length&&!Array.isArray(obj)&&!Array.isArray(obj.itens)) throw new Error('JSON inválido.');
+      } else { obj=await readExcelFile(file); rows=normalizeRows(obj.itens); }
+      const obraId=replace&&state.selectedObraId?state.selectedObraId:('obra_'+Date.now());
+      const obraNome=baseName(file.name)||obj?.nome||'Nova obra';
+      const obra={ id:obraId, nome:obraNome, nomeProjeto:obj?.nomeProjeto||obj?.obra||obraNome,
+        contratada:obj?.contratada||'', arquivoNome:file.name, origem:ext,
+        medicaoAtual:obj?.medicaoAtual||'', itens:rows, resumo:obj?.resumo||{percentual:0} };
+      await saveObra(obra);
+      state.selectedObraId=obraId;
+      showToast(`✅ ${rows.length} itens importados`);
+    } catch(err){ showToast('❌ '+err.message,true); console.error(err); }
+  };
+  input.click();
+}
+
+function showToast(msg,isError=false){
+  let t=$('toast');
+  if(!t){ t=document.createElement('div'); t.id='toast'; document.body.appendChild(t); }
+  t.textContent=msg; t.className='toast'+(isError?' toast-error':''); t.style.opacity='1';
+  clearTimeout(t._timer); t._timer=setTimeout(()=>{ t.style.opacity='0'; },isError?5000:3500);
+}
+
+function renderCurvaS(canvasId,wrapId,itens,prev){
+  const canvas=$(canvasId); if(!canvas) return prev;
+  if(prev) prev.destroy();
+  const dark=document.documentElement.dataset.theme==='dark';
+  const gc=dark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)';
+  const tc=dark?'#94a3b8':'#64748b';
+  const mobile=window.innerWidth<=640;
+  const n=itens.length;
+  const thickness=Math.max(mobile?8:18,Math.min(mobile?18:40,Math.floor((mobile?Math.max(160,window.innerWidth-48):600)/(n||1))));
+  const minW=n>0?Math.max(0,n*(thickness+14)):0;
+  const wrap=$(wrapId);
+  if(wrap){
+    if(minW>wrap.offsetWidth){ wrap.style.overflowX='auto'; canvas.style.minWidth=minW+'px'; }
+    else{ wrap.style.overflowX='hidden'; canvas.style.minWidth=''; }
+  }
+  return new Chart(canvas.getContext('2d'),{
+    type:'bar',
+    data:{ labels:itens.map(r=>String(r.item||'')),
+      datasets:[{ label:'% Executado', data:itens.map(r=>Number(r.percentualExecutado)||0),
+        backgroundColor:'rgba(99,102,241,0.2)',borderColor:'#6366f1',borderWidth:1,borderRadius:3,barThickness:thickness }] },
+    options:{ responsive:true, maintainAspectRatio:false,
+      scales:{ y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},
+        x:{grid:{display:false},ticks:{color:tc,font:{size:mobile?9:10},maxRotation:45,minRotation:0}} },
+      plugins:{legend:{labels:{color:tc}}} }
+  });
+}
+
+function applySelected(o){
+  state.rows=Array.isArray(o.itens)?o.itens:[];
+  const pn=$('projName'); if(pn) pn.value=o.nomeProjeto||o.nome||'Nova obra';
+  const pc=$('projContratada'); if(pc) pc.value=o.contratada||'';
+  const ps=$('projScope'); if(ps) ps.value=o.medicaoAtual||'';
+}
+function renderTable(){
+  const tbody=$('tbody'); if(!tbody) return;
+  tbody.innerHTML=state.rows.map((r,i)=>`
+    <tr data-i="${i}">
+      <td contenteditable="true" data-k="item">${esc(r.item)}</td>
+      <td contenteditable="true" data-k="descricao" class="td-desc">${esc(r.descricao)}</td>
+      <td contenteditable="true" data-k="valorContrato" style="text-align:right">${money(r.valorContrato)}</td>
+      <td contenteditable="true" data-k="medicao" style="text-align:right">${money(r.medicao)}</td>
+      <td contenteditable="true" data-k="acumulado" style="text-align:right">${money(r.acumulado)}</td>
+      <td contenteditable="true" data-k="saldo" style="text-align:right">${money(r.saldo)}</td>
+      <td contenteditable="true" data-k="percentualExecutado" style="text-align:right;font-weight:700">${Number(r.percentualExecutado||0).toFixed(2)}</td>
+      <td style="text-align:right"><button data-del="${i}" class="btn btn-danger" style="padding:.4rem;border-radius:6px">🗑</button></td>
+    </tr>`).join('');
+}
+function updateDashboard(){
+  const o=currentObra();
+  const vc=Number(o?.resumo?.valorContratoAditivo)||state.rows.reduce((a,r)=>a+Number(r.valorContrato||0),0);
+  const ac=Number(o?.resumo?.acumuladoTotal)||state.rows.reduce((a,r)=>a+Number(r.acumulado||0),0);
+  const p=calcPctGeral(o?.resumo,state.rows);
+  if($('stats')) $('stats').innerHTML=
+    `<div class="stat-card"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value" style="font-size:1rem">${money(vc)}</span></div>
+     <div class="stat-card"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="font-size:1rem;color:var(--success)">${money(ac)}</span></div>
+     <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
+     <div class="stat-card"><span class="stat-label">Medição Atual</span><span class="stat-value" style="font-size:1.2rem">${esc(o?.medicaoAtual||'-')}</span></div>`;
+  if($('countAll'))  $('countAll').textContent=money(vc);
+  if($('countDone')) $('countDone').textContent=money(ac);
+  if($('countPct'))  $('countPct').textContent=pct(p);
+  if($('mainProjName'))       $('mainProjName').textContent       = o?.nomeProjeto||o?.nome||'-';
+  if($('mainProjContratada')) $('mainProjContratada').textContent  = o?.contratada||'-';
+  if($('mainProjScope'))      $('mainProjScope').textContent       = o?.medicaoAtual||'-';
+  state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser);
+}
+
+function renderObrasBox(){
+  const box=$('obrasBox'); if(!box) return;
+  if(!state.obras.length){
+    box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem">Nenhuma obra cadastrada.</p>';
+    return;
+  }
+  box.innerHTML=
+    `<div class="form-group" style="margin-bottom:.5rem"><label>Obra ativa</label>
+     <select id="obraSelect" class="form-control">
+       ${state.obras.map(o=>`<option value="${o.id}" ${o.id===state.selectedObraId?'selected':''}>${esc(o.nome||'Obra')}</option>`).join('')}
+     </select></div>
+     <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+       <button class="btn btn-sec" id="replaceObraBtn" style="flex:1">🔄 Atualizar</button>
+       <button class="btn btn-danger" id="deleteObraBtn" style="flex:1">🗑 Remover</button>
+     </div>`;
+  $('obraSelect').onchange=e=>{
+    state.selectedObraId=e.target.value;
+    const o=currentObra(); if(o){ applySelected(o); renderAll(); }
+  };
+  $('replaceObraBtn').onclick=()=>importFile(true);
+  $('deleteObraBtn').onclick=async()=>{
+    const idToDelete=state.selectedObraId;
+    if(!idToDelete||!confirm('Remover obra?')) return;
+    await deleteObra(idToDelete);
+    const restantes=state.obras.filter(o=>o.id!==idToDelete);
+    state.selectedObraId=restantes.length?restantes[0].id:null;
+    if(state.selectedObraId){ const o=state.obras.find(x=>x.id===state.selectedObraId); if(o) applySelected(o); }
+    else{ state.rows=[]; const pn=$('projName'); if(pn) pn.value=''; const pc=$('projContratada'); if(pc) pc.value=''; const ps=$('projScope'); if(ps) ps.value=''; }
+    renderAll();
+  };
+}
+function renderAll(){ renderObrasBox(); renderTable(); updateDashboard(); }
+
+function renderAdminStats(){
+  let tot=0,tit=0,tvc=0,tac=0;
+  Object.values(state.allUsers).forEach(u=>{
+    if(u.role==='admin') return;
+    (u.obras||[]).forEach(o=>{
+      tot++; const it=Array.isArray(o.itens)?o.itens:[];
+      tit+=it.length;
+      tvc+=Number(o.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
+      tac+=Number(o.resumo?.acumuladoTotal)||it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+    });
+  });
+  const p=tvc>0?+(tac/tvc*100).toFixed(2):0;
+  if($('adminStats')) $('adminStats').innerHTML=
+    `<div class="stat-card"><span class="stat-label">Total de Obras</span><span class="stat-value">${tot}</span></div>
+     <div class="stat-card"><span class="stat-label">Total de Itens</span><span class="stat-value">${tit}</span></div>
+     <div class="stat-card"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
+     <div class="stat-card"><span class="stat-label">Acumulado Geral</span><span class="stat-value" style="font-size:1.1rem">${money(tac)}</span></div>`;
+}
+function renderColabList(){
+  const box=$('colabList'); if(!box) return;
+  const colabs=Object.entries(state.allUsers).filter(([,u])=>u.role!=='admin');
+  if(!colabs.length){ box.innerHTML='<p style="color:var(--text-muted);font-size:.875rem">Nenhum colaborador.</p>'; return; }
+  box.innerHTML=colabs.map(([uid,u])=>
+    `<div class="colab-item" style="${u.blocked?'opacity:.7':''}">
+       <div><strong>${esc(u.nome)}</strong>
+         ${u.blocked?'<span style="margin-left:.5rem;font-size:.7rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.1rem .4rem;border-radius:999px">🔒 Bloqueado</span>':''}
+         <br><small style="color:var(--text-muted)">${esc(u.email)}</small></div>
+       <div style="display:flex;gap:.4rem;flex-wrap:wrap">
+         <button class="btn ${u.blocked?'btn-success':'btn-warning'}" style="padding:.3rem .65rem;font-size:.72rem" onclick="toggleBloqueio('${uid}',${u.blocked})">${u.blocked?'✅ Desbloquear':'🔒 Bloquear'}</button>
+         <button class="btn btn-danger" style="padding:.3rem .65rem;font-size:.72rem" onclick="removeColab('${uid}')">Remover</button>
+       </div>
+     </div>`).join('');
+}
+function renderAdminSidebar(){
+  const box=$('adminColabSidebar'); if(!box) return;
+  const colabs=Object.entries(state.allUsers).filter(([,u])=>u.role!=='admin');
+  if(!colabs.length){ box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem">Nenhum colaborador.</p>'; return; }
+  if(state.adminSelectedUid&&state.allUsers[state.adminSelectedUid]){
+    const u=state.allUsers[state.adminSelectedUid], n=(u.obras||[]).length;
+    box.innerHTML=
+      `<button class="btn btn-sec" onclick="adminDeselectColab()" style="width:100%;margin-bottom:.75rem;font-size:.8rem">← Todos</button>
+       <div class="colab-sidebar-item active">
+         <div style="font-weight:600;font-size:.875rem">${u.blocked?'🔒 ':''}${esc(u.nome)}</div>
+         <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n!==1?'s':''}</div>
+       </div>`;
+    return;
+  }
+  box.innerHTML=colabs.map(([uid,u])=>
+    `<div class="colab-sidebar-item" style="${u.blocked?'opacity:.55':''}" onclick="adminSelectColab('${uid}')">
+       <div style="font-weight:600;font-size:.875rem">${u.blocked?'🔒 ':''}${esc(u.nome)}</div>
+       <div style="font-size:.75rem;color:var(--text-muted)">${(u.obras||[]).length} obra${(u.obras||[]).length!==1?'s':''}</div>
+     </div>`).join('');
+}
+function adminObraCardHTML(obra){
+  const it=Array.isArray(obra.itens)?obra.itens:[];
+  const vc=Number(obra.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
+  const ac=Number(obra.resumo?.acumuladoTotal)||it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+  const p=calcPctGeral(obra.resumo,it);
+  return `<div class="obra-card" style="cursor:pointer" onclick="adminSelectObra('${obra.id}')">
+    <div class="obra-card-header">
+      <div><div class="obra-card-title">${esc(obra.nome||'Sem nome')}</div>
+      <div class="obra-card-sub">${it.length} itens | Aba: ${esc(obra.medicaoAtual||'-')}</div></div>
+      <div class="obra-card-pct">${pct(p)}</div></div>
+    <div class="obra-progress-bar"><div class="obra-progress-fill" style="width:${Math.min(100,p)}%"></div></div>
+    <div class="obra-card-footer">
+      <span>CT/Aditivo: ${money(vc)}</span><span>Acumulado: ${money(ac)}</span><span>Saldo: ${money(vc-ac)}</span>
+    </div></div>`;
+}
+function renderAdminDetail(){
+  const panel=$('adminDetailPanel'); if(!panel) return;
+  if(!state.adminSelectedUid){ panel.innerHTML='<p style="color:var(--text-muted);padding:1rem">Selecione um colaborador ao lado.</p>'; return; }
+  const u=state.allUsers[state.adminSelectedUid];
+  if(!u){ panel.innerHTML=''; return; }
+  const obrasList=u.obras||[];
+  let html=`<div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
+    <div style="font-weight:700;font-size:1.1rem">👤 ${esc(u.nome)}${u.blocked?' <span style="font-size:.75rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.2rem .6rem;border-radius:999px">🔒</span>':''}</div>
+    <div class="form-group" style="margin:0;min-width:220px">
+      <select id="adminObraSelect" class="form-control" onchange="adminSelectObra(this.value)">
+        <option value="">-- Selecione uma obra --</option>
+        ${obrasList.map(o=>`<option value="${o.id}" ${o.id===state.adminSelectedObraId?'selected':''}>${esc(o.nome||'Obra')}</option>`).join('')}
+      </select></div></div>`;
+  if(!state.adminSelectedObraId||!obrasList.length){
+    panel.innerHTML=html+(obrasList.length?obrasList.map(adminObraCardHTML).join(''):'<p style="color:var(--text-muted)">Sem obras.</p>');
+    return;
+  }
+  const obra=obrasList.find(o=>o.id===state.adminSelectedObraId);
+  if(!obra){ panel.innerHTML=html+'<p style="color:var(--text-muted)">Obra não encontrada.</p>'; return; }
+  const it=Array.isArray(obra.itens)?obra.itens:[];
+  const vc=Number(obra.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
+  const ac=Number(obra.resumo?.acumuladoTotal)||it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+  const p=calcPctGeral(obra.resumo,it);
+  const tAcu=it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+  const tMed=it.reduce((a,i)=>a+Number(i.medicao||0),0);
+  html+=
+    `<div class="admin-stats-grid">
+       <div class="stat-card compact"><span class="stat-label">Valor CT / Aditivo</span><span class="stat-value">${money(vc)}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Acumulado Total</span><span class="stat-value" style="color:var(--success)">${money(ac)}</span></div>
+       <div class="stat-card compact"><span class="stat-label">% Geral</span><span class="stat-value">${pct(p)}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Medição Atual</span><span class="stat-value">${esc(obra.medicaoAtual||'-')}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Acumulado (itens)</span><span class="stat-value">${money(tAcu)}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Medição</span><span class="stat-value">${money(tMed)}</span></div>
+       <div class="stat-card compact"><span class="stat-label">Saldo</span><span class="stat-value">${money(vc-ac)}</span></div>
+     </div>
+     <div class="panel" style="margin-bottom:1.5rem">
+       <h3 style="margin-bottom:1rem">Curva S — Progresso Físico</h3>
+       <div class="chart-scroll-wrap" id="adminCurvaSwrap"><div class="chart-container"><canvas id="adminCurvaS"></canvas></div></div>
+     </div>
+     <div class="panel">
+       <h3 style="margin-bottom:1rem">Índice de Itens</h3>
+       <div class="table-container"><table>
+         <thead><tr>
+           <th class="th-sticky">Item</th><th class="th-sticky">Descrição</th>
+           <th class="th-sticky" style="text-align:right">Valor Contrato</th>
+           <th class="th-sticky" style="text-align:right">Medição</th>
+           <th class="th-sticky" style="text-align:right">Acumulado</th>
+           <th class="th-sticky" style="text-align:right">Saldo</th>
+           <th class="th-sticky" style="text-align:right">% Exec.</th>
+         </tr></thead>
+         <tbody>${it.map(r=>`<tr>
+           <td>${esc(r.item)}</td><td class="td-desc">${esc(r.descricao)}</td>
+           <td style="text-align:right">${money(r.valorContrato)}</td>
+           <td style="text-align:right">${money(r.medicao)}</td>
+           <td style="text-align:right">${money(r.acumulado)}</td>
+           <td style="text-align:right">${money(r.saldo)}</td>
+           <td style="text-align:right;font-weight:700;color:${Number(r.percentualExecutado)>=99.5?'var(--success)':'var(--text)'}">${Number(r.percentualExecutado||0).toFixed(2)}%</td>
+         </tr>`).join('')}</tbody>
+       </table></div>
+     </div>`;
+  panel.innerHTML=html;
+  requestAnimationFrame(()=>{ state.chartAdmin=renderCurvaS('adminCurvaS','adminCurvaSwrap',it,state.chartAdmin); });
+}
+function renderAdminViews(){ renderAdminStats(); renderAdminSidebar(); renderColabList(); }
+
+function setupAdminSubs(){
+  if(state.unsubAllUsers) state.unsubAllUsers();
+  state.unsubAllUsers=onSnapshot(collection(db,'users'),snap=>{
+    snap.docChanges().forEach(change=>{
+      const d=change.doc, data=d.data();
+      if(data.disabled||change.type==='removed'){
+        delete state.allUsers[d.id];
+        if(state.adminSubs[d.id]){ state.adminSubs[d.id](); delete state.adminSubs[d.id]; }
+        return;
+      }
+      if(!state.allUsers[d.id]) state.allUsers[d.id]={nome:data.nome||data.email,email:data.email,role:data.role,blocked:!!data.blocked,obras:[]};
+      else{ state.allUsers[d.id].nome=data.nome||data.email; state.allUsers[d.id].email=data.email; state.allUsers[d.id].role=data.role; state.allUsers[d.id].blocked=!!data.blocked; }
+      if(data.role!=='admin'&&!state.adminSubs[d.id]){
+        state.adminSubs[d.id]=onSnapshot(collection(db,'users',d.id,'obras'),oSnap=>{
+          state.allUsers[d.id].obras=oSnap.docs.map(o=>({id:o.id,...o.data()}));
+          renderAdminViews();
+          if(state.adminSelectedUid===d.id) renderAdminDetail();
+        });
+      }
+    });
+    renderAdminViews();
+  });
+}
+
+function listenUserObras(){
+  if(state.unsubUserObras) state.unsubUserObras();
+  state.unsubUserObras=onSnapshot(collection(db,'users',state.user.uid,'obras'),snap=>{
+    state.obras=snap.docs.map(d=>({id:d.id,...d.data()}));
+    if(state.selectedObraId&&!state.obras.find(o=>o.id===state.selectedObraId))
+      state.selectedObraId=state.obras.length?state.obras[0].id:null;
+    if(!state.selectedObraId&&state.obras.length) state.selectedObraId=state.obras[0].id;
+    if(state.selectedObraId){ const o=state.obras.find(x=>x.id===state.selectedObraId); if(o) applySelected(o); }
+    renderAll();
+  });
+}
+
+function setupColabForm(){
+  const form=$('addColabForm'); if(!form) return;
+  form.addEventListener('submit',async e=>{
+    e.preventDefault();
+    const nome=$('colabNome').value.trim(), email=$('colabEmail').value.trim(), senha=$('colabSenha').value;
+    const msgEl=$('colabMsgError'), btn=$('addColabBtn');
+    if(!nome||!email||!senha) return;
+    btn.disabled=true; btn.textContent='Cadastrando...'; msgEl.style.display='none';
+    const adminEmail=state.user.email;
+    try{
+      const cred=await createUserWithEmailAndPassword(auth,email,senha);
+      await setDoc(doc(db,'users',cred.user.uid),{nome,email,role:'colaborador',criadoEm:Date.now(),disabled:false,blocked:false});
+      await signOut(auth);
+      await signInWithEmailAndPassword(auth,adminEmail,ADMIN_SENHA);
+      $('colabNome').value=''; $('colabEmail').value=''; $('colabSenha').value='';
+      showToast(`✅ "${nome}" cadastrado!`);
+    }catch(err){ msgEl.textContent=err?.message||'Erro.'; msgEl.style.display='block'; }
+    finally{ btn.disabled=false; btn.textContent='Cadastrar colaborador'; }
+  });
+}
+
+function setupNovaAtividade(){
+  const recalc=()=>{
+    const vc=parseMoney($('fValorContrato').value), acu=parseMoney($('fAcumulado').value);
+    if(vc>0){ $('fSaldo').value=(vc-acu).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); $('fPct').value=(acu/vc*100).toFixed(2); }
+    else{ $('fSaldo').value=''; $('fPct').value=''; }
+  };
+  ['fValorContrato','fMedicao','fAcumulado'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input',recalc); });
+  const addRowBtn=$('addRow');
+  if(addRowBtn) addRowBtn.onclick=()=>{
+    const item=$('fItem').value.trim(), desc=$('fName').value.trim();
+    if(!item&&!desc){ showToast('⚠️ Preencha item ou descrição.',true); return; }
+    const vc=parseMoney($('fValorContrato').value), med=parseMoney($('fMedicao').value), acu=parseMoney($('fAcumulado').value);
+    const saldo=vc>0?vc-acu:0, p=vc>0?+(acu/vc*100).toFixed(2):0;
+    state.rows.push({item,descricao:desc,valorContrato:vc,medicao:med,acumulado:acu,saldo,percentualExecutado:p});
+    const o=currentObra(); if(o){ o.itens=state.rows; saveObra(o); }
+    renderAll();
+    $('fItem').value=''; $('fName').value=''; $('fValorContrato').value=''; $('fMedicao').value=''; $('fAcumulado').value=''; $('fSaldo').value=''; $('fPct').value='';
+    showToast('✅ Item adicionado.');
+  };
+}
+
+function bindEvents(){
+  $('loginForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const email=$('loginEmail').value.trim(), senha=$('loginSenha').value, btn=$('loginBtn');
+    btn.disabled=true; btn.textContent='Entrando...'; $('loginError').style.display='none';
+    try{ await signInWithEmailAndPassword(auth,email,senha); }
+    catch{ $('loginError').textContent='E-mail ou senha inválidos.'; $('loginError').style.display='block'; }
+    finally{ btn.disabled=false; btn.textContent='Entrar'; }
+  });
+  const logoutAdmin=$('logoutBtnAdmin'); if(logoutAdmin) logoutAdmin.addEventListener('click',()=>{ cleanup(); signOut(auth); });
+  const logoutUser=$('logoutBtnUser');   if(logoutUser)  logoutUser.addEventListener('click',()=>{ cleanup(); signOut(auth); });
+  const toggleThemeBtn=$('toggleTheme');
+  if(toggleThemeBtn) toggleThemeBtn.onclick=()=>{
+    document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';
+    if(state.rows.length) state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser);
+  };
+  const menuBtn=$('menuBtn');
+  if(menuBtn) menuBtn.onclick=()=>{
+    const aside=document.querySelector('#appView .app-aside');
+    if(!aside) return;
+    const open=aside.classList.toggle('aside-open');
+    menuBtn.textContent=open?'✕':'☰';
+  };
+  const adminToggleColab=$('adminToggleColab');
+  if(adminToggleColab) adminToggleColab.onclick=()=>{ const p=$('adminColabPanel'); if(p) p.style.display=p.style.display==='none'?'block':'none'; };
+  const loadFileBtn=$('loadFile');     if(loadFileBtn)  loadFileBtn.onclick=()=>importFile(false);
+  const addObraBtn=$('addObraBtn');    if(addObraBtn)   addObraBtn.onclick=()=>importFile(false);
+  const fillSampleBtn=$('fillSample'); if(fillSampleBtn) fillSampleBtn.onclick=()=>{
+    if(!confirm('Limpar todos os itens?')) return;
+    state.rows=[]; const o=currentObra(); if(o){ o.itens=[]; saveObra(o); } renderAll();
+  };
+  const exportCsvBtn=$('exportCsv');
+  if(exportCsvBtn) exportCsvBtn.onclick=()=>{
+    const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];
+    const body=state.rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob=new Blob([fields.join(',')+' \n'+body],{type:'text/csv;charset=utf-8'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='cronograma.csv'; a.click(); URL.revokeObjectURL(a.href);
+  };
+  const saveJsonBtn=$('saveJson');
+  if(saveJsonBtn) saveJsonBtn.onclick=()=>{
+    const o=currentObra(), name=($('projName')?.value||'').trim()||'projeto';
+    const blob=new Blob([JSON.stringify({obra:name,medicaoAtual:o?.medicaoAtual||'',itens:state.rows},null,2)],{type:'application/json;charset=utf-8'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name.replace(/[^a-zA-Z0-9\-_]/g,'-').toLowerCase()+'.json'; a.click(); URL.revokeObjectURL(a.href);
+  };
+  const projContratada=$('projContratada');
+  if(projContratada) projContratada.addEventListener('input',()=>{
+    const o=currentObra(); if(!o) return;
+    o.contratada=projContratada.value.trim(); scheduleSave();
+  });
+  const tbody=$('tbody');
+  if(tbody){
+    tbody.addEventListener('input',e=>{
+      const t=e.target, tr=t.closest('tr'); if(!tr) return;
+      const i=+tr.dataset.i, k=t.dataset.k; if(!k) return;
+      if(['valorContrato','medicao','acumulado','saldo','percentualExecutado'].includes(k))
+        state.rows[i][k]=Number(t.textContent.replace(',','.').replace(/[^\d.-]/g,''))||0;
+      else state.rows[i][k]=t.textContent.trim();
+      updateDashboard(); scheduleSave();
+    });
+    tbody.addEventListener('focusout',e=>{
+      const t=e.target, tr=t.closest('tr'); if(!tr) return;
+      const i=+tr.dataset.i, k=t.dataset.k;
+      if(k&&['valorContrato','medicao','acumulado','saldo'].includes(k)) t.textContent=money(state.rows[i][k]);
+      else if(k==='percentualExecutado') t.textContent=Number(state.rows[i][k]).toFixed(2);
+    });
+    tbody.addEventListener('click',e=>{
+      const b=e.target.closest('button[data-del]'); if(!b) return;
+      state.rows.splice(+b.dataset.del,1);
+      const o=currentObra(); if(o){ o.itens=state.rows; saveObra(o); }
+      renderAll();
+    });
+  }
+  window.addEventListener('scroll',()=>{ const b=$('btnTopo'); if(b) b.classList.toggle('visible',window.scrollY>200); });
+}
+
+window.adminSelectColab  =uid=>{ state.adminSelectedUid=uid; state.adminSelectedObraId=null; renderAdminSidebar(); renderAdminDetail(); };
+window.adminDeselectColab=()=>{ state.adminSelectedUid=null; state.adminSelectedObraId=null; renderAdminSidebar(); renderAdminDetail(); };
+window.adminSelectObra   =id=>{ state.adminSelectedObraId=id||null; renderAdminDetail(); };
+window.toggleBloqueio=async(uid,isBlocked)=>{
+  await updateDoc(doc(db,'users',uid),{blocked:!isBlocked});
+  state.allUsers[uid].blocked=!isBlocked;
+  renderColabList(); renderAdminSidebar();
+  if(state.adminSelectedUid===uid) renderAdminDetail();
+};
+window.removeColab=async uid=>{
+  if(!confirm('Remover colaborador?')) return;
+  await updateDoc(doc(db,'users',uid),{disabled:true});
+  delete state.allUsers[uid];
+  if(state.adminSubs[uid]){ state.adminSubs[uid](); delete state.adminSubs[uid]; }
+  if(state.adminSelectedUid===uid){ state.adminSelectedUid=null; state.adminSelectedObraId=null; }
+  renderAdminViews(); renderAdminDetail();
+  showToast('✅ Colaborador removido.');
+};
+
+async function init(){
+  bindEvents(); setupNovaAtividade();
+  onAuthStateChanged(auth,async user=>{
+    state.user=user;
+    if(!user){ showView('loginView'); return; }
+    const snap=await getDoc(doc(db,'users',user.uid));
+    if(!snap.exists()){ cleanup(); await signOut(auth); return; }
+    const data=snap.data();
+    state.admin=data.role==='admin';
+    if(data.disabled===true||data.blocked===true){ cleanup(); await signOut(auth); return; }
+    state.userName=data.nome||(user.email?user.email.split('@')[0]:'');
+    const nameEl=$('userNameDisplay'); if(nameEl) nameEl.textContent=state.userName.toUpperCase();
+    if(state.admin){
+      showView('adminView'); setupAdminSubs();
+      if(!state.colabFormReady){ state.colabFormReady=true; setupColabForm(); }
+    } else {
+      showView('appView');
+      state.obras=[]; state.selectedObraId=null; state.rows=[];
+      listenUserObras();
+    }
+  });
+}
+init();
