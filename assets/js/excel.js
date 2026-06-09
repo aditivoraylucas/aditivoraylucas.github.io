@@ -134,7 +134,8 @@ function findValorContrato(rows){
 
 /**
  * Extrai o valor monetário de "Esta Medição" / "Medição Atual" do cabeçalho.
- * Busca o rótulo e pega o primeiro número > 0 à direita ou abaixo.
+ * Busca o rótulo e pega o primeiro número > 1 à direita ou abaixo,
+ * ignorando valores pequenos que representam apenas o número da medição.
  */
 function findEstaMedicao(rows){
   const RE = /esta[\s.]*medi|medi[çc][aã]o[\s.]*atual|medi[çc][aã]o[\s.]*n[°º]/i;
@@ -143,16 +144,16 @@ function findEstaMedicao(rows){
     for(let c = 0; c < row.length; c++){
       const cell = String(row[c] ?? '').trim();
       if(!cell || !RE.test(cell)) continue;
-      // Tenta à direita na mesma linha
+      // Tenta à direita na mesma linha (valor monetário > 1)
       for(let cc = c + 1; cc < Math.min(c + 10, row.length); cc++){
-        const v = Number(row[cc]); if(v > 0) return v;
+        const v = Number(row[cc]); if(v > 1) return v;
       }
-      // Tenta linha abaixo
+      // Tenta linha abaixo (valor monetário > 1)
       for(let rr = r + 1; rr <= r + 4 && rr < rows.length; rr++){
-        const v = Number(rows[rr]?.[c]); if(v > 0) return v;
+        const v = Number(rows[rr]?.[c]); if(v > 1) return v;
         for(let cc = c - 1; cc <= c + 3; cc++){
           if(cc < 0) continue;
-          const v2 = Number(rows[rr]?.[cc]); if(v2 > 0) return v2;
+          const v2 = Number(rows[rr]?.[cc]); if(v2 > 1) return v2;
         }
       }
     }
