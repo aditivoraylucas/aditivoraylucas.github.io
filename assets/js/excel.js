@@ -133,16 +133,16 @@ function findValorContrato(rows){
 }
 
 /**
- * Extrai o valor monetário de "Esta Medição" do cabeçalho.
+ * Extrai o valor de "Esta Medição" do cabeçalho.
  *
- * Regra: o valor SEMPRE está na mesma coluna do rótulo,
- * podendo estar na mesma célula (mesclada) ou nas linhas
- * imediatamente abaixo. NUNCA busca colunas à direita.
+ * Regra simplificada:
+ *  - Localiza o rótulo na planilha.
+ *  - Pega o valor na linha imediatamente abaixo (r+1), mesma coluna.
+ *  - Se r+1 estiver vazio (célula mesclada), tenta r+2.
+ *  - NUNCA busca colunas à direita.
  */
 function findEstaMedicao(rows){
   const RE = /esta[\s.]*medi[çc]|última[\s.]*medi[çc]|medi[çc][aã]o[\s.]*atual|valor[\s.]*desta[\s.]*medi[çc]/i;
-
-  const candidates = [];
 
   for(let r = 0; r < rows.length; r++){
     const row = rows[r] || [];
@@ -150,31 +150,17 @@ function findEstaMedicao(rows){
       const cell = String(row[c] ?? '').trim();
       if(!cell || !RE.test(cell)) continue;
 
-      // Mesma célula pode conter o valor após o rótulo (ex: "Esta Medição: 12345")
-      const inlineMatch = cell.replace(RE, '').match(/[\d.,]+/);
-      if(inlineMatch){
-        const v = Number(inlineMatch[0].replace(/\./g,'').replace(',','.'));
-        if(v > 0) candidates.push(v);
-      }
+      // r+1: linha imediatamente abaixo, mesma coluna
+      const v1 = Number(rows[r + 1]?.[c]);
+      if(v1 > 0) return v1;
 
-      // Busca SOMENTE abaixo, mesma coluna (até 6 linhas)
-      for(let rr = r + 1; rr <= r + 6 && rr < rows.length; rr++){
-        const cell2 = String(rows[rr]?.[c] ?? '').trim();
-        // Para se encontrar outro rótulo (célula de texto não numérica)
-        if(cell2 && isNaN(Number(cell2.replace(/[.,\s]/g,''))) && !/^[\d.,\s]+$/.test(cell2)) break;
-        const v = Number(String(rows[rr]?.[c] ?? '').replace(/[.\s]/g,'').replace(',','.'));
-        if(v > 0) candidates.push(v);
-      }
+      // r+2: fallback para célula mesclada que pula uma linha
+      const v2 = Number(rows[r + 2]?.[c]);
+      if(v2 > 0) return v2;
     }
   }
 
-  if(!candidates.length) return 0;
-
-  // Prioridade: valor monetário real (> 100)
-  const monetarios = candidates.filter(v => v > 100);
-  if(monetarios.length) return Math.max(...monetarios);
-
-  return Math.max(...candidates);
+  return 0;
 }
 
 function extractMetaFromHeaders(data, firstDataRowIdx){
