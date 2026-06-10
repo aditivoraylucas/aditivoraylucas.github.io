@@ -114,7 +114,7 @@ export function renderTable(){
   }).join('');
 }
 
-/* ── Dashboard do colaborador (painel fixo) — mantém "Valor CT / Aditivo" ── */
+/* ── Dashboard do colaborador (painel fixo) ── */
 export function updateDashboard(){
   const o=currentObra();
   const vc     = Number(o?.resumo?.valorContratoAditivo)||state.rows.reduce((a,r)=>a+Number(r.valorContrato||0),0);
@@ -124,10 +124,10 @@ export function updateDashboard(){
   const LS = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
   const VS = 'font-size:.95rem;font-weight:700;margin-top:.2rem';
   if($('stats')) $('stats').innerHTML=
-    `<div class="stat-card"><span class="stat-label" style="${LS}">Valor CT / Aditivo</span><span class="stat-value" style="${VS}">${money(vc)}</span></div>
+    `<div class="stat-card"><span class="stat-label" style="${LS}">Esta Medição</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>
+     <div class="stat-card"><span class="stat-label" style="${LS}">Valor CT / Aditivo</span><span class="stat-value" style="${VS}">${money(vc)}</span></div>
      <div class="stat-card"><span class="stat-label" style="${LS}">Acumulado Total</span><span class="stat-value" style="${VS};color:var(--success)">${money(ac)}</span></div>
-     <div class="stat-card"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>
-     <div class="stat-card"><span class="stat-label" style="${LS}">Esta Medição</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>`;
+     <div class="stat-card"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>`;
   if($('countAll'))  $('countAll').textContent  = money(vc);
   if($('countDone')) $('countDone').textContent = money(ac);
   if($('countPct'))  $('countPct').textContent  = pct(p);
