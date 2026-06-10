@@ -15,8 +15,11 @@ function detectColumns(data){
   const RE_ITEM = /^(item|n[°º\.°]|num\.?|no\.?)$/i;
   const RE = {
     desc:  /discrimina|descri[çc]|servic[oa]|servi[çc]|especific|designa/i,
-    med:   /no[\s.]*(per[ií]odo|mes|m[eê]s)|^medic[a\u00e3]o$|^realizado$|periodo|esta[\s.]*medi|med\.?\s*atual|\bmed\b|medi[çc]/i,
-    acum:  /acumulado|acum\.?/i,
+    // Medição: exige que a célula seja especificamente sobre a medição do período,
+    // NÃO bate em "acumulado", "saldo", etc.
+    med:   /no[\s.]*(per[ií]odo|mes|m[eê]s)|^medic[aã]o$|^realizado$|esta[\s.]*medi[çc]|med\.?\s*atual|med\.?\s*(do\s*)?(per[ií]odo|m[eê]s)|^medi[çc][aã]o\s*(do\s*per[ií]odo)?$/i,
+    // Acumulado: só bate em células que contêm explicitamente "acumulado" ou "acum"
+    acum:  /^acumulado$|\bacumulado\b|^acum\.?$/i,
     saldo: /saldo/i
   };
   const VC_PATTERNS = [
@@ -65,8 +68,9 @@ function detectColumns(data){
       const t = norm(row[c]);
       if(!t || c === itemCol) continue;
       if(RE.desc.test(t)  && cols.desc  < 0) cols.desc  = c;
+      // Acumulado tem prioridade: testa ANTES de med para não colidir
+      if(RE.acum.test(t)  && cols.acum  < 0){ cols.acum  = c; continue; }
       if(RE.med.test(t)   && cols.med   < 0) cols.med   = c;
-      if(RE.acum.test(t)  && cols.acum  < 0) cols.acum  = c;
       if(RE.saldo.test(t) && cols.saldo < 0) cols.saldo = c;
       for(const {pri, re} of VC_PATTERNS){
         if(re.test(t)){
@@ -84,6 +88,7 @@ function detectColumns(data){
     for(let c = (itemCol >= 0 ? itemCol : 0) + 1; c < firstDataRow.length; c++){
       if(!usedCols.has(c) && isNum(firstDataRow[c]) && Number(firstDataRow[c]) > 0) numCols.push(c);
     }
+    // Ordem esperada na planilha: vc → med → acum → saldo
     missing.forEach((k, i) => { if(numCols[i] !== undefined) cols[k] = numCols[i]; });
   }
   if(cols.desc < 0 && itemCol >= 0){
@@ -141,35 +146,23 @@ function findValorContrato(rows){
  */
 function parseValor(raw){
   if(raw === '' || raw === null || raw === undefined) return 0;
-  // Se já é número nativo (Excel lê como float), retorna direto
   if(typeof raw === 'number') return raw;
   const s = String(raw).trim();
-  // Remove R$, espaços, etc.
   const clean = s.replace(/[R$\s]/g, '');
-  // Formato BR: ponto como milhar, vírgula como decimal → "120.326,47"
   if(/^\d{1,3}(\.\d{3})*(,\d+)?$/.test(clean)){
     return parseFloat(clean.replace(/\./g, '').replace(',', '.'));
   }
-  // Formato US: vírgula como milhar, ponto como decimal → "120,326.47"
   if(/^\d{1,3}(,\d{3})*(\.\d+)?$/.test(clean)){
     return parseFloat(clean.replace(/,/g, ''));
   }
-  // Só vírgula como decimal (sem milhar): "120326,47"
   if(/^\d+,\d+$/.test(clean)){
     return parseFloat(clean.replace(',', '.'));
   }
-  // Fallback direto
   return parseFloat(clean) || 0;
 }
 
 /**
  * Extrai o valor de "Esta Medição" do cabeçalho.
- *
- * Regra simplificada:
- *  - Localiza o rótulo na planilha.
- *  - Pega o valor na linha imediatamente abaixo (r+1), mesma coluna.
- *  - Se r+1 estiver vazio (célula mesclada), tenta r+2.
- *  - NUNCA busca colunas à direita.
  */
 function findEstaMedicao(rows){
   const RE = /esta[\s.]*medi[çc]|última[\s.]*medi[çc]|medi[çc][aã]o[\s.]*atual|valor[\s.]*desta[\s.]*medi[çc]/i;
@@ -180,11 +173,9 @@ function findEstaMedicao(rows){
       const cell = String(row[c] ?? '').trim();
       if(!cell || !RE.test(cell)) continue;
 
-      // r+1: linha imediatamente abaixo, mesma coluna
       const v1 = parseValor(rows[r + 1]?.[c]);
       if(v1 > 0) return v1;
 
-      // r+2: fallback para célula mesclada que pula uma linha
       const v2 = parseValor(rows[r + 2]?.[c]);
       if(v2 > 0) return v2;
     }
