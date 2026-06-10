@@ -26,55 +26,247 @@ function calcDataFim(dataInicio, totalMeses){
   return d.toISOString().slice(0, 10);
 }
 
+/* ════════════════════════════════════════════════════════════
+   renderCurvaS
+   - SEM cronograma  → gráfico de barras simples (inalterado)
+   - COM cronograma  → Curva S aprimorada:
+       • Planejado acumulado (linha âmbar)
+       • Executado real ponderado (linha verde)
+       • Área de desvio colorida (verde=adiantado / vermelho=atrasado)
+       • Linha vertical "Hoje" com anotação
+       • Tooltip rico: Planejado / Executado / Desvio
+   ════════════════════════════════════════════════════════════ */
 export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData, dataInicio){
   const canvas=$(canvasId); if(!canvas) return prev;
   if(prev) prev.destroy();
-  const dark=document.documentElement.dataset.theme==='dark';
-  const gc=dark?'rgba(255,255,255,0.1)':'rgba(0,0,0,0.1)';
-  const tc=dark?'#94a3b8':'#64748b';
-  const mobile=window.innerWidth<=900;
-  const wrap=$(wrapId);
+
+  const dark   = document.documentElement.dataset.theme === 'dark';
+  const gc     = dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+  const tc     = dark ? '#94a3b8' : '#64748b';
+  const mobile = window.innerWidth <= 900;
+  const wrap   = $(wrapId);
   if(wrap){ wrap.style.overflowX='hidden'; canvas.style.minWidth=''; canvas.style.width='100%'; }
-  const n=itens.length;
-  const containerW=wrap?wrap.offsetWidth:600;
-  const thickness=mobile
-    ? Math.max(4,Math.floor((containerW-16)/(n||1))-2)
-    : Math.max(18,Math.min(40,Math.floor(600/(n||1))));
-  const datasets=[{
-    type:'bar', label:'% Executado',
-    data: itens.map(r=>Number(r.percentualExecutado)||0),
-    backgroundColor:'rgba(99,102,241,0.2)', borderColor:'#6366f1',
-    borderWidth:1, borderRadius:3, barThickness:mobile?'flex':thickness, order:2
-  }];
-  const di = dataInicio || currentObra()?.dataInicio;
-  const timeline = (cronogramaData && di)
-    ? buildCronogramaTimeline(di, cronogramaData)
-    : null;
-  let labels=itens.map(r=>String(r.item||''));
-  if(timeline && timeline.length){
-    const totalVC =itens.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
-    const totalAcu=itens.reduce((a,r)=>a+(Number(r.acumulado)||0),0);
-    const realPctGeral=totalVC>0?+(totalAcu/totalVC*100).toFixed(2):0;
-    let acumPlan=0;
-    const planData=timeline.map(t=>{acumPlan+=t.planejadoPct;return +acumPlan.toFixed(2);});
-    const nMeses=timeline.length;
-    const realData=timeline.map((t,i)=>t.passado?+(realPctGeral/nMeses*(i+1)).toFixed(2):null);
-    labels=timeline.map(t=>t.label);
-    datasets.length=0;
-    datasets.push(
-      {type:'line',label:'Planejado (%)',data:planData,borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,0.08)',borderWidth:2,pointRadius:3,tension:0.3,fill:false,order:1},
-      {type:'line',label:'Executado Real (%)',data:realData,borderColor:'#10b981',backgroundColor:'rgba(16,185,129,0.1)',borderWidth:2,pointRadius:3,tension:0.3,fill:false,spanGaps:false,order:0}
-    );
-  }
-  return new Chart(canvas.getContext('2d'),{
-    type:'bar', data:{labels,datasets},
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      scales:{
-        y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},
-        x:{grid:{display:false},ticks:{color:tc,font:{size:mobile?8:10},maxRotation:mobile?90:45,minRotation:0}}
+
+  /* ── Modo SEM cronograma: barras simples (não muda) ── */
+  const di       = dataInicio || currentObra()?.dataInicio;
+  const timeline = (cronogramaData && di) ? buildCronogramaTimeline(di, cronogramaData) : null;
+
+  if(!timeline || !timeline.length){
+    const n         = itens.length;
+    const containerW= wrap ? wrap.offsetWidth : 600;
+    const thickness = mobile
+      ? Math.max(4, Math.floor((containerW-16)/(n||1))-2)
+      : Math.max(18, Math.min(40, Math.floor(600/(n||1))));
+    return new Chart(canvas.getContext('2d'),{
+      type:'bar',
+      data:{
+        labels: itens.map(r=>String(r.item||'')),
+        datasets:[{
+          type:'bar', label:'% Executado',
+          data: itens.map(r=>Number(r.percentualExecutado)||0),
+          backgroundColor:'rgba(99,102,241,0.2)', borderColor:'#6366f1',
+          borderWidth:1, borderRadius:3,
+          barThickness: mobile?'flex':thickness, order:2
+        }]
       },
-      plugins:{legend:{labels:{color:tc}}}
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        scales:{
+          y:{beginAtZero:true,max:100,grid:{color:gc},ticks:{color:tc,callback:v=>v+'%'}},
+          x:{grid:{display:false},ticks:{color:tc,font:{size:mobile?8:10},maxRotation:mobile?90:45,minRotation:0}}
+        },
+        plugins:{legend:{labels:{color:tc}}}
+      }
+    });
+  }
+
+  /* ── Modo COM cronograma: Curva S aprimorada ── */
+  const totalVC  = itens.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
+  const totalAcu = itens.reduce((a,r)=>a+(Number(r.acumulado)||0),0);
+  const realPctGeral = totalVC > 0 ? +(totalAcu/totalVC*100).toFixed(2) : 0;
+
+  // Planejado acumulado
+  let acumPlan = 0;
+  const planData = timeline.map(t=>{ acumPlan += t.planejadoPct; return +Math.min(acumPlan,100).toFixed(2); });
+
+  // Executado real ponderado: distribui realPctGeral proporcional ao planejado de cada mês
+  const planTotal = planData[planData.length-1] || 100;
+  const realData  = timeline.map((t,i)=>{
+    if(!t.passado) return null;
+    // peso: quanto do planejado já deveria ter sido feito até este mês
+    const pesoAcum = planTotal > 0 ? planData[i] / planTotal : (i+1)/timeline.length;
+    return +Math.min(realPctGeral * (pesoAcum > 0 ? 1 : 0) + realPctGeral*(1-pesoAcum)*0, 100).toFixed(2);
+  });
+
+  // Versão correta: distribui linearmente dentro dos meses passados, chegando em realPctGeral no último mês passado
+  const passadoCount = timeline.filter(t=>t.passado).length;
+  const realDataFinal = timeline.map((t,i)=>{
+    if(!t.passado) return null;
+    const fracaoMes = (i+1)/passadoCount;
+    return +Math.min(realPctGeral * fracaoMes, 100).toFixed(2);
+  });
+
+  // Índice do mês atual (último "passado")
+  const hojeIdx = timeline.reduce((last,t,i)=> t.passado ? i : last, -1);
+
+  // Área de desvio: dataset de preenchimento entre planejado e executado
+  // Positivo (adiantado) = executado > planejado → verde
+  // Negativo (atrasado)  = executado < planejado → vermelho
+  const desvioData = timeline.map((t,i)=>{
+    if(realDataFinal[i] === null) return null;
+    return +( realDataFinal[i] - planData[i] ).toFixed(2);
+  });
+
+  const labels = timeline.map(t=>t.label);
+
+  // Plugin personalizado: linha vertical "Hoje" + label
+  const pluginHoje = {
+    id: 'linhaHoje',
+    afterDraw(chart){
+      if(hojeIdx < 0) return;
+      const { ctx, chartArea:{ top, bottom }, scales:{ x } } = chart;
+      const xPos = x.getPixelForValue(hojeIdx);
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(xPos, top);
+      ctx.lineTo(xPos, bottom);
+      ctx.lineWidth   = 2;
+      ctx.strokeStyle = dark ? 'rgba(248,113,113,0.9)' : 'rgba(220,38,38,0.8)';
+      ctx.setLineDash([5,4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Badge "Hoje"
+      const label   = 'Hoje';
+      const padding = 4;
+      ctx.font      = `bold ${mobile?9:11}px sans-serif`;
+      const tw      = ctx.measureText(label).width;
+      const bw      = tw + padding*2;
+      const bh      = mobile ? 14 : 18;
+      const bx      = xPos - bw/2;
+      const by      = top + 4;
+      ctx.fillStyle = dark ? 'rgba(220,38,38,0.85)' : 'rgba(239,68,68,0.9)';
+      roundRect(ctx, bx, by, bw, bh, 4);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, xPos, by + bh/2);
+      ctx.restore();
+    }
+  };
+
+  function roundRect(ctx, x, y, w, h, r){
+    ctx.beginPath();
+    ctx.moveTo(x+r, y);
+    ctx.lineTo(x+w-r, y);
+    ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+    ctx.lineTo(x+w, y+h-r);
+    ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+    ctx.lineTo(x+r, y+h);
+    ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+    ctx.lineTo(x, y+r);
+    ctx.quadraticCurveTo(x, y, x+r, y);
+    ctx.closePath();
+  }
+
+  // Determina cor da área de desvio no mês atual
+  const desvioHoje = hojeIdx >= 0 ? (desvioData[hojeIdx] ?? 0) : 0;
+  const desvioColor     = desvioHoje >= 0
+    ? (dark ? 'rgba(52,211,153,0.18)' : 'rgba(16,185,129,0.15)')
+    : (dark ? 'rgba(248,113,113,0.18)' : 'rgba(239,68,68,0.12)');
+  const desvioBorder    = desvioHoje >= 0 ? 'rgba(16,185,129,0)' : 'rgba(239,68,68,0)';
+
+  const datasets = [
+    // 1. Área de desvio (fundo)
+    {
+      type:'line', label: desvioHoje >= 0 ? 'Adiantamento' : 'Atraso',
+      data: desvioData.map((v,i)=> v !== null ? planData[i] : null),
+      borderColor: 'transparent',
+      backgroundColor: desvioColor,
+      fill: { target: '+1', above: desvioColor, below: desvioColor },
+      pointRadius: 0, tension: 0.35, order: 3,
+      spanGaps: false
+    },
+    // 2. Executado Real
+    {
+      type:'line', label:'Executado Real (%)',
+      data: realDataFinal,
+      borderColor:'#10b981', backgroundColor:'rgba(16,185,129,0.08)',
+      borderWidth: 2.5, pointRadius: mobile?2:4,
+      pointBackgroundColor:'#10b981',
+      tension: 0.35, fill: false, spanGaps: false, order: 1
+    },
+    // 3. Planejado (por cima)
+    {
+      type:'line', label:'Planejado (%)',
+      data: planData,
+      borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,0.06)',
+      borderWidth: 2.5, pointRadius: mobile?2:4,
+      pointBackgroundColor:'#f59e0b',
+      tension: 0.35, fill: false, order: 0
+    }
+  ];
+
+  return new Chart(canvas.getContext('2d'),{
+    type:'line',
+    data:{ labels, datasets },
+    plugins:[ pluginHoje ],
+    options:{
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction:{ mode:'index', intersect:false },
+      scales:{
+        y:{
+          beginAtZero:true, max:100,
+          grid:{ color:gc },
+          ticks:{ color:tc, callback: v=>v+'%', font:{ size: mobile?9:11 } }
+        },
+        x:{
+          grid:{ display:false },
+          ticks:{ color:tc, font:{ size:mobile?8:10 }, maxRotation: mobile?90:45, minRotation:0 }
+        }
+      },
+      plugins:{
+        legend:{
+          labels:{
+            color: tc,
+            font:{ size: mobile?9:11 },
+            usePointStyle: true,
+            pointStyleWidth: 10,
+            filter: item => item.text !== 'Adiantamento' && item.text !== 'Atraso'
+              ? true
+              : (hojeIdx >= 0)  // só mostra legenda de desvio se tiver meses passados
+          }
+        },
+        tooltip:{
+          callbacks:{
+            title: items => `📅 ${items[0].label}`,
+            label: item => {
+              if(item.datasetIndex === 0) return null; // oculta área de desvio no tooltip
+              const v = item.parsed.y;
+              if(v === null || v === undefined) return null;
+              const prefix = item.datasetIndex === 1 ? '🟢 Executado' : '🟡 Planejado';
+              return ` ${prefix}: ${Number(v).toFixed(1)}%`;
+            },
+            afterBody: items => {
+              const planVal  = items.find(i=>i.datasetIndex===2)?.parsed.y;
+              const realVal  = items.find(i=>i.datasetIndex===1)?.parsed.y;
+              if(planVal == null || realVal == null) return [];
+              const dev = +(realVal - planVal).toFixed(1);
+              const icon = dev >= 0 ? '✅' : '⚠️';
+              const txt  = dev >= 0 ? `Adiantado ${dev}%` : `Atrasado ${Math.abs(dev)}%`;
+              return [`─────────────`, ` ${icon} ${txt}`];
+            }
+          },
+          backgroundColor: dark ? '#1e293b' : '#fff',
+          titleColor:       dark ? '#f8fafc' : '#0f172a',
+          bodyColor:        dark ? '#94a3b8' : '#475569',
+          borderColor:      dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+          borderWidth: 1,
+          padding: 10,
+          cornerRadius: 8
+        }
+      }
     }
   });
 }
