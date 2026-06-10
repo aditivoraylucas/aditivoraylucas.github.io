@@ -1,5 +1,8 @@
 import { norm, isNum, baseName, EXCEL_EXTS } from './state.js';
 
+/* ---------------------------------------------------------------
+   detectSheet — usa aba BM/MED mais recente ou a última
+--------------------------------------------------------------- */
 function detectSheet(wb){
   const matches = wb.SheetNames.filter(n => /^(BM|MED)\s*\d+/i.test(n));
   if(matches.length){
@@ -11,75 +14,136 @@ function detectSheet(wb){
   return wb.SheetNames.at(-1);
 }
 
+/* ---------------------------------------------------------------
+   detectColumns
+
+   REGRAS (conforme especificação do usuário):
+   1. Encontra a linha de cabeçalho que contém a palavra "ITEM"
+   2. Varre TODO o bloco de cabeçalho (até 15 linhas acima da
+      primeira linha de dados numéricos) para localizar:
+        • coluna NO PERIODO  (= coluna de medição)
+        • coluna ACUMULADO
+        • coluna SALDO
+        Regra 5/6: usa SEMPRE a ocorrência que está associada à
+        linha do ITEM (não do cabeçalho superior)
+   3. Valor de contrato = última coluna numérica encontrada
+      ANTES de "NO PERIODO" (mais à direita, regra 9)
+   4. Descrição = primeira coluna texto após ITEM e antes de VC
+--------------------------------------------------------------- */
 function detectColumns(data){
-  const RE_ITEM = /^(item|n[°º\.°]|num\.?|no\.?)$/i;
-  const RE = {
-    desc:  /discrimina|descri[çc]|servic[oa]|servi[çc]|especific|designa/i,
-    med:   /no[\s.]*(per[ií]odo|mes|m[eê]s)|^medic[aã]o$|^realizado$|periodo|esta[\s.]*medi|med\.?\s*atual|\bmed\b|medi[çc]/i,
-    acum:  /acumulado|acum\.?/i,
-    saldo: /saldo/i
-  };
-  const VC_PATTERNS = [
-    { pri: 1, re: /valor\s*(unit[aá]r|unit\.)?\b/i },
-    { pri: 1, re: /vl\.?\s*unit|vlr\.?\s*unit/i },
-    { pri: 2, re: /vl\.?\s*(do\s*)?(contrato|ct)\b|vlr\.?\s*(do\s*)?(contrato|ct)\b|v\.?\s*contrato\b|\bvl\s*ct\b/i },
-    { pri: 3, re: /valor\s+(de\s+)?contrato\b(?!\s+(com|atualizado|reajuste|aditivo))/i },
-    { pri: 3, re: /valor\s+total\s+(do\s+)?contrato\b(?!\s+(com|atualizado|reajuste|aditivo))/i },
-    { pri: 4, re: /valor\s*(total\s*)?(do\s*)?contrato\s*(com\s*)?(atualizado|reajuste)/i },
-    { pri: 5, re: /valor\s*ct\s*[\/\\]\s*ta/i },
-    { pri: 5, re: /valor\s*(de\s+)?contrato\s*(com\s*)?(aditivo|\bta\b)/i },
-  ];
-  let headerRowIdx = -1, itemCol = -1;
+  const RE_ITEM  = /^(item|n[°º\.°]|num\.?|no\.?)$/i;
+  const RE_MED   = /no[\s.]*(per[ií]odo|mes|m[eê]s)|^no[\s.]*per[ií]odo$|esta[\s.]*medi|^realizado$|^medi[\s\S]{0,8}$/i;
+  const RE_ACUM  = /acumulado|^acum\.?$/i;
+  const RE_SALDO = /^saldo$/i;
+  const RE_VC    = /valor.*(unit[aá]r|contrato|ct|total)|vl\.?\s*(unit|ct|contrato)|vlr\.?\s*(unit|ct|contrato)/i;
+
+  // 1. Encontra linha do ITEM e coluna ITEM
+  let itemRowIdx = -1, itemCol = -1;
   for(let r = 0; r < Math.min(80, data.length); r++){
     const row = data[r] || [];
-    for(let c = 0; c < Math.min(15, row.length); c++){
+    for(let c = 0; c < Math.min(20, row.length); c++){
       if(RE_ITEM.test(norm(row[c]))){
-        headerRowIdx = r; itemCol = c; break;
+        itemRowIdx = r; itemCol = c; break;
       }
     }
-    if(headerRowIdx >= 0) break;
+    if(itemRowIdx >= 0) break;
   }
-  if(headerRowIdx < 0){
+  // fallback: primeira linha cujo col0 seja dígito inteiro
+  if(itemRowIdx < 0){
     for(let r = 0; r < Math.min(80, data.length); r++){
       const row = data[r] || [];
       for(let c = 0; c < Math.min(5, row.length); c++){
         if(/^\d+$/.test(String(row[c]??'').trim())){
-          headerRowIdx = Math.max(0, r - 1); itemCol = c; break;
+          itemRowIdx = Math.max(0, r-1); itemCol = c; break;
         }
       }
-      if(headerRowIdx >= 0) break;
+      if(itemRowIdx >= 0) break;
     }
   }
-  const cols = { item: itemCol, desc:-1, vc:-1, med:-1, acum:-1, saldo:-1 };
-  let vcPri = -1;
-  if(headerRowIdx < 0) return cols;
 
-  // Amplia janela para 10 linhas acima do cabeçalho e varre até coluna 30
-  // para cobrir planilhas com células mescladas em múltiplas linhas
-  const blockStart = Math.max(0, headerRowIdx - 10);
-  const headerBlock = [];
-  for(let r = blockStart; r <= headerRowIdx; r++){
+  const cols = { item: itemCol, desc:-1, vc:-1, med:-1, acum:-1, saldo:-1 };
+  if(itemRowIdx < 0) return cols;
+
+  // 2. Monta bloco de cabeçalho: da linha ITEM até 2 linhas abaixo
+  //    (para pegar a sub-linha "NO PERIODO | ACUMULADO | SALDO")
+  //    + até 15 linhas acima (para pegar rótulos de colunas mescladas)
+  const blockStart = Math.max(0, itemRowIdx - 15);
+  const blockEnd   = Math.min(data.length - 1, itemRowIdx + 2);
+
+  // Mapa: coluna → melhor label encontrado no bloco
+  const labelMap = {}; // c → norm text
+  for(let r = blockStart; r <= blockEnd; r++){
     const row = data[r] || [];
-    if(r < headerRowIdx && /^\d+$/.test(String(row[itemCol]??'').trim())) continue;
-    headerBlock.push(row);
-  }
-  for(const row of headerBlock){
-    for(let c = 0; c < Math.min(row.length, 30); c++){
+    for(let c = 0; c < row.length; c++){
       const t = norm(row[c]);
       if(!t || c === itemCol) continue;
-      if(RE.desc.test(t)  && cols.desc  < 0) cols.desc  = c;
-      if(RE.med.test(t)   && cols.med   < 0) cols.med   = c;
-      if(RE.acum.test(t)  && cols.acum  < 0) cols.acum  = c;
-      if(RE.saldo.test(t) && cols.saldo < 0) cols.saldo = c;
-      for(const {pri, re} of VC_PATTERNS){
-        if(re.test(t)){
-          if(pri >= vcPri){ cols.vc = c; vcPri = pri; }
-          break;
+      // preferência: linha mais próxima do itemRowIdx vence
+      if(!labelMap[c] || r >= (labelMap[c].row ?? -1)){
+        labelMap[c] = { text: t, row: r };
+      }
+    }
+  }
+
+  // 3. Detecta med/acum/saldo e coleta TODAS as colunas valor
+  //    Regra 6: usa a ocorrência da linha ITEM ou sub-linha imediata
+  //    (prioridade pela linha mais próxima de itemRowIdx)
+  let medCandidates = [], acumCandidates = [], saldoCandidates = [], vcCandidates = [];
+
+  for(let r = blockStart; r <= blockEnd; r++){
+    const row = data[r] || [];
+    const dist = Math.abs(r - itemRowIdx); // distância da linha ITEM
+    for(let c = 0; c < row.length; c++){
+      const t = norm(row[c]);
+      if(!t || c === itemCol) continue;
+      if(RE_MED.test(t))   medCandidates.push({c, dist, r});
+      if(RE_ACUM.test(t))  acumCandidates.push({c, dist, r});
+      if(RE_SALDO.test(t)) saldoCandidates.push({c, dist, r});
+      if(RE_VC.test(t))    vcCandidates.push({c, dist, r, t});
+    }
+  }
+
+  // Ordena por distância (mais perto do itemRowIdx = melhor)
+  const closest = arr => arr.sort((a,b) => a.dist - b.dist || a.r - b.r)[0];
+
+  const medBest  = closest(medCandidates);
+  const acumBest = closest(acumCandidates);
+  const saldoBest= closest(saldoCandidates);
+
+  if(medBest)  cols.med  = medBest.c;
+  if(acumBest) cols.acum = acumBest.c;
+  if(saldoBest)cols.saldo= saldoBest.c;
+
+  // 4. Valor de contrato = última coluna VC encontrada
+  //    que esteja ANTES de "NO PERIODO" (mais à esquerda que med)
+  //    Regra 9: usa a mais à direita dentre as elegíveis
+  const medCol = cols.med >= 0 ? cols.med : 9999;
+  const vcElegiveis = vcCandidates.filter(v => v.c < medCol);
+  if(vcElegiveis.length){
+    // pega a de maior coluna (mais à direita = mais recente/atualizada)
+    vcElegiveis.sort((a,b) => b.c - a.c);
+    cols.vc = vcElegiveis[0].c;
+  }
+
+  // 5. Descrição = primeira coluna texto entre itemCol e vc
+  if(cols.desc < 0 && itemCol >= 0){
+    const fdr = data[itemRowIdx + 1] || data[itemRowIdx] || [];
+    const lim = cols.vc > 0 ? cols.vc : itemCol + 15;
+    for(let c = itemCol + 1; c < lim; c++){
+      if(!isNum(fdr[c]) && String(fdr[c]??'').trim()){ cols.desc = c; break; }
+    }
+    // fallback: primeira col string no próprio bloco header
+    if(cols.desc < 0){
+      for(const [c, info] of Object.entries(labelMap)){
+        const ci = Number(c);
+        if(ci > itemCol && ci < lim && !/^\d/.test(info.text)){
+          cols.desc = ci; break;
         }
       }
     }
   }
-  const firstDataRow = data[headerRowIdx + 1] || [];
+
+  // 6. Fallback numérico para campos ainda não encontrados
+  const firstDataRow = data[itemRowIdx + 1] || [];
   const missing = ['vc','med','acum','saldo'].filter(k => cols[k] < 0);
   if(missing.length > 0){
     const usedCols = new Set(Object.values(cols).filter(v => v >= 0));
@@ -89,16 +153,13 @@ function detectColumns(data){
     }
     missing.forEach((k, i) => { if(numCols[i] !== undefined) cols[k] = numCols[i]; });
   }
-  if(cols.desc < 0 && itemCol >= 0){
-    const fdr = data[headerRowIdx + 1] || [];
-    const vcLimit = cols.vc > 0 ? cols.vc : itemCol + 12;
-    for(let c = itemCol + 1; c < vcLimit; c++){
-      if(!isNum(fdr[c]) && String(fdr[c]??'').trim()){ cols.desc = c; break; }
-    }
-  }
+
   return cols;
 }
 
+/* ---------------------------------------------------------------
+   findValorContrato — busca no cabeçalho (linhas acima dos itens)
+--------------------------------------------------------------- */
 function findValorContrato(rows){
   const PATTERNS = [
     [1, /valor\s*ct\s*[\/\\]\s*ta/i],
@@ -135,10 +196,9 @@ function findValorContrato(rows){
   return candidates[0].v;
 }
 
-/**
- * Extrai o valor monetário de "Esta Medição" / "Medição Atual" do cabeçalho.
- * Busca o rótulo e pega o primeiro número > 0 à direita ou abaixo.
- */
+/* ---------------------------------------------------------------
+   findEstaMedicao — busca valor mon. de "Esta Medição" no cabeçalho
+--------------------------------------------------------------- */
 function findEstaMedicao(rows){
   const RE = /esta[\s.]*medi|medi[çc][aã]o[\s.]*atual|medi[çc][aã]o[\s.]*n[°º]/i;
   for(let r = 0; r < rows.length; r++){
@@ -146,11 +206,9 @@ function findEstaMedicao(rows){
     for(let c = 0; c < row.length; c++){
       const cell = String(row[c] ?? '').trim();
       if(!cell || !RE.test(cell)) continue;
-      // Tenta à direita na mesma linha
       for(let cc = c + 1; cc < Math.min(c + 10, row.length); cc++){
         const v = Number(row[cc]); if(v > 0) return v;
       }
-      // Tenta linha abaixo
       for(let rr = r + 1; rr <= r + 4 && rr < rows.length; rr++){
         const v = Number(rows[rr]?.[c]); if(v > 0) return v;
         for(let cc = c - 1; cc <= c + 3; cc++){
@@ -163,6 +221,9 @@ function findEstaMedicao(rows){
   return 0;
 }
 
+/* ---------------------------------------------------------------
+   extractMetaFromHeaders
+--------------------------------------------------------------- */
 function extractMetaFromHeaders(data, firstDataRowIdx){
   const RE_ACUM = /acumulado/i, RE_CONT=/contratada/i;
   let acu=0, contratada='';
@@ -220,6 +281,9 @@ function extractMetaFromHeaders(data, firstDataRowIdx){
   return { valorContratoAditivo:vca, acumuladoTotal:acu, contratada, estaMedicao };
 }
 
+/* ---------------------------------------------------------------
+   normalizeRows — normaliza lista vinda do Firebase
+--------------------------------------------------------------- */
 export function normalizeRows(list){
   return Array.isArray(list)?list.map(item=>({
     item:item?.item??'',
@@ -232,6 +296,9 @@ export function normalizeRows(list){
   })):[];
 }
 
+/* ---------------------------------------------------------------
+   readExcelFile — entry point principal
+--------------------------------------------------------------- */
 export async function readExcelFile(file){
   const buffer=await file.arrayBuffer();
   const wb=XLSX.read(new Uint8Array(buffer),{type:'array',cellDates:false,cellNF:false,cellText:false});
@@ -240,48 +307,83 @@ export async function readExcelFile(file){
   const ws=wb.Sheets[sheetName];
   const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:true});
   if(!data.length) throw new Error(`A aba "${sheetName}" está vazia.`);
+
   const cols=detectColumns(data);
   const itemCol=cols.item>=0?cols.item:0;
+
+  // Primeira linha com item inteiro ("1", "2"...)
   let firstDataRowIdx=-1;
-  for(let r=0; r<data.length; r++){ if(/^\d+$/.test(String(data[r][itemCol]??'').trim())){ firstDataRowIdx=r; break; } }
+  for(let r=0; r<data.length; r++){
+    if(/^\d+$/.test(String(data[r][itemCol]??'').trim())){
+      firstDataRowIdx=r; break;
+    }
+  }
+
   const meta=extractMetaFromHeaders(data,firstDataRowIdx);
   const items=[], warnings=[];
+
   for(let r=0; r<data.length; r++){
     const row=data[r]||[];
     const itemStr=String(row[itemCol]??'').trim();
+
+    // REGRA: coleta apenas itens inteiros (1, 2, 3...) — não 1.1, 2.3
     if(!/^\d+$/.test(itemStr)) continue;
+
+    // Descrição
     let descricao='';
     if(cols.desc>=0) descricao=String(row[cols.desc]??'').trim();
     if(!descricao){
-      const lim=cols.vc>0?cols.vc:itemCol+12;
-      for(let c=itemCol+1; c<lim; c++){ const v=String(row[c]??'').trim(); if(v&&!isNum(row[c])){ descricao=v; break; } }
+      const lim=cols.vc>0?cols.vc:itemCol+15;
+      for(let c=itemCol+1; c<lim; c++){
+        const v=String(row[c]??'').trim();
+        if(v&&!isNum(row[c])){ descricao=v; break; }
+      }
     }
+
     const vc  =cols.vc  >=0?(Number(row[cols.vc]  )||0):0;
     const med =cols.med >=0?(Number(row[cols.med]) ||0):0;
     const acum=cols.acum>=0?(Number(row[cols.acum])||0):0;
     let saldo =cols.saldo>=0?(Number(row[cols.saldo])||0):0;
     if(!saldo&&vc>0) saldo=vc-acum;
+
     const p=vc>0?+(acum/vc*100).toFixed(2):0;
+
     if(!descricao) warnings.push(`Item ${itemStr}: descrição não encontrada`);
     if(!vc&&!acum) warnings.push(`Item ${itemStr}: valores zerados`);
-    items.push({ item:itemStr, descricao, valorContrato:+vc.toFixed(2), medicao:+med.toFixed(2), acumulado:+acum.toFixed(2), saldo:+saldo.toFixed(2), percentualExecutado:p });
+
+    items.push({
+      item: itemStr,
+      descricao,
+      valorContrato: +vc.toFixed(2),
+      medicao:       +med.toFixed(2),
+      acumulado:     +acum.toFixed(2),
+      saldo:         +saldo.toFixed(2),
+      percentualExecutado: p
+    });
   }
-  if(!items.length) throw new Error(`Nenhum item numérico encontrado na aba "${sheetName}".`);
-  const sumVC=items.reduce((a,i)=>a+i.valorContrato,0);
+
+  if(!items.length) throw new Error(`Nenhum item numérico inteiro encontrado na aba "${sheetName}".`);
+
+  const sumVC  =items.reduce((a,i)=>a+i.valorContrato,0);
   const sumAcum=items.reduce((a,i)=>a+i.acumulado,0);
   const vca=meta.valorContratoAditivo||sumVC;
   const acu=meta.acumuladoTotal>0?meta.acumuladoTotal:sumAcum;
-  // estaMedicao: valor do cabeçalho tem prioridade; fallback soma da coluna medicao dos itens
-  const estaMed = meta.estaMedicao > 0 ? meta.estaMedicao : items.reduce((a,i)=>a+i.medicao,0);
+  const estaMed=meta.estaMedicao>0?meta.estaMedicao:items.reduce((a,i)=>a+i.medicao,0);
+
   return {
-    nome:baseName(file.name), nomeProjeto:wb.Props?.Title||baseName(file.name)||'Nova obra',
-    medicaoAtual:sheetName, contratada:meta.contratada||'',
-    itens:items, warnings,
+    nome:baseName(file.name),
+    nomeProjeto:wb.Props?.Title||baseName(file.name)||'Nova obra',
+    medicaoAtual:sheetName,
+    contratada:meta.contratada||'',
+    itens:items,
+    warnings,
     resumo:{
-      total:sumVC, acumulado:sumAcum,
+      total:sumVC,
+      acumulado:sumAcum,
       percentual:vca>0?+(acu/vca*100).toFixed(2):0,
-      valorContratoAditivo:vca, acumuladoTotal:acu,
-      estaMedicao: +estaMed.toFixed(2)
+      valorContratoAditivo:vca,
+      acumuladoTotal:acu,
+      estaMedicao:+estaMed.toFixed(2)
     }
   };
 }
