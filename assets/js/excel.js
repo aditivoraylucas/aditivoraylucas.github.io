@@ -53,7 +53,10 @@ function detectColumns(data){
   const cols = { item: itemCol, desc:-1, vc:-1, med:-1, acum:-1, saldo:-1 };
   let vcPri = -1;
   if(headerRowIdx < 0) return cols;
-  const blockStart = Math.max(0, headerRowIdx - 4);
+
+  // Amplia janela para 10 linhas acima do cabeçalho e varre até coluna 30
+  // para cobrir planilhas com células mescladas em múltiplas linhas
+  const blockStart = Math.max(0, headerRowIdx - 10);
   const headerBlock = [];
   for(let r = blockStart; r <= headerRowIdx; r++){
     const row = data[r] || [];
@@ -61,7 +64,7 @@ function detectColumns(data){
     headerBlock.push(row);
   }
   for(const row of headerBlock){
-    for(let c = 0; c < row.length; c++){
+    for(let c = 0; c < Math.min(row.length, 30); c++){
       const t = norm(row[c]);
       if(!t || c === itemCol) continue;
       if(RE.desc.test(t)  && cols.desc  < 0) cols.desc  = c;
