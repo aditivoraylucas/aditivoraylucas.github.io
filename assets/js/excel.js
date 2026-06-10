@@ -132,42 +132,28 @@ function findValorContrato(rows){
   return candidates[0].v;
 }
 
-function findItemSentinelRow(rows){
-  const MARCADORES_TABELA = new Set(['ITEM','REF','CODIGO','SERVICOS','EXECUTADOS','UND']);
-  for(let r = 0; r < Math.min(80, rows.length); r++){
-    const row = rows[r] || [];
-    for(let c = 0; c < Math.min(10, row.length); c++){
-      const t = norm(row[c]).toUpperCase().slice(0, 10);
-      if(t === 'ITEM'){
-        const marcadoresNaLinha = row.slice(0, 15)
-          .map(cell => norm(cell).toUpperCase().slice(0, 10))
-          .filter(t => MARCADORES_TABELA.has(t));
-        if(marcadoresNaLinha.length >= 1) return r;
-      }
-    }
-  }
-  return -1;
-}
-
+/**
+ * Extrai o valor monetário de "Esta Medição" / "Medição Atual" do cabeçalho.
+ * Busca o rótulo e pega o primeiro número > 0 à direita ou abaixo.
+ */
 function findEstaMedicao(rows){
-  const RE_ROTULO = /esta[\s.]*medi[çc]|medi[çc][aã]o[\s.]*atual/i;
-  const itemSentinelRow = findItemSentinelRow(rows);
-  const limiteSeguro = itemSentinelRow >= 0 ? itemSentinelRow : Math.min(30, rows.length);
-
-  for(let r = 0; r < limiteSeguro; r++){
+  const RE = /esta[\s.]*medi|medi[çc][aã]o[\s.]*atual|medi[çc][aã]o[\s.]*n[°º]/i;
+  for(let r = 0; r < rows.length; r++){
     const row = rows[r] || [];
     for(let c = 0; c < row.length; c++){
       const cell = String(row[c] ?? '').trim();
-      if(!cell || !RE_ROTULO.test(cell)) continue;
-      for(let rr = r + 1; rr <= r + 4 && rr < limiteSeguro; rr++){
-        const v = Number(rows[rr]?.[c]); if(v > 1) return v;
+      if(!cell || !RE.test(cell)) continue;
+      // Tenta à direita na mesma linha
+      for(let cc = c + 1; cc < Math.min(c + 10, row.length); cc++){
+        const v = Number(row[cc]); if(v > 0) return v;
+      }
+      // Tenta linha abaixo
+      for(let rr = r + 1; rr <= r + 4 && rr < rows.length; rr++){
+        const v = Number(rows[rr]?.[c]); if(v > 0) return v;
         for(let cc = c - 1; cc <= c + 3; cc++){
           if(cc < 0) continue;
-          const v2 = Number(rows[rr]?.[cc]); if(v2 > 1) return v2;
+          const v2 = Number(rows[rr]?.[cc]); if(v2 > 0) return v2;
         }
-      }
-      for(let cc = c + 1; cc < Math.min(c + 10, row.length); cc++){
-        const v = Number(row[cc]); if(v > 1) return v;
       }
     }
   }
@@ -282,6 +268,7 @@ export async function readExcelFile(file){
   const sumAcum=items.reduce((a,i)=>a+i.acumulado,0);
   const vca=meta.valorContratoAditivo||sumVC;
   const acu=meta.acumuladoTotal>0?meta.acumuladoTotal:sumAcum;
+  // estaMedicao: valor do cabeçalho tem prioridade; fallback soma da coluna medicao dos itens
   const estaMed = meta.estaMedicao > 0 ? meta.estaMedicao : items.reduce((a,i)=>a+i.medicao,0);
   return {
     nome:baseName(file.name), nomeProjeto:wb.Props?.Title||baseName(file.name)||'Nova obra',

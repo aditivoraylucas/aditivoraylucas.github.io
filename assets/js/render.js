@@ -22,10 +22,16 @@ function calcDataFim(dataInicio, totalMeses){
   const totalMes   = mes - 1 + totalMeses;
   const fimAno     = ano + Math.floor(totalMes / 12);
   const fimMes     = (totalMes % 12) + 1;
+  // último dia do mês anterior ao fim
   const d = new Date(fimAno, fimMes - 1, 0);
   return d.toISOString().slice(0, 10);
 }
 
+/* ─────────────────────────────────────────────────────────
+   renderCurvaS
+   RECEBE dataInicio explicitamente para funcionar tanto no painel
+   do colaborador quanto no painel admin (onde currentObra() é null).
+───────────────────────────────────────────────────────── */
 export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData, dataInicio){
   const canvas=$(canvasId); if(!canvas) return prev;
   if(prev) prev.destroy();
@@ -46,10 +52,13 @@ export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData, data
     backgroundColor:'rgba(99,102,241,0.2)', borderColor:'#6366f1',
     borderWidth:1, borderRadius:3, barThickness:mobile?'flex':thickness, order:2
   }];
+
+  // dataInicio passado como parâmetro; fallback para currentObra (painel do colab)
   const di = dataInicio || currentObra()?.dataInicio;
   const timeline = (cronogramaData && di)
     ? buildCronogramaTimeline(di, cronogramaData)
     : null;
+
   let labels=itens.map(r=>String(r.item||''));
   if(timeline && timeline.length){
     const totalVC =itens.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
@@ -105,7 +114,7 @@ export function renderTable(){
   }).join('');
 }
 
-/* ── Dashboard do colaborador — ordem: Esta Medição | Valor CT/Aditivo | Acumulado Total | % Geral ── */
+/* ── Dashboard do colaborador (painel fixo) — mantém "Valor CT / Aditivo" ── */
 export function updateDashboard(){
   const o=currentObra();
   const vc     = Number(o?.resumo?.valorContratoAditivo)||state.rows.reduce((a,r)=>a+Number(r.valorContrato||0),0);
@@ -115,16 +124,17 @@ export function updateDashboard(){
   const LS = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
   const VS = 'font-size:.95rem;font-weight:700;margin-top:.2rem';
   if($('stats')) $('stats').innerHTML=
-    `<div class="stat-card"><span class="stat-label" style="${LS}">Esta Medição</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>
-     <div class="stat-card"><span class="stat-label" style="${LS}">Valor CT / Aditivo</span><span class="stat-value" style="${VS}">${money(vc)}</span></div>
+    `<div class="stat-card"><span class="stat-label" style="${LS}">Valor CT / Aditivo</span><span class="stat-value" style="${VS}">${money(vc)}</span></div>
      <div class="stat-card"><span class="stat-label" style="${LS}">Acumulado Total</span><span class="stat-value" style="${VS};color:var(--success)">${money(ac)}</span></div>
-     <div class="stat-card"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>`;
+     <div class="stat-card"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>
+     <div class="stat-card"><span class="stat-label" style="${LS}">Esta Medição</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>`;
   if($('countAll'))  $('countAll').textContent  = money(vc);
   if($('countDone')) $('countDone').textContent = money(ac);
   if($('countPct'))  $('countPct').textContent  = pct(p);
   if($('mainProjName'))       $('mainProjName').textContent      = o?.nomeProjeto||o?.nome||'-';
   if($('mainProjContratada')) $('mainProjContratada').textContent = o?.contratada||'-';
   if($('mainProjScope'))      $('mainProjScope').textContent      = o?.medicaoAtual||'-';
+  // passa dataInicio explicitamente
   state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser,o?.cronograma,o?.dataInicio);
 }
 
@@ -166,6 +176,7 @@ export function setImportFileFn(fn){ importFileFn = fn; }
 
 /* ── ADMIN ── */
 
+/* Painel fixo do admin — "Soma dos Contratos" (visão global de todas as obras) */
 export function renderAdminStats(){
   let tot=0,tvc=0,tac=0;
   Object.values(state.allUsers).forEach(u=>{
@@ -227,6 +238,7 @@ export function renderAdminSidebar(){
   const mob=$('adminColabSidebarMobile'); if(mob) mob.innerHTML=html;
 }
 
+/* Card de obra na listagem — mantém "CT/Aditivo" */
 export function adminObraCardHTML(obra){
   const it=Array.isArray(obra.itens)?obra.itens:[];
   const vc=Number(obra.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
@@ -324,6 +336,7 @@ export function renderAdminDetail(){
      </div>`;
   panel.innerHTML=html;
   requestAnimationFrame(()=>{
+    // passa dataInicio da obra explicitamente — currentObra() seria null aqui
     state.chartAdmin=renderCurvaS('adminCurvaS','adminCurvaSwrap',it,state.chartAdmin,obra.cronograma,obra.dataInicio);
   });
 }
