@@ -39,8 +39,6 @@ export async function importFile(replace=false){
         contratada:obj?.contratada||'', arquivoNome:file.name, origem:ext,
         medicaoAtual:obj?.medicaoAtual||'', itens:rows, resumo:obj?.resumo||{percentual:0} };
 
-      // Só preserva cronograma/dataInicio se estiver ATUALIZANDO a mesma obra (replace=true)
-      // Ao criar uma obra nova (replace=false) jamais copia dados de outra obra
       if(replace){
         const existente=currentObra();
         if(existente?.cronograma) obra.cronograma = existente.cronograma;
@@ -55,7 +53,6 @@ export async function importFile(replace=false){
   input.click();
 }
 
-/* ── Importar Cronograma Físico-Financeiro ── */
 export async function importCronograma(){
   const o=currentObra();
   if(!o){ showToast('⚠️ Selecione uma obra antes de importar o cronograma.',true); return; }
@@ -136,7 +133,6 @@ export function bindEvents(){
   const toggleThemeBtn=$('toggleTheme');
   if(toggleThemeBtn) toggleThemeBtn.onclick=()=>{
     document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';
-    // Passa dataInicio da obra atual para não perder o cronograma ao trocar o tema
     const o=currentObra();
     if(state.rows.length) state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser,o?.cronograma,o?.dataInicio);
   };
@@ -212,7 +208,10 @@ export function bindEvents(){
     });
     tbody.addEventListener('click',e=>{
       const b=e.target.closest('button[data-del]'); if(!b) return;
-      state.rows.splice(+b.dataset.del,1);
+      const idx=+b.dataset.del;
+      const desc=state.rows[idx]?.descricao||state.rows[idx]?.item||'este item';
+      if(!confirm(`Remover "${desc}" do índice de itens?`)) return;
+      state.rows.splice(idx,1);
       const o=currentObra(); if(o){ o.itens=state.rows; saveObra(o); }
       renderAll();
     });
