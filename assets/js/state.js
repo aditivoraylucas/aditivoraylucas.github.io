@@ -52,42 +52,74 @@ export function cleanup(adminSubs, allUsers){
  * Dado dataInicio (string 'YYYY-MM-DD') e o array cronograma da obra,
  * retorna array de { label, planejadoPct, planejadoValor, passado }.
  *
- * Fix: usa ano/mês local explícito para evitar drift de fuso horário.
- * Fix: passado inclui o mês atual (m <= mesesDecorridos + 1).
+ * REGRA DE LABEL:
+ *   m=1 → mês de início (offset 0)
+ *   m=2 → mês seguinte (offset 1)
+ *   ...
+ *   m=N → offset N-1
+ *
+ *   Exemplo: início mar/25, 18 meses
+ *     m=1  → mar/25   (offset 0)
+ *     m=18 → ago/26   ... ERRADO com (m-1)
+ *
+ *   FIX: slot do mês m ocupa o ESPAÇO entre (m-1) e m meses após o início.
+ *   Para exibir o mês correto usamos offset = m-1 mas contamos a partir do
+ *   próprio mês de início como posição 0, portanto:
+ *     slotBase0 = (iniMes - 1) + (m - 1)   → isso dá ago/26 para m=18, início=mar
+ *   O correto é o mês de encerramento do mês m, que é exatamente
+ *     slotBase0 = (iniMes - 1) + m          → set/26 para m=18 ✔
+ *   mas isso deslocaria o label do mês 1 para abril em vez de março.
+ *
+ *   Concluão: a convenção correta é manter o label como o mês de INÍCIO
+ *   de cada período, portanto m=1 → mar, m=18 → ago.
+ *   O que está errado é o TÉRMINO PREVISTO no painel, que deve ser
+ *   dataInicio + totalMeses (já corrigido em calcDataFim).
+ *   A curva em si exibe corretamente os 18 períodos mensais de mar/25 a ago/26.
+ *
+ *   PORÉM: o usuário diz que a curva mostra só 17 meses. Isso significa
+ *   que maxMes retorna 17 (o último item do array cronograma tem mes=17).
+ *   Causa: o cronograma salvo no Firestore está com 18 entradas mas
+ *   a última tem mes=18 e o loop for(m=1;m<=maxMes) funciona corretamente.
+ *   Portanto o problema é que cronograma.length=18 mas o LOOP usa maxMes
+ *   que é max(c.mes). Se o parser salvou mes 1..18 corretamente, maxMes=18
+ *   e o loop vai de 1 a 18 = 18 pontos. Se o parser perdeu o último,
+ *   maxMes=17 e o gráfico mostra 17 pontos.
+ *
+ *   FIX DEFINITIVO: usar cronograma.length como totalMeses em vez de maxMes,
+ *   garantindo sempre N pontos independente do valor de c.mes.
  */
 export function buildCronogramaTimeline(dataInicio, cronograma){
   if(!dataInicio || !Array.isArray(cronograma) || !cronograma.length) return [];
 
-  // Parseia a data de início como ano/mês LOCAL (sem converter para UTC)
-  const [iniAno, iniMes] = dataInicio.split('-').map(Number); // mes 1-based
+  const [iniAno, iniMes] = dataInicio.split('-').map(Number);
 
   const now     = new Date();
   const hojeAno = now.getFullYear();
-  const hojeMes = now.getMonth() + 1; // 1-based
+  const hojeMes = now.getMonth() + 1;
 
-  // Quantos meses se passaram desde o início até o mês atual (inclusive)
   const mesesDecorridos = Math.max(0,
     (hojeAno - iniAno) * 12 + (hojeMes - iniMes)
   );
 
-  const maxMes = Math.max(...cronograma.map(c => c.mes));
+  // USA cronograma.length para garantir N pontos mesmo se c.mes tiver gaps
+  const totalMeses = cronograma.length;
   const result = [];
 
-  for(let m = 1; m <= maxMes; m++){
-    // Calcula o mês/ano deste slot sem usar setMonth (evita overflow)
-    const totalMes = iniMes - 1 + (m - 1);       // 0-based offset
-    const slotAno  = iniAno + Math.floor(totalMes / 12);
-    const slotMes  = (totalMes % 12) + 1;          // 1-based
+  for(let m = 1; m <= totalMeses; m++){
+    const totalMesBase0 = (iniMes - 1) + (m - 1);    // offset 0-based do mês m
+    const slotAno  = iniAno + Math.floor(totalMesBase0 / 12);
+    const slotMes  = (totalMesBase0 % 12) + 1;        // 1-based
     const slotDate = new Date(slotAno, slotMes - 1, 1);
     const label    = slotDate.toLocaleDateString('pt-BR', { month:'short', year:'2-digit' });
 
-    const entry = cronograma.find(c => c.mes === m);
+    // Busca pelo índice (m-1) em vez de c.mes para não depender de numeração correta
+    const entry = cronograma[m - 1];
     result.push({
       mes: m,
       label,
       planejadoPct:   entry ? +Number(entry.planejadoPct).toFixed(2)   : 0,
       planejadoValor: entry ? +Number(entry.planejadoValor).toFixed(2) : 0,
-      passado: m <= mesesDecorridos + 1  // inclui mês atual
+      passado: m <= mesesDecorridos + 1
     });
   }
   return result;
