@@ -20,14 +20,15 @@ function fmtDate(str){
 /**
  * Calcula a data de término da obra.
  * REGRA: o DIA do término é sempre igual ao DIA do início.
- * Apenas o mês e o ano avançam conforme o total de meses do cronograma.
+ * Os meses são completos: início 10/06/2026 + 12 meses = 10/06/2027.
  */
 function calcDataFim(dataInicio, totalMeses){
   if(!dataInicio || !totalMeses) return null;
   const [ano, mes, dia] = dataInicio.split('-').map(Number);
-  const totalMes = mes - 1 + totalMeses;
-  const fimAno   = ano + Math.floor(totalMes / 12);
-  const fimMes   = (totalMes % 12) + 1;
+  // mes-1 converte para base-0; soma totalMeses completos (o mês do início não é consumido)
+  const mesBase0  = (mes - 1) + totalMeses;
+  const fimAno    = ano + Math.floor(mesBase0 / 12);
+  const fimMes    = (mesBase0 % 12) + 1;           // 1-based
   const ultimoDia = new Date(fimAno, fimMes, 0).getDate();
   const fimDia    = Math.min(dia, ultimoDia);
   return `${fimAno}-${String(fimMes).padStart(2,'0')}-${String(fimDia).padStart(2,'0')}`;
