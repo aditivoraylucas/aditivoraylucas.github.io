@@ -53,13 +53,20 @@ export function cleanup(adminSubs, allUsers){
  * retorna array de { label, planejadoPct, planejadoValor, passado }.
  *
  * REGRA DE LABEL (alinhado ao mês de término):
- *   O label de cada período m representa o MÊS DE ENCERRAMENTO daquele período.
- *   Usando offset = m (em vez de m-1), o último label sempre coincide com
- *   o mês do Término Previsto exibido no cabeçalho.
+ *   offset = m → label representa o mês de ENCERRAMENTO do período.
+ *   O último label sempre coincide com o mês do Término Previsto.
  *
  *   Exemplo: início 17/03/2025, 18 meses
- *     m=1  → abr/25  (encerra em abril)
- *     m=18 → set/26  (encerra em setembro = Término Previsto 17/09/2026) ✔
+ *     m=1  → abr/25  |  m=18 → set/26 (= Término 17/09/2026) ✔
+ *
+ * REGRA "HOJE" (passado):
+ *   Como os labels estão deslocados +1 em relação ao período real,
+ *   usamos m <= mesesDecorridos (sem +1) para que a linha Hoje
+ *   caia no label correto (mês atual).
+ *
+ *   Exemplo hoje = jun/26, início = mar/25:
+ *     mesesDecorridos = (2026-2025)*12 + (6-3) = 15
+ *     passado = m <= 15  → último passado é m=15, label = (3-1+15)%12+1 = 18%12+1 = 7 = jun ✔
  */
 export function buildCronogramaTimeline(dataInicio, cronograma){
   if(!dataInicio || !Array.isArray(cronograma) || !cronograma.length) return [];
@@ -78,8 +85,7 @@ export function buildCronogramaTimeline(dataInicio, cronograma){
   const result = [];
 
   for(let m = 1; m <= totalMeses; m++){
-    // offset = m: o label representa o mês de encerramento do período m
-    // assim o último label = mês do Término Previsto
+    // offset = m: label = mês de encerramento do período m
     const totalMesBase0 = (iniMes - 1) + m;
     const slotAno  = iniAno + Math.floor(totalMesBase0 / 12);
     const slotMes  = (totalMesBase0 % 12) + 1;
@@ -92,7 +98,8 @@ export function buildCronogramaTimeline(dataInicio, cronograma){
       label,
       planejadoPct:   entry ? +Number(entry.planejadoPct).toFixed(2)   : 0,
       planejadoValor: entry ? +Number(entry.planejadoValor).toFixed(2) : 0,
-      passado: m <= mesesDecorridos + 1
+      // sem +1: compensa o deslocamento de label para que "Hoje" caia no mês correto
+      passado: m <= mesesDecorridos
     });
   }
   return result;
