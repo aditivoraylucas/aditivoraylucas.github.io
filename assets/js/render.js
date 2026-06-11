@@ -25,26 +25,15 @@ function fmtDate(str){
 function calcDataFim(dataInicio, totalMeses){
   if(!dataInicio || !totalMeses) return null;
   const [ano, mes, dia] = dataInicio.split('-').map(Number);
-  // mes-1 converte para base-0; soma totalMeses completos (o mês do início não é consumido)
   const mesBase0  = (mes - 1) + totalMeses;
   const fimAno    = ano + Math.floor(mesBase0 / 12);
-  const fimMes    = (mesBase0 % 12) + 1;           // 1-based
+  const fimMes    = (mesBase0 % 12) + 1;
   const ultimoDia = new Date(fimAno, fimMes, 0).getDate();
   const fimDia    = Math.min(dia, ultimoDia);
   return `${fimAno}-${String(fimMes).padStart(2,'0')}-${String(fimDia).padStart(2,'0')}`;
 }
 
-/* ════════════════════════════════════════════════════════════
-   renderCurvaS
-   - SEM cronograma  → gráfico de barras simples (inalterado)
-   - COM cronograma  → Curva S aprimorada:
-       • Planejado acumulado (linha âmbar)
-       • Executado real ponderado (linha verde)
-       • Área de desvio colorida (verde=adiantado / vermelho=atrasado)
-       • Linha vertical "Hoje" com anotação
-       • Tooltip rico: Planejado / Executado / Desvio
-   ════════════════════════════════════════════════════════════ */
-export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData, dataInicio){
+export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData, dataInicio, dataEmissao){
   const canvas=$(canvasId); if(!canvas) return prev;
   if(prev) prev.destroy();
 
@@ -55,9 +44,9 @@ export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData, data
   const wrap   = $(wrapId);
   if(wrap){ wrap.style.overflowX='hidden'; canvas.style.minWidth=''; canvas.style.width='100%'; }
 
-  /* ── Modo SEM cronograma: barras simples (não muda) ── */
   const di       = dataInicio || currentObra()?.dataInicio;
-  const timeline = (cronogramaData && di) ? buildCronogramaTimeline(di, cronogramaData) : null;
+  // Passa dataEmissao para buildCronogramaTimeline: define o mês de referência do "Hoje"
+  const timeline = (cronogramaData && di) ? buildCronogramaTimeline(di, cronogramaData, dataEmissao) : null;
 
   if(!timeline || !timeline.length){
     const n         = itens.length;
@@ -88,24 +77,13 @@ export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData, data
     });
   }
 
-  /* ── Modo COM cronograma: Curva S aprimorada ── */
   const totalVC  = itens.reduce((a,r)=>a+(Number(r.valorContrato)||0),0);
   const totalAcu = itens.reduce((a,r)=>a+(Number(r.acumulado)||0),0);
   const realPctGeral = totalVC > 0 ? +(totalAcu/totalVC*100).toFixed(2) : 0;
 
-  // Planejado acumulado
   let acumPlan = 0;
   const planData = timeline.map(t=>{ acumPlan += t.planejadoPct; return +Math.min(acumPlan,100).toFixed(2); });
 
-  // Executado real ponderado: distribui realPctGeral proporcional ao planejado de cada mês
-  const planTotal = planData[planData.length-1] || 100;
-  const realData  = timeline.map((t,i)=>{
-    if(!t.passado) return null;
-    const pesoAcum = planTotal > 0 ? planData[i] / planTotal : (i+1)/timeline.length;
-    return +Math.min(realPctGeral * (pesoAcum > 0 ? 1 : 0) + realPctGeral*(1-pesoAcum)*0, 100).toFixed(2);
-  });
-
-  // Versão correta: distribui linearmente dentro dos meses passados, chegando em realPctGeral no último mês passado
   const passadoCount = timeline.filter(t=>t.passado).length;
   const realDataFinal = timeline.map((t,i)=>{
     if(!t.passado) return null;
@@ -113,10 +91,8 @@ export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData, data
     return +Math.min(realPctGeral * fracaoMes, 100).toFixed(2);
   });
 
-  // Índice do mês atual (último "passado")
   const hojeIdx = timeline.reduce((last,t,i)=> t.passado ? i : last, -1);
 
-  // Área de desvio
   const desvioData = timeline.map((t,i)=>{
     if(realDataFinal[i] === null) return null;
     return +( realDataFinal[i] - planData[i] ).toFixed(2);
@@ -124,7 +100,6 @@ export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData, data
 
   const labels = timeline.map(t=>t.label);
 
-  // Plugin: linha vertical "Hoje"
   const pluginHoje = {
     id: 'linhaHoje',
     afterDraw(chart){
@@ -177,7 +152,6 @@ export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData, data
   const desvioColor  = desvioHoje >= 0
     ? (dark ? 'rgba(52,211,153,0.18)' : 'rgba(16,185,129,0.15)')
     : (dark ? 'rgba(248,113,113,0.18)' : 'rgba(239,68,68,0.12)');
-  const desvioBorder = desvioHoje >= 0 ? 'rgba(16,185,129,0)' : 'rgba(239,68,68,0)';
 
   const datasets = [
     {
@@ -297,7 +271,6 @@ export function renderTable(){
   }).join('');
 }
 
-/* ── Painel de Cronograma no aside ── */
 export function renderCronogramaBox(){
   const box=$('cronogramaBox'); if(!box) return;
   const o=currentObra();
@@ -326,6 +299,7 @@ export function renderCronogramaBox(){
   if(removeBtn) removeBtn.onclick=async()=>{
     if(!confirm('Remover o cronograma desta obra?')) return;
     delete o.cronograma;
+    delete o.dataEmissao;
     await saveObra(o);
     renderCronogramaBox();
     updateDashboard();
@@ -335,10 +309,8 @@ export function renderCronogramaBox(){
 
 import { showToast } from './state.js';
 
-/* ---- Dashboard do colaborador (painel fixo) ---- */
 export function updateDashboard(){
   const o=currentObra();
-  // Usa o.itens (salvo no Firestore) para a curva S — mesma fonte do admin
   const itensParaCurva = Array.isArray(o?.itens) && o.itens.length > 0 ? o.itens : state.rows;
   const vc     = Number(o?.resumo?.valorContratoAditivo)||state.rows.reduce((a,r)=>a+Number(r.valorContrato||0),0);
   const ac     = Number(o?.resumo?.acumuladoTotal)     ||state.rows.reduce((a,r)=>a+Number(r.acumulado||0),0);
@@ -357,7 +329,8 @@ export function updateDashboard(){
   if($('mainProjName'))       $('mainProjName').textContent      = o?.nomeProjeto||o?.nome||'-';
   if($('mainProjContratada')) $('mainProjContratada').textContent = o?.contratada||'-';
   if($('mainProjScope'))      $('mainProjScope').textContent      = o?.medicaoAtual||'-';
-  state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',itensParaCurva,state.chartUser,o?.cronograma,o?.dataInicio);
+  // Passa dataEmissao: define o mês de referência do "Hoje" na Curva S
+  state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',itensParaCurva,state.chartUser,o?.cronograma,o?.dataInicio,o?.dataEmissao);
 }
 
 export function renderObrasBox(){
@@ -558,7 +531,8 @@ export function renderAdminDetail(){
      </div>`;
   panel.innerHTML=html;
   requestAnimationFrame(()=>{
-    state.chartAdmin=renderCurvaS('adminCurvaS','adminCurvaSwrap',it,state.chartAdmin,obra.cronograma,obra.dataInicio);
+    // Passa dataEmissao da obra para a Curva S do admin
+    state.chartAdmin=renderCurvaS('adminCurvaS','adminCurvaSwrap',it,state.chartAdmin,obra.cronograma,obra.dataInicio,obra.dataEmissao);
   });
 }
 
