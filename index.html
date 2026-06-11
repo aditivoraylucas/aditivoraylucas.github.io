@@ -38,12 +38,12 @@
         </svg>
         <div>
           <h2 style="font-size:1.5rem;font-weight:800">Cronograma PRO</h2>
-          <p style="color:var(--text-muted);font-size:.875rem">Gestão de obras e medições</p>
+          <p style="color:var(--text-muted);font-size:.875rem">Gest&#227;o de obras e medi&#231;&#245;es</p>
         </div>
       </div>
       <form id="loginForm" style="display:flex;flex-direction:column;gap:1rem">
         <div class="form-group"><label for="loginEmail">E-mail</label><input id="loginEmail" type="email" class="form-control" placeholder="seu@email.com" required autocomplete="email"/></div>
-        <div class="form-group"><label for="loginSenha">Senha</label><input id="loginSenha" type="password" class="form-control" placeholder="••••••••" required autocomplete="current-password"/></div>
+        <div class="form-group"><label for="loginSenha">Senha</label><input id="loginSenha" type="password" class="form-control" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;" required autocomplete="current-password"/></div>
         <div id="loginError" style="display:none;color:var(--danger);font-size:.8rem;background:rgba(239,68,68,.08);padding:.6rem .875rem;border-radius:var(--radius-sm)"></div>
         <button id="loginBtn" type="submit" class="btn btn-primary" style="width:100%;margin-top:.25rem">Entrar</button>
       </form>
@@ -56,7 +56,7 @@
   <div class="app-shell">
     <header class="app-topbar">
       <div class="brand">
-        <button id="menuBtn" class="menu-btn" aria-label="Menu">☰</button>
+        <button id="menuBtn" class="menu-btn" aria-label="Menu">&#9776;</button>
         <svg width="38" height="38" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="bgU" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
@@ -75,11 +75,11 @@
           <line x1="10" y1="54" x2="54" y2="54" stroke="url(#goldU)" stroke-width="2.5" stroke-linecap="round"/>
           <text x="32" y="46" text-anchor="middle" font-family="Georgia,serif" font-weight="700" font-size="26" letter-spacing="2" fill="url(#goldU)">RA</text>
         </svg>
-        <div class="brand-text"><h1>Cronograma PRO</h1><p>Gestão de Obras</p></div>
+        <div class="brand-text"><h1>Cronograma PRO</h1><p>Gest&#227;o de Obras</p></div>
       </div>
       <div class="header-actions">
-        <span class="user-chip">👤 <span id="userNameDisplay">—</span></span>
-        <button id="toggleTheme" class="btn btn-sec" style="padding:.5rem .75rem">🌙</button>
+        <span class="user-chip">&#128100; <span id="userNameDisplay">&#8212;</span></span>
+        <button id="toggleTheme" class="btn btn-sec" style="padding:.5rem .75rem">&#127769;</button>
         <button id="logoutBtnUser" class="btn btn-sec" style="padding:.5rem .75rem">Sair</button>
       </div>
     </header>
@@ -88,26 +88,26 @@
 
       <!-- OBRAS -->
       <div class="panel" style="padding:1rem">
-        <div class="section-title" style="margin-bottom:.75rem">📁 Obras</div>
+        <div class="section-title" style="margin-bottom:.75rem">&#128193; Obras</div>
         <div id="obrasBox"></div>
-        <button id="addObraBtn" class="btn btn-primary" style="width:100%;margin-top:.75rem">️ Nova Obra</button>
+        <button id="addObraBtn" class="btn btn-primary" style="width:100%;margin-top:.75rem">&#65039; Nova Obra</button>
       </div>
 
       <!-- CRONOGRAMA -->
       <div class="panel" style="padding:1rem">
-        <div class="section-title" style="margin-bottom:.75rem">📅 Cronograma</div>
+        <div class="section-title" style="margin-bottom:.75rem">&#128197; Cronograma</div>
         <div id="cronogramaBox"></div>
-        <button id="loadCronograma" class="btn btn-primary" style="width:100%;margin-top:.75rem">📅 Importar Cronograma</button>
+        <button id="loadCronograma" class="btn btn-primary" style="width:100%;margin-top:.75rem">&#128197; Importar Cronograma</button>
       </div>
 
-      <!-- AÇÕES -->
+      <!-- A&#199;&#213;ES -->
       <div class="panel" style="padding:1rem">
-        <div class="section-title">🔧 Ações</div>
+        <div class="section-title">&#128295; A&#231;&#245;es</div>
         <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.5rem">
-          <button id="loadFile" class="btn btn-sec" style="width:100%">📂 Importar Excel / JSON</button>
-          <button id="exportCsv" class="btn btn-sec" style="width:100%">⬇️ Exportar CSV</button>
-          <button id="saveJson" class="btn btn-sec" style="width:100%">💾 Salvar JSON</button>
-          <button id="fillSample" class="btn btn-danger" style="width:100%">🗑 Limpar itens</button>
+          <button id="loadFile" class="btn btn-sec" style="width:100%">&#128194; Importar Excel / JSON</button>
+          <button id="exportCsv" class="btn btn-sec" style="width:100%">&#11015;&#65039; Exportar CSV</button>
+          <button id="saveJson" class="btn btn-sec" style="width:100%">&#128190; Salvar JSON</button>
+          <button id="fillSample" class="btn btn-danger" style="width:100%">&#128465; Limpar itens</button>
         </div>
       </div>
 
@@ -119,26 +119,26 @@
     <main class="app-main">
       <div class="proj-banner" id="projBanner">
         <div class="proj-banner-item">
-          <span class="lbl">🏗️ Projeto</span>
-          <span class="val" id="mainProjName">—</span>
+          <span class="lbl">&#127959;&#65039; Projeto</span>
+          <span class="val" id="mainProjName">&#8212;</span>
         </div>
         <div class="proj-banner-sep"></div>
         <div class="proj-banner-item">
           <span class="lbl">Contratada</span>
-          <span class="val" id="mainProjContratada">—</span>
+          <span class="val" id="mainProjContratada">&#8212;</span>
         </div>
         <div class="proj-banner-sep"></div>
         <div class="proj-banner-item">
-          <span class="lbl">Medição atual</span>
-          <span class="val" id="mainProjScope">—</span>
+          <span class="lbl">Medi&#231;&#227;o atual</span>
+          <span class="val" id="mainProjScope">&#8212;</span>
         </div>
       </div>
 
-      <!-- Painel: Data de Início do Contrato -->
+      <!-- Painel: DATA DE IN&#205;CIO DA OBRA -->
       <div class="panel" style="margin-bottom:1.25rem">
         <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
           <div class="form-group" style="margin:0;flex:1;min-width:200px">
-            <label style="font-size:.8rem;font-weight:600;color:var(--text-muted)">📅 Data de Início do Contrato</label>
+            <label style="font-size:.8rem;font-weight:600;color:var(--text-muted)">&#128197; DATA DE IN&#205;CIO DA OBRA</label>
             <input id="projDataInicio" type="date" class="form-control" style="max-width:220px"/>
           </div>
           <div id="cronoStatus" style="font-size:.8rem;color:var(--text-muted);padding-top:.25rem"></div>
@@ -148,19 +148,19 @@
       <div class="stats-grid" id="stats"></div>
 
       <div class="panel" style="margin-bottom:1.25rem">
-        <h3 style="margin-bottom:1rem" id="sCurveTitle">Curva S — Progresso Físico</h3>
+        <h3 style="margin-bottom:1rem" id="sCurveTitle">Curva S &#8212; Progresso F&#237;sico</h3>
         <div class="chart-scroll-wrap" id="sCurveScrollWrap">
           <div class="chart-container"><canvas id="sCurveChart"></canvas></div>
         </div>
       </div>
 
       <div class="panel" style="margin-bottom:1.25rem">
-        <h3 style="margin-bottom:1rem">➕ Nova atividade</h3>
+        <h3 style="margin-bottom:1rem">&#10133; Nova atividade</h3>
         <div class="add-form-grid">
           <div class="form-group"><label>Item</label><input id="fItem" class="form-control" placeholder="ex: 1"/></div>
-          <div class="form-group" style="grid-column:span 2"><label>Descrição</label><input id="fName" class="form-control" placeholder="Descrição do serviço"/></div>
+          <div class="form-group" style="grid-column:span 2"><label>Descri&#231;&#227;o</label><input id="fName" class="form-control" placeholder="Descri&#231;&#227;o do servi&#231;o"/></div>
           <div class="form-group"><label>Valor Contrato</label><input id="fValorContrato" class="form-control" placeholder="0,00"/></div>
-          <div class="form-group"><label>Medição</label><input id="fMedicao" class="form-control" placeholder="0,00"/></div>
+          <div class="form-group"><label>Medi&#231;&#227;o</label><input id="fMedicao" class="form-control" placeholder="0,00"/></div>
           <div class="form-group"><label>Acumulado</label><input id="fAcumulado" class="form-control" placeholder="0,00"/></div>
           <div class="form-group"><label>Saldo</label><input id="fSaldo" class="form-control" readonly style="background:var(--bg)"/></div>
           <div class="form-group"><label>% Exec.</label><input id="fPct" class="form-control" readonly style="background:var(--bg)"/></div>
@@ -169,19 +169,19 @@
       </div>
 
       <div class="panel">
-        <h3 style="margin-bottom:1rem">📋 Índice de Itens</h3>
+        <h3 style="margin-bottom:1rem">&#128203; &#205;ndice de Itens</h3>
         <div class="table-container">
           <table>
             <thead>
               <tr>
                 <th data-label="ITEM" data-full="Item"></th>
-                <th data-label="DESCRIÇÃO" data-full="Descrição"></th>
+                <th data-label="DESCRI&#199;&#195;O" data-full="Descri&#231;&#227;o"></th>
                 <th style="text-align:right" data-label="VALOR CT" data-full="Valor Contrato"></th>
-                <th style="text-align:right" data-label="MED" data-full="Medição"></th>
+                <th style="text-align:right" data-label="MED" data-full="Medi&#231;&#227;o"></th>
                 <th style="text-align:right" data-label="ACUMUL" data-full="Acumulado"></th>
                 <th style="text-align:right" data-label="SALDO" data-full="Saldo"></th>
                 <th style="text-align:right" data-label="%" data-full="% Exec."></th>
-                <th style="text-align:right" data-label="AÇÃO" data-full="Ação"></th>
+                <th style="text-align:right" data-label="A&#199;&#195;O" data-full="A&#231;&#227;o"></th>
               </tr>
             </thead>
             <tbody id="tbody"></tbody>
@@ -190,7 +190,7 @@
       </div>
     </main>
   </div>
-  <button id="btnTopo" class="btn btn-primary btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</button>
+  <button id="btnTopo" class="btn btn-primary btnTopo" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8593;</button>
 </div>
 
 <!-- ADMIN -->
@@ -198,7 +198,7 @@
   <div class="app-shell">
     <header class="app-topbar">
       <div class="brand">
-        <button id="menuBtnAdmin" class="menu-btn" aria-label="Menu Admin">☰</button>
+        <button id="menuBtnAdmin" class="menu-btn" aria-label="Menu Admin">&#9776;</button>
         <svg width="38" height="38" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="bgA" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
@@ -220,13 +220,13 @@
         <div class="brand-text"><h1>Cronograma PRO</h1><p>Painel Administrativo</p></div>
       </div>
       <div class="header-actions">
-        <button id="adminToggleColab" class="btn btn-sec">👥 Colaboradores</button>
+        <button id="adminToggleColab" class="btn btn-sec">&#128101; Colaboradores</button>
         <button id="logoutBtnAdmin" class="btn btn-sec" style="padding:.5rem .75rem">Sair</button>
       </div>
     </header>
 
     <aside class="app-aside" id="adminAside">
-      <div class="section-title" style="padding:.25rem .5rem">👥 Colaboradores</div>
+      <div class="section-title" style="padding:.25rem .5rem">&#128101; Colaboradores</div>
       <div id="adminColabSidebar"></div>
     </aside>
 
@@ -234,7 +234,7 @@
       <div class="stats-grid" id="adminStats" style="margin-bottom:1.5rem"></div>
 
       <div class="admin-colab-mobile-panel">
-        <div class="section-title" style="margin-bottom:.5rem">👥 Colaboradores</div>
+        <div class="section-title" style="margin-bottom:.5rem">&#128101; Colaboradores</div>
         <div id="adminColabSidebarMobile"></div>
       </div>
 
@@ -248,7 +248,7 @@
           <form id="addColabForm" style="display:flex;flex-direction:column;gap:.875rem;max-width:400px">
             <div class="form-group"><label>Nome</label><input id="colabNome" class="form-control" placeholder="Nome completo" required/></div>
             <div class="form-group"><label>E-mail</label><input id="colabEmail" class="form-control" type="email" placeholder="email@exemplo.com" required/></div>
-            <div class="form-group"><label>Senha inicial</label><input id="colabSenha" class="form-control" type="password" placeholder="Mínimo 6 caracteres" required minlength="6"/></div>
+            <div class="form-group"><label>Senha inicial</label><input id="colabSenha" class="form-control" type="password" placeholder="M&#237;nimo 6 caracteres" required minlength="6"/></div>
             <div id="colabMsgError" style="display:none;color:var(--danger);font-size:.8rem;background:rgba(239,68,68,.08);padding:.5rem .75rem;border-radius:var(--radius-sm)"></div>
             <button id="addColabBtn" type="submit" class="btn btn-primary" style="align-self:flex-start">Cadastrar colaborador</button>
           </form>
