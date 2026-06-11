@@ -10,6 +10,47 @@ export function parseCronogramaXLSX(workbook){
   const ws = workbook.Sheets[sheetName];
   const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
+  // --- Extrai "Data de emissão" do cabeçalho da planilha
+  // Procura nas primeiras 20 linhas por uma célula com "data de emissão" (ou "emissao")
+  // e lê a data na mesma célula ou na célula seguinte da linha (suporta mesclada ou não)
+  let dataEmissao = null;
+  const reEmissao = /data\s*de\s*emiss[aã]o/i;
+  const reData    = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/;
+  outer:
+  for(let ri = 0; ri < Math.min(20, raw.length); ri++){
+    const row = raw[ri];
+    for(let ci = 0; ci < row.length; ci++){
+      const cell = String(row[ci]);
+      if(reEmissao.test(cell)){
+        // Tenta extrair a data da mesma célula
+        let m = cell.match(reData);
+        if(m){
+          dataEmissao = _parseDataBR(m[1], m[2], m[3]);
+          break outer;
+        }
+        // Tenta nas células seguintes da mesma linha
+        for(let ci2 = ci + 1; ci2 < Math.min(ci + 5, row.length); ci2++){
+          const c2 = String(row[ci2]);
+          m = c2.match(reData);
+          if(m){ dataEmissao = _parseDataBR(m[1], m[2], m[3]); break outer; }
+          // Pode vir como número serial do Excel
+          const num = Number(row[ci2]);
+          if(!isNaN(num) && num > 40000 && num < 60000){
+            dataEmissao = _excelSerialToDate(num);
+            break outer;
+          }
+        }
+        break outer;
+      }
+    }
+  }
+
+  // Fallback: usa mês/ano atual
+  if(!dataEmissao){
+    const hoje = new Date();
+    dataEmissao = { mes: hoje.getMonth() + 1, ano: hoje.getFullYear() };
+  }
+
   // --- Localiza linha de cabeçalho dos meses (contém pelo menos 4 células numéricas 1..N)
   let mesHeaderRowIdx = -1;
   let mesColMap = {}; // mes (1..N) => índice da coluna de '%'
@@ -40,13 +81,11 @@ export function parseCronogramaXLSX(workbook){
   }
 
   // --- Lê itens: linhas após mesHeaderRow+1 (pula linha de %/R$)
-  // Linha de %/R$ fica logo abaixo do mesHeader
   const dataStartRow = mesHeaderRowIdx + 2;
   const itens = [];
   for(let ri = dataStartRow; ri < raw.length; ri++){
     const row = raw[ri];
     const itemVal = row[itemCol];
-    // Para quando encontrar TOTAL ou linha vazia
     if(String(itemVal).toLowerCase().includes('total')) break;
     if(itemVal === '' || itemVal === null || itemVal === undefined) continue;
     const numItem = Number(itemVal);
@@ -54,7 +93,7 @@ export function parseCronogramaXLSX(workbook){
 
     const mesesItem = meses.map(m => {
       const pctCol = mesColMap[m];
-      const valCol = pctCol + 1; // coluna R$ é sempre a seguinte à %
+      const valCol = pctCol + 1;
       const p = Number(row[pctCol]) || 0;
       const v = Number(row[valCol]) || 0;
       return { mes: m, pct: p, valor: v };
@@ -69,35 +108,26 @@ export function parseCronogramaXLSX(workbook){
 
   if(!itens.length) throw new Error('Nenhum item encontrado na planilha de cronograma.');
 
-  // --- Agrega por mês: soma % ponderada pelo valor total e soma valor
-  // Para % total do mês: usamos a linha TOTAL SIMPLES da planilha se existir,
-  // senão recalculamos somando valores de cada item.
+  // --- Agrega por mês
   const porMes = {};
   meses.forEach(m => { porMes[m] = { planejadoPct: 0, planejadoValor: 0 }; });
 
-  // Tenta ler linha TOTAL SIMPLES
   let totalRow = null;
   for(let ri = dataStartRow; ri < raw.length; ri++){
     const row = raw[ri];
     const cell = String(row[itemCol]).toLowerCase() + ' ' + String(row[itemCol+1]||'').toLowerCase();
-    if(cell.includes('total') && cell.includes('simples')){
-      totalRow = row; break;
-    }
-    // fallback: linha com 'TOTAL' e 'SIMPLES' em qualquer célula
-    if(row.some(c => String(c).toLowerCase().includes('simples'))){
-      totalRow = row; break;
-    }
+    if(cell.includes('total') && cell.includes('simples')){ totalRow = row; break; }
+    if(row.some(c => String(c).toLowerCase().includes('simples'))){ totalRow = row; break; }
   }
 
   if(totalRow){
     meses.forEach(m => {
       const pctCol = mesColMap[m];
       const valCol = pctCol + 1;
-      porMes[m].planejadoPct   = +(Number(totalRow[pctCol]) * 100).toFixed(4); // vem como 0..1
+      porMes[m].planejadoPct   = +(Number(totalRow[pctCol]) * 100).toFixed(4);
       porMes[m].planejadoValor = Number(totalRow[valCol]) || 0;
     });
   } else {
-    // fallback: soma valores dos itens
     itens.forEach(it => {
       it.meses.forEach(({ mes, valor }) => { porMes[mes].planejadoValor += valor; });
     });
@@ -109,12 +139,24 @@ export function parseCronogramaXLSX(workbook){
     });
   }
 
-  // --- Monta array final
   const cronograma = meses.map(m => ({
     mes: m,
     planejadoPct:   porMes[m].planejadoPct,
     planejadoValor: porMes[m].planejadoValor
   }));
 
-  return { cronograma, totalMeses: meses.length, itens };
+  return { cronograma, totalMeses: meses.length, itens, dataEmissao };
+}
+
+// --- Helpers
+function _parseDataBR(d, m, a){
+  let ano = Number(a);
+  if(ano < 100) ano += ano < 50 ? 2000 : 1900;
+  return { dia: Number(d), mes: Number(m), ano };
+}
+
+function _excelSerialToDate(serial){
+  // Excel epoch: 1 jan 1900 = serial 1 (com bug do ano bissexto)
+  const d = new Date((serial - 25569) * 86400 * 1000);
+  return { dia: d.getUTCDate(), mes: d.getUTCMonth() + 1, ano: d.getUTCFullYear() };
 }
