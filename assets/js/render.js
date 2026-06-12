@@ -45,7 +45,6 @@ export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData, data
   if(wrap){ wrap.style.overflowX='hidden'; canvas.style.minWidth=''; canvas.style.width='100%'; }
 
   const di       = dataInicio || currentObra()?.dataInicio;
-  // Passa dataEmissao para buildCronogramaTimeline: define o mês de referência do "Hoje"
   const timeline = (cronogramaData && di) ? buildCronogramaTimeline(di, cronogramaData, dataEmissao) : null;
 
   if(!timeline || !timeline.length){
@@ -271,6 +270,7 @@ export function renderTable(){
   }).join('');
 }
 
+/* ── Cronograma do Contrato (Curva S 1) ── */
 export function renderCronogramaBox(){
   const box=$('cronogramaBox'); if(!box) return;
   const o=currentObra();
@@ -307,6 +307,43 @@ export function renderCronogramaBox(){
   };
 }
 
+/* ── Cronograma de Aditivo (Curva S 2) ── */
+export function renderCronogramaAditivoBox(){
+  const box=$('cronogramaAditivoBox'); if(!box) return;
+  const o=currentObra();
+  if(!o){
+    box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem">Selecione uma obra para gerenciar o cronograma de aditivo.</p>';
+    return;
+  }
+  const temAditivo = Array.isArray(o.cronogramaAditivo) && o.cronogramaAditivo.length > 0;
+  const totalMeses = temAditivo ? o.cronogramaAditivo.length : 0;
+  const dataFimStr = (temAditivo && o.dataInicio)
+    ? fmtDate(calcDataFim(o.dataInicio, totalMeses))
+    : null;
+
+  if(temAditivo){
+    box.innerHTML=
+      `<div style="display:flex;flex-direction:column;gap:.35rem">
+         <div style="font-size:.8rem;color:var(--text-muted)">📋 <strong style="color:var(--text)">${totalMeses} meses</strong> importados</div>
+         ${dataFimStr?`<div style="font-size:.75rem;color:var(--text-muted)">🏁 Término do aditivo: <strong>${dataFimStr}</strong></div>`:''}
+       </div>
+       <button id="removeCronogramaAditivoBtn" class="btn btn-danger" style="width:100%;margin-top:.6rem;font-size:.8rem">🗑 Remover Aditivo</button>`;
+  } else {
+    box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem">Nenhum cronograma de aditivo importado.</p>';
+  }
+
+  const removeBtn=$('removeCronogramaAditivoBtn');
+  if(removeBtn) removeBtn.onclick=async()=>{
+    if(!confirm('Remover o cronograma de aditivo desta obra?')) return;
+    delete o.cronogramaAditivo;
+    delete o.dataEmissaoAditivo;
+    await saveObra(o);
+    renderCronogramaAditivoBox();
+    updateDashboard();
+    showToast('✅ Cronograma de aditivo removido.');
+  };
+}
+
 import { showToast } from './state.js';
 
 export function updateDashboard(){
@@ -329,8 +366,27 @@ export function updateDashboard(){
   if($('mainProjName'))       $('mainProjName').textContent      = o?.nomeProjeto||o?.nome||'-';
   if($('mainProjContratada')) $('mainProjContratada').textContent = o?.contratada||'-';
   if($('mainProjScope'))      $('mainProjScope').textContent      = o?.medicaoAtual||'-';
-  // Passa dataEmissao: define o mês de referência do "Hoje" na Curva S
-  state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',itensParaCurva,state.chartUser,o?.cronograma,o?.dataInicio,o?.dataEmissao);
+
+  /* Curva S 1 — Contrato oficial (independente, nunca alterada pelo aditivo) */
+  state.chartUser = renderCurvaS(
+    'sCurveChart', 'sCurveScrollWrap',
+    itensParaCurva, state.chartUser,
+    o?.cronograma, o?.dataInicio, o?.dataEmissao
+  );
+
+  /* Curva S 2 — Cronograma de Aditivo (alimentada por cronogramaAditivo) */
+  const temAditivo = Array.isArray(o?.cronogramaAditivo) && o.cronogramaAditivo.length > 0;
+  const panelAditivo = $('sCurveAditivoPanel');
+  if(panelAditivo) panelAditivo.style.display = temAditivo ? '' : 'none';
+  if(temAditivo){
+    state.chartUser2 = renderCurvaS(
+      'sCurveAditivoChart', 'sCurveAditivoScrollWrap',
+      itensParaCurva, state.chartUser2,
+      o.cronogramaAditivo, o?.dataInicio, o?.dataEmissaoAditivo
+    );
+  } else {
+    if(state.chartUser2){ state.chartUser2.destroy(); state.chartUser2 = null; }
+  }
 }
 
 export function renderObrasBox(){
@@ -338,6 +394,7 @@ export function renderObrasBox(){
   if(!state.obras.length){
     box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem">Nenhuma obra cadastrada.</p>';
     renderCronogramaBox();
+    renderCronogramaAditivoBox();
     return;
   }
   box.innerHTML=
@@ -365,6 +422,7 @@ export function renderObrasBox(){
     renderAll();
   };
   renderCronogramaBox();
+  renderCronogramaAditivoBox();
 }
 
 export function renderAll(){ renderObrasBox(); renderTable(); updateDashboard(); }
@@ -441,10 +499,11 @@ export function adminObraCardHTML(obra){
   const p=calcPctGeral(obra.resumo,it);
   const temCrono=Array.isArray(obra.cronograma)&&obra.cronograma.length>0;
   const temData=!!obra.dataInicio;
+  const temAditivo=Array.isArray(obra.cronogramaAditivo)&&obra.cronogramaAditivo.length>0;
   return `<div class="obra-card" style="cursor:pointer" onclick="adminSelectObra('${obra.id}')">
     <div class="obra-card-header">
       <div><div class="obra-card-title">${esc(obra.nome||'Sem nome')}</div>
-      <div class="obra-card-sub">${it.length} itens | Aba: ${esc(obra.medicaoAtual||'-')}${temCrono&&temData?' | 📅 Cronograma':''}</div></div>
+      <div class="obra-card-sub">${it.length} itens | Aba: ${esc(obra.medicaoAtual||'-')}${temCrono&&temData?' | 📅 Cronograma':''}${temAditivo?' | 📋 Aditivo':''}</div></div>
       <div class="obra-card-pct">${pct(p)}</div></div>
     <div class="obra-progress-bar"><div class="obra-progress-fill" style="width:${Math.min(100,p)}%"></div></div>
     <div class="obra-card-footer">
@@ -483,9 +542,18 @@ export function renderAdminDetail(){
   const dataFimISO     = calcDataFim(obra.dataInicio, totalMeses);
   const dataFimStr     = dataFimISO ? fmtDate(dataFimISO) : '-';
   const temCrono       = Array.isArray(obra.cronograma)&&obra.cronograma.length>0;
+  const temAditivo     = Array.isArray(obra.cronogramaAditivo)&&obra.cronogramaAditivo.length>0;
   const LS   = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
   const VS   = 'font-size:.95rem;font-weight:700;margin-top:.15rem';
   const VSSM = 'font-size:.82rem;font-weight:700;margin-top:.15rem;word-break:break-word';
+
+  /* Bloco de Curva S do Aditivo — só renderiza HTML se houver aditivo */
+  const curvaSAditivoHTML = temAditivo
+    ? `<div class="panel" style="margin-bottom:1.5rem">
+         <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S — Cronograma de Aditivo</h3>
+         <div class="chart-scroll-wrap" id="adminCurvaSAditivoWrap"><div class="chart-container"><canvas id="adminCurvaSAditivo"></canvas></div></div>
+       </div>`
+    : '';
 
   html +=
     `<div class="admin-stats-grid">
@@ -502,6 +570,7 @@ export function renderAdminDetail(){
        <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S${temCrono&&obra.dataInicio?' — Planejado vs Executado':' — Progresso Físico'}</h3>
        <div class="chart-scroll-wrap" id="adminCurvaSwrap"><div class="chart-container"><canvas id="adminCurvaS"></canvas></div></div>
      </div>
+     ${curvaSAditivoHTML}
      <div class="panel">
        <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Índice de Itens</h3>
        <div class="table-container"><table class="admin-table">
@@ -531,8 +600,22 @@ export function renderAdminDetail(){
      </div>`;
   panel.innerHTML=html;
   requestAnimationFrame(()=>{
-    // Passa dataEmissao da obra para a Curva S do admin
-    state.chartAdmin=renderCurvaS('adminCurvaS','adminCurvaSwrap',it,state.chartAdmin,obra.cronograma,obra.dataInicio,obra.dataEmissao);
+    /* Curva S 1 — Contrato oficial */
+    state.chartAdmin = renderCurvaS(
+      'adminCurvaS', 'adminCurvaSwrap',
+      it, state.chartAdmin,
+      obra.cronograma, obra.dataInicio, obra.dataEmissao
+    );
+    /* Curva S 2 — Aditivo (só se existir) */
+    if(temAditivo){
+      state.chartAdmin2 = renderCurvaS(
+        'adminCurvaSAditivo', 'adminCurvaSAditivoWrap',
+        it, state.chartAdmin2,
+        obra.cronogramaAditivo, obra.dataInicio, obra.dataEmissaoAditivo
+      );
+    } else {
+      if(state.chartAdmin2){ state.chartAdmin2.destroy(); state.chartAdmin2 = null; }
+    }
   });
 }
 
