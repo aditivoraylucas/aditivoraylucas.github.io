@@ -49,11 +49,21 @@ export function cleanup(adminSubs, allUsers){
 }
 
 /* ── Cronograma Físico-Financeiro ── */
+/**
+ * buildCronogramaTimeline(dataInicio, cronograma, dataEmissao?)
+ *
+ * dataEmissao (opcional): { mes, ano } extraído da planilha.
+ *   - Se fornecido, o mês de referência do "Hoje" é dataEmissao.mes/dataEmissao.ano.
+ *   - Apenas mês e ano importam; o dia é ignorado.
+ *   - Ex: dataEmissao 29/03/2026 → referência = mês 3 de 2026.
+ *   - Fallback: mês/ano atual do sistema.
+ */
 export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
   if(!dataInicio || !Array.isArray(cronograma) || !cronograma.length) return [];
 
   const [iniAno, iniMes] = dataInicio.split('-').map(Number);
 
+  // Referência do "Hoje": dataEmissao da planilha (apenas mês/ano) ou sistema
   let refAno, refMes;
   if(dataEmissao && dataEmissao.mes && dataEmissao.ano){
     refMes = dataEmissao.mes;
