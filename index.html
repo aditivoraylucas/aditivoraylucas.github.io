@@ -100,6 +100,13 @@
         <button id="loadCronograma" class="btn btn-primary" style="width:100%;margin-top:.75rem">&#128197; Importar Cronograma</button>
       </div>
 
+      <!-- CRONOGRAMA MENSAL (EXECUCAO REAL) -->
+      <div class="panel" style="padding:1rem">
+        <div class="section-title" style="margin-bottom:.75rem">&#128200; Cronograma Mensal</div>
+        <div id="cronogramaMensalBox"></div>
+        <button id="loadCronogramaMensal" class="btn btn-primary" style="width:100%;margin-top:.75rem">&#128200; Importar Mensal</button>
+      </div>
+
       <!-- CRONOGRAMA DE ADITIVO -->
       <div class="panel" style="padding:1rem">
         <div class="section-title" style="margin-bottom:.75rem">&#128203; Cronograma de Aditivo</div>
@@ -107,7 +114,7 @@
         <button id="loadCronogramaAditivo" class="btn btn-primary" style="width:100%;margin-top:.75rem">&#128203; Importar Aditivo</button>
       </div>
 
-      <!-- A&#199;&#213;ES -->
+      <!-- ACOES -->
       <div class="panel" style="padding:1rem">
         <div class="section-title">&#128295; A&#231;&#245;es</div>
         <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.5rem">
@@ -142,7 +149,7 @@
         </div>
       </div>
 
-      <!-- Painel: DATA DE IN&#205;CIO DA OBRA -->
+      <!-- DATA DE INICIO DA OBRA -->
       <div class="panel" style="margin-bottom:1.25rem">
         <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
           <div class="form-group" style="margin:0;flex:1;min-width:200px">
@@ -155,17 +162,17 @@
 
       <div class="stats-grid" id="stats"></div>
 
-      <!-- CURVA S 1 — Contrato Oficial -->
+      <!-- CURVA S 1 — Indice de Itens (barras) -->
       <div class="panel" style="margin-bottom:1.25rem">
-        <h3 style="margin-bottom:1rem" id="sCurveTitle">Curva S &#8212; Contrato Oficial</h3>
+        <h3 style="margin-bottom:1rem" id="sCurveTitle">Curva S &#8212; &#205;ndice de Itens</h3>
         <div class="chart-scroll-wrap" id="sCurveScrollWrap">
           <div class="chart-container"><canvas id="sCurveChart"></canvas></div>
         </div>
       </div>
 
-      <!-- CURVA S 2 — Cronograma de Aditivo -->
+      <!-- CURVA S 2 — Cronograma Fisico-Financeiro (planejado x executado real) -->
       <div class="panel" style="margin-bottom:1.25rem" id="sCurveAditivoPanel">
-        <h3 style="margin-bottom:1rem">Curva S &#8212; Cronograma de Aditivo</h3>
+        <h3 style="margin-bottom:1rem">Curva S &#8212; Cronograma F&#237;sico-Financeiro</h3>
         <div class="chart-scroll-wrap" id="sCurveAditivoScrollWrap">
           <div class="chart-container"><canvas id="sCurveAditivoChart"></canvas></div>
         </div>
