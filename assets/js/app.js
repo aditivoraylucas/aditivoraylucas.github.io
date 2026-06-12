@@ -1,66 +1,96 @@
-import { $, state, showView, showToast, cleanup } from './state.js';
 import { auth, db } from './firebase.js';
-import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { getFirestore, doc, getDoc, collection, onSnapshot } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-import { applySelected, renderAll, renderAdminViews, renderAdminDetail } from './render.js';
+import { state, showView, showToast, cleanup } from './state.js';
+import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+import { collection, query, where, onSnapshot, doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { renderAll, renderAdminViews, applySelected } from './render.js';
 import { bindEvents, setupNovaAtividade, setupColabForm } from './events.js';
+import { getObraIdDaUrl, setObraIdNaUrl } from './url-state.js';
 
-function setupAdminSubs(){
-  if(state.unsubAllUsers) state.unsubAllUsers();
-  state.unsubAllUsers=onSnapshot(collection(db,'users'),snap=>{
-    snap.docChanges().forEach(change=>{
-      const d=change.doc, data=d.data();
-      if(data.disabled||change.type==='removed'){
-        delete state.allUsers[d.id];
-        if(state.adminSubs[d.id]){ state.adminSubs[d.id](); delete state.adminSubs[d.id]; }
-        return;
+bindEvents();
+setupNovaAtividade();
+
+onAuthStateChanged(auth, async user => {
+  if (!user) {
+    cleanup();
+    showView('loginView');
+    return;
+  }
+
+  state.user = user;
+  const userSnap = await getDoc(doc(db, 'users', user.uid));
+  const userData = userSnap.exists() ? userSnap.data() : {};
+  state.admin    = userData.role === 'admin';
+  state.userName = userData.nome || user.email || '';
+
+  const nameEl = document.getElementById('userNameDisplay');
+  if (nameEl) nameEl.textContent = state.userName;
+
+  if (state.admin) {
+    showView('adminView');
+    setupColabForm();
+
+    const usersQ = query(collection(db, 'users'), where('role', '!=', 'admin'));
+    state.unsubAllUsers = onSnapshot(usersQ, async snap => {
+      const updates = snap.docChanges();
+      for (const change of updates) {
+        const uid  = change.doc.id;
+        const data = change.doc.data();
+        if (change.type === 'removed' || data.disabled) {
+          delete state.allUsers[uid];
+          if (state.adminSubs[uid]) { state.adminSubs[uid](); delete state.adminSubs[uid]; }
+          continue;
+        }
+        if (!state.adminSubs[uid]) {
+          // P-007: filtra obras com deletedAt no listener do admin
+          const obrasQ = query(
+            collection(db, 'users', uid, 'obras'),
+            where('deletedAt', '==', null)
+          );
+          state.adminSubs[uid] = onSnapshot(obrasQ, obrasSnap => {
+            state.allUsers[uid] = { ...data, obras: obrasSnap.docs.map(d => ({ id: d.id, ...d.data() })) };
+            renderAdminViews();
+          });
+        } else {
+          state.allUsers[uid] = { ...data, obras: state.allUsers[uid]?.obras || [] };
+        }
       }
-      if(!state.allUsers[d.id]) state.allUsers[d.id]={nome:data.nome||data.email,email:data.email,role:data.role,blocked:!!data.blocked,obras:[]};
-      else{ state.allUsers[d.id].nome=data.nome||data.email; state.allUsers[d.id].email=data.email; state.allUsers[d.id].role=data.role; state.allUsers[d.id].blocked=!!data.blocked; }
-      if(data.role!=='admin'&&!state.adminSubs[d.id]){
-        state.adminSubs[d.id]=onSnapshot(collection(db,'users',d.id,'obras'),oSnap=>{
-          state.allUsers[d.id].obras=oSnap.docs.map(o=>({id:o.id,...o.data()}));
-          renderAdminViews();
-          if(state.adminSelectedUid===d.id) renderAdminDetail();
-        });
-      }
+      renderAdminViews();
     });
-    renderAdminViews();
-  });
-}
+    return;
+  }
 
-function listenUserObras(){
-  if(state.unsubUserObras) state.unsubUserObras();
-  state.unsubUserObras=onSnapshot(collection(db,'users',state.user.uid,'obras'),snap=>{
-    state.obras=snap.docs.map(d=>({id:d.id,...d.data()}));
-    if(state.selectedObraId&&!state.obras.find(o=>o.id===state.selectedObraId))
-      state.selectedObraId=state.obras.length?state.obras[0].id:null;
-    if(!state.selectedObraId&&state.obras.length) state.selectedObraId=state.obras[0].id;
-    if(state.selectedObraId){ const o=state.obras.find(x=>x.id===state.selectedObraId); if(o) applySelected(o); }
+  // Colaborador: escuta obras sem deletedAt
+  // P-007: where('deletedAt', '==', null) filtra documentos com soft delete
+  // Obras removidas ficam no Firestore mas nunca aparecem na UI
+  showView('appView');
+  const obrasQ = query(
+    collection(db, 'users', user.uid, 'obras'),
+    where('deletedAt', '==', null)
+  );
+  state.unsubUserObras = onSnapshot(obrasQ, snap => {
+    state.obras = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    // P-006: tenta restaurar obra ativa da URL; senão usa a primeira
+    const obraIdDaUrl = getObraIdDaUrl();
+    const obraRestaurada = obraIdDaUrl
+      ? state.obras.find(o => o.id === obraIdDaUrl)
+      : null;
+
+    if (obraRestaurada) {
+      state.selectedObraId = obraRestaurada.id;
+    } else if (!state.selectedObraId || !state.obras.find(o => o.id === state.selectedObraId)) {
+      state.selectedObraId = state.obras[0]?.id ?? null;
+    }
+
+    if (state.selectedObraId) {
+      const obra = state.obras.find(o => o.id === state.selectedObraId);
+      if (obra) {
+        applySelected(obra); // também grava o ID na URL
+      }
+    } else {
+      setObraIdNaUrl(null);
+    }
+
     renderAll();
   });
-}
-
-async function init(){
-  bindEvents(); setupNovaAtividade();
-  onAuthStateChanged(auth,async user=>{
-    state.user=user;
-    if(!user){ showView('loginView'); return; }
-    const snap=await getDoc(doc(db,'users',user.uid));
-    if(!snap.exists()){ cleanup(); await signOut(auth); return; }
-    const data=snap.data();
-    state.admin=data.role==='admin';
-    if(data.disabled===true||data.blocked===true){ cleanup(); await signOut(auth); return; }
-    state.userName=data.nome||(user.email?user.email.split('@')[0]:'');
-    const nameEl=$('userNameDisplay'); if(nameEl) nameEl.textContent=state.userName.toUpperCase();
-    if(state.admin){
-      showView('adminView'); setupAdminSubs();
-      if(!state.colabFormReady){ state.colabFormReady=true; setupColabForm(); }
-    } else {
-      showView('appView');
-      state.obras=[]; state.selectedObraId=null; state.rows=[];
-      listenUserObras();
-    }
-  });
-}
-init();
+});

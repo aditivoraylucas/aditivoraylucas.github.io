@@ -1,24 +1,52 @@
 import { $, state, esc, money, pct, calcPctGeral, buildCronogramaTimeline, showToast } from './state.js';
 import { db } from './firebase.js';
-import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { registrarEvento } from './auditoria.js';
+import { setObraIdNaUrl, limparObraIdDaUrl } from './url-state.js';
+import { doc, setDoc, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
-export async function saveObra(obra){ await setDoc(doc(db,'users',state.user.uid,'obras',obra.id), obra); }
-export async function deleteObra(id){ await deleteDoc(doc(db,'users',state.user.uid,'obras',id)); }
-export function scheduleSave(){
-  clearTimeout(state.saveTimer);
-  state.saveTimer = setTimeout(async()=>{ const o=currentObra(); if(o){ o.itens=state.rows; await saveObra(o); } }, 1200);
+// P-007: NUNCA usar deleteDoc em obras — soft delete via deletedAt
+export async function saveObra(obra) {
+  await setDoc(doc(db, 'users', state.user.uid, 'obras', obra.id), obra);
 }
-export function currentObra(){ return state.obras.find(o => o.id === state.selectedObraId); }
+
+export async function deleteObra(id) {
+  const obraRef = doc(db, 'users', state.user.uid, 'obras', id);
+  const snapshot = state.obras.find(o => o.id === id) ?? null;
+
+  // Soft delete: marca deletedAt, não apaga o documento
+  await updateDoc(obraRef, { deletedAt: serverTimestamp() });
+
+  // Auditoria append-only
+  await registrarEvento({
+    uid:          state.user.uid,
+    entidade:     'obras',
+    docId:        id,
+    acao:         'OBRA_REMOVIDA',
+    snapshotAntes: snapshot,
+  });
+}
+
+export function scheduleSave() {
+  clearTimeout(state.saveTimer);
+  state.saveTimer = setTimeout(async () => {
+    const o = currentObra();
+    if (o) { o.itens = state.rows; await saveObra(o); }
+  }, 1200);
+}
+
+export function currentObra() {
+  return state.obras.find(o => o.id === state.selectedObraId);
+}
 
 /* ---- helpers de data ---- */
-function fmtDate(str){
-  if(!str) return '-';
+function fmtDate(str) {
+  if (!str) return '-';
   const d = new Date(str + 'T00:00:00');
   return isNaN(d) ? str : d.toLocaleDateString('pt-BR');
 }
 
-function calcDataFim(dataInicio, totalMeses){
-  if(!dataInicio || !totalMeses) return null;
+function calcDataFim(dataInicio, totalMeses) {
+  if (!dataInicio || !totalMeses) return null;
   const [ano, mes, dia] = dataInicio.split('-').map(Number);
   const mesBase0  = (mes - 1) + totalMeses;
   const fimAno    = ano + Math.floor(mesBase0 / 12);
@@ -239,19 +267,22 @@ export function renderCurvaS(canvasId, wrapId, itens, prev, cronogramaData, data
   });
 }
 
-export function applySelected(o){
-  state.rows=Array.isArray(o.itens)?o.itens:[];
-  const pn=$('projName'); if(pn) pn.value=o.nomeProjeto||o.nome||'Nova obra';
-  const pc=$('projContratada'); if(pc) pc.value=o.contratada||'';
-  const ps=$('projScope'); if(ps) ps.value=o.medicaoAtual||'';
-  const di=$('projDataInicio'); if(di) di.value=o.dataInicio||'';
+export function applySelected(o) {
+  state.rows = Array.isArray(o.itens) ? o.itens : [];
+  const pn = $('projName');       if (pn) pn.value = o.nomeProjeto || o.nome || 'Nova obra';
+  const pc = $('projContratada'); if (pc) pc.value = o.contratada || '';
+  const ps = $('projScope');      if (ps) ps.value = o.medicaoAtual || '';
+  const di = $('projDataInicio'); if (di) di.value = o.dataInicio || '';
+
+  // P-006: reflete obra ativa na URL
+  setObraIdNaUrl(o.id);
 }
 
-export function renderTable(){
-  const tbody=$('tbody'); if(!tbody) return;
-  tbody.innerHTML=state.rows.map((r,i)=>{
-    const p=Number(r.percentualExecutado||0);
-    const pctColor=p>=99.95?'color:var(--success);font-weight:700':'font-weight:700';
+export function renderTable() {
+  const tbody = $('tbody'); if (!tbody) return;
+  tbody.innerHTML = state.rows.map((r, i) => {
+    const p = Number(r.percentualExecutado || 0);
+    const pctColor = p >= 99.95 ? 'color:var(--success);font-weight:700' : 'font-weight:700';
     return `<tr data-i="${i}">
       <td contenteditable="true" data-k="item">${esc(r.item)}</td>
       <td contenteditable="true" data-k="descricao" class="td-desc">${esc(r.descricao)}</td>
@@ -266,33 +297,31 @@ export function renderTable(){
 }
 
 /* ── Cronograma do Contrato (Curva S 1) ── */
-export function renderCronogramaBox(){
-  const box=$('cronogramaBox'); if(!box) return;
-  const o=currentObra();
-  if(!o){
-    box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem">Selecione uma obra para gerenciar o cronograma.</p>';
+export function renderCronogramaBox() {
+  const box = $('cronogramaBox'); if (!box) return;
+  const o = currentObra();
+  if (!o) {
+    box.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem">Selecione uma obra para gerenciar o cronograma.</p>';
     return;
   }
-  const temCrono = Array.isArray(o.cronograma) && o.cronograma.length > 0;
+  const temCrono   = Array.isArray(o.cronograma) && o.cronograma.length > 0;
   const totalMeses = temCrono ? o.cronograma.length : 0;
-  const dataFimStr = (temCrono && o.dataInicio)
-    ? fmtDate(calcDataFim(o.dataInicio, totalMeses))
-    : null;
+  const dataFimStr = (temCrono && o.dataInicio) ? fmtDate(calcDataFim(o.dataInicio, totalMeses)) : null;
 
-  if(temCrono){
-    box.innerHTML=
+  if (temCrono) {
+    box.innerHTML =
       `<div style="display:flex;flex-direction:column;gap:.35rem">
          <div style="font-size:.8rem;color:var(--text-muted)">📊 <strong style="color:var(--text)">${totalMeses} meses</strong> importados</div>
-         ${dataFimStr?`<div style="font-size:.75rem;color:var(--text-muted)">🏁 Término previsto: <strong>${dataFimStr}</strong></div>`:''}
+         ${dataFimStr ? `<div style="font-size:.75rem;color:var(--text-muted)">🏁 Término previsto: <strong>${dataFimStr}</strong></div>` : ''}
        </div>
        <button id="removeCronogramaBtn" class="btn btn-danger" style="width:100%;margin-top:.6rem;font-size:.8rem">🗑 Remover Cronograma</button>`;
   } else {
-    box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem">Nenhum cronograma importado para esta obra.</p>';
+    box.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem">Nenhum cronograma importado para esta obra.</p>';
   }
 
-  const removeBtn=$('removeCronogramaBtn');
-  if(removeBtn) removeBtn.onclick=async()=>{
-    if(!confirm('Remover o cronograma desta obra?')) return;
+  const removeBtn = $('removeCronogramaBtn');
+  if (removeBtn) removeBtn.onclick = async () => {
+    if (!confirm('Remover o cronograma desta obra?')) return;
     delete o.cronograma;
     delete o.dataEmissao;
     await saveObra(o);
@@ -303,35 +332,32 @@ export function renderCronogramaBox(){
 }
 
 /* ── Cronograma de Aditivo (Curva S 2) ── */
-export function renderCronogramaAditivoBox(){
-  const box=$('cronogramaAditivoBox'); if(!box) return;
-  const o=currentObra();
-  if(!o){
-    box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem">Selecione uma obra para gerenciar o cronograma de aditivo.</p>';
+export function renderCronogramaAditivoBox() {
+  const box = $('cronogramaAditivoBox'); if (!box) return;
+  const o = currentObra();
+  if (!o) {
+    box.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem">Selecione uma obra para gerenciar o cronograma de aditivo.</p>';
     return;
   }
   const temAditivo = Array.isArray(o.cronogramaAditivo) && o.cronogramaAditivo.length > 0;
   const totalMeses = temAditivo ? o.cronogramaAditivo.length : 0;
-  /* FIX: usa dataInicioAditivo com fallback para dataInicio */
   const dataBaseAditivo = o.dataInicioAditivo || o.dataInicio;
-  const dataFimStr = (temAditivo && dataBaseAditivo)
-    ? fmtDate(calcDataFim(dataBaseAditivo, totalMeses))
-    : null;
+  const dataFimStr = (temAditivo && dataBaseAditivo) ? fmtDate(calcDataFim(dataBaseAditivo, totalMeses)) : null;
 
-  if(temAditivo){
-    box.innerHTML=
+  if (temAditivo) {
+    box.innerHTML =
       `<div style="display:flex;flex-direction:column;gap:.35rem">
          <div style="font-size:.8rem;color:var(--text-muted)">📋 <strong style="color:var(--text)">${totalMeses} meses</strong> importados</div>
-         ${dataFimStr?`<div style="font-size:.75rem;color:var(--text-muted)">🏁 Término do aditivo: <strong>${dataFimStr}</strong></div>`:''}
+         ${dataFimStr ? `<div style="font-size:.75rem;color:var(--text-muted)">🏁 Término do aditivo: <strong>${dataFimStr}</strong></div>` : ''}
        </div>
        <button id="removeCronogramaAditivoBtn" class="btn btn-danger" style="width:100%;margin-top:.6rem;font-size:.8rem">🗑 Remover Aditivo</button>`;
   } else {
-    box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem">Nenhum cronograma de aditivo importado.</p>';
+    box.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem">Nenhum cronograma de aditivo importado.</p>';
   }
 
-  const removeBtn=$('removeCronogramaAditivoBtn');
-  if(removeBtn) removeBtn.onclick=async()=>{
-    if(!confirm('Remover o cronograma de aditivo desta obra?')) return;
+  const removeBtn = $('removeCronogramaAditivoBtn');
+  if (removeBtn) removeBtn.onclick = async () => {
+    if (!confirm('Remover o cronograma de aditivo desta obra?')) return;
     delete o.cronogramaAditivo;
     delete o.dataEmissaoAditivo;
     delete o.dataInicioAditivo;
@@ -342,167 +368,181 @@ export function renderCronogramaAditivoBox(){
   };
 }
 
-export function updateDashboard(){
-  const o=currentObra();
+export function updateDashboard() {
+  const o = currentObra();
   const itensParaCurva = Array.isArray(o?.itens) && o.itens.length > 0 ? o.itens : state.rows;
-  const vc     = Number(o?.resumo?.valorContratoAditivo)||state.rows.reduce((a,r)=>a+Number(r.valorContrato||0),0);
-  const ac     = Number(o?.resumo?.acumuladoTotal)     ||state.rows.reduce((a,r)=>a+Number(r.acumulado||0),0);
-  const estaMed= Number(o?.resumo?.estaMedicao)        ||state.rows.reduce((a,r)=>a+Number(r.medicao||0),0);
-  const p      = calcPctGeral(o?.resumo, state.rows);
+  const vc      = Number(o?.resumo?.valorContratoAditivo) || state.rows.reduce((a,r)=>a+Number(r.valorContrato||0),0);
+  const ac      = Number(o?.resumo?.acumuladoTotal)       || state.rows.reduce((a,r)=>a+Number(r.acumulado||0),0);
+  const estaMed = Number(o?.resumo?.estaMedicao)          || state.rows.reduce((a,r)=>a+Number(r.medicao||0),0);
+  const p       = calcPctGeral(o?.resumo, state.rows);
   const LS = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
   const VS = 'font-size:.95rem;font-weight:700;margin-top:.2rem';
-  if($('stats')) $('stats').innerHTML=
+  if ($('stats')) $('stats').innerHTML =
     `<div class="stat-card"><span class="stat-label" style="${LS}">Esta Medição</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>
      <div class="stat-card"><span class="stat-label" style="${LS}">Valor CT / Aditivo</span><span class="stat-value" style="${VS}">${money(vc)}</span></div>
      <div class="stat-card"><span class="stat-label" style="${LS}">Acumulado Total</span><span class="stat-value" style="${VS};color:var(--success)">${money(ac)}</span></div>
      <div class="stat-card"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>`;
-  if($('countAll'))  $('countAll').textContent  = money(vc);
-  if($('countDone')) $('countDone').textContent = money(ac);
-  if($('countPct'))  $('countPct').textContent  = pct(p);
-  if($('mainProjName'))       $('mainProjName').textContent      = o?.nomeProjeto||o?.nome||'-';
-  if($('mainProjContratada')) $('mainProjContratada').textContent = o?.contratada||'-';
-  if($('mainProjScope'))      $('mainProjScope').textContent      = o?.medicaoAtual||'-';
+  if ($('countAll'))  $('countAll').textContent  = money(vc);
+  if ($('countDone')) $('countDone').textContent = money(ac);
+  if ($('countPct'))  $('countPct').textContent  = pct(p);
+  if ($('mainProjName'))       $('mainProjName').textContent       = o?.nomeProjeto || o?.nome || '-';
+  if ($('mainProjContratada')) $('mainProjContratada').textContent = o?.contratada || '-';
+  if ($('mainProjScope'))      $('mainProjScope').textContent      = o?.medicaoAtual || '-';
 
-  /* Curva S 1 — Contrato oficial */
   state.chartUser = renderCurvaS(
     'sCurveChart', 'sCurveScrollWrap',
     itensParaCurva, state.chartUser,
     o?.cronograma, o?.dataInicio, o?.dataEmissao
   );
 
-  /* Curva S 2 — Aditivo
-     FIX Bug 1: usa dataInicioAditivo com fallback para dataInicio */
-  const temAditivo = Array.isArray(o?.cronogramaAditivo) && o.cronogramaAditivo.length > 0;
-  const panelAditivo = $('sCurveAditivoPanel');
-  if(panelAditivo) panelAditivo.style.display = temAditivo ? '' : 'none';
-  if(temAditivo){
+  const temAditivo    = Array.isArray(o?.cronogramaAditivo) && o.cronogramaAditivo.length > 0;
+  const panelAditivo  = $('sCurveAditivoPanel');
+  if (panelAditivo) panelAditivo.style.display = temAditivo ? '' : 'none';
+  if (temAditivo) {
     state.chartUser2 = renderCurvaS(
       'sCurveAditivoChart', 'sCurveAditivoScrollWrap',
       itensParaCurva, state.chartUser2,
       o.cronogramaAditivo,
-      o.dataInicioAditivo || o.dataInicio,   /* FIX Bug 1 */
+      o.dataInicioAditivo || o.dataInicio,
       o.dataEmissaoAditivo
     );
   } else {
-    if(state.chartUser2){ state.chartUser2.destroy(); state.chartUser2 = null; }
+    if (state.chartUser2) { state.chartUser2.destroy(); state.chartUser2 = null; }
   }
 }
 
-export function renderObrasBox(){
-  const box=$('obrasBox'); if(!box) return;
-  if(!state.obras.length){
-    box.innerHTML='<p style="color:var(--text-muted);font-size:.8rem">Nenhuma obra cadastrada.</p>';
+export function renderObrasBox() {
+  const box = $('obrasBox'); if (!box) return;
+  // P-007: exibe apenas obras sem deletedAt
+  const obrasAtivas = state.obras.filter(o => !o.deletedAt);
+  if (!obrasAtivas.length) {
+    box.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem">Nenhuma obra cadastrada.</p>';
     renderCronogramaBox();
     renderCronogramaAditivoBox();
     return;
   }
-  box.innerHTML=
+  box.innerHTML =
     `<div class="form-group" style="margin-bottom:.5rem"><label>Obra ativa</label>
      <select id="obraSelect" class="form-control">
-       ${state.obras.map(o=>`<option value="${o.id}" ${o.id===state.selectedObraId?'selected':''}>${esc(o.nome||'Obra')}</option>`).join('')}
+       ${obrasAtivas.map(o => `<option value="${o.id}" ${o.id === state.selectedObraId ? 'selected' : ''}>${esc(o.nome || 'Obra')}</option>`).join('')}
      </select></div>
      <div style="display:flex;gap:.5rem;flex-wrap:wrap">
        <button class="btn btn-sec" id="replaceObraBtn" style="flex:1">🔄 Atualizar</button>
        <button class="btn btn-danger" id="deleteObraBtn" style="flex:1">🗑 Remover</button>
      </div>`;
-  $('obraSelect').onchange=e=>{
-    state.selectedObraId=e.target.value;
-    const o=currentObra(); if(o){ applySelected(o); renderAll(); }
+  $('obraSelect').onchange = e => {
+    state.selectedObraId = e.target.value;
+    const o = currentObra(); if (o) { applySelected(o); renderAll(); }
   };
-  $('replaceObraBtn').onclick=()=>importFileFn(true);
-  $('deleteObraBtn').onclick=async()=>{
-    const idToDelete=state.selectedObraId;
-    if(!idToDelete||!confirm('Remover obra?')) return;
+  $('replaceObraBtn').onclick = () => importFileFn(true);
+  $('deleteObraBtn').onclick  = async () => {
+    const idToDelete = state.selectedObraId;
+    const obraNome   = currentObra()?.nome || 'esta obra';
+    if (!idToDelete || !confirm(`Remover "${obraNome}"? Esta ação pode ser desfeita pelo administrador.`)) return;
+
     await deleteObra(idToDelete);
-    const restantes=state.obras.filter(o=>o.id!==idToDelete);
-    state.selectedObraId=restantes.length?restantes[0].id:null;
-    if(state.selectedObraId){ const o=state.obras.find(x=>x.id===state.selectedObraId); if(o) applySelected(o); }
-    else{ state.rows=[]; ['projName','projContratada','projScope'].forEach(id=>{const el=$(id);if(el)el.value='';}); }
+
+    const restantes = obrasAtivas.filter(o => o.id !== idToDelete);
+    state.selectedObraId = restantes.length ? restantes[0].id : null;
+    if (state.selectedObraId) {
+      const proxima = state.obras.find(x => x.id === state.selectedObraId);
+      if (proxima) applySelected(proxima);
+    } else {
+      state.rows = [];
+      ['projName','projContratada','projScope'].forEach(id => { const el = $(id); if (el) el.value = ''; });
+      limparObraIdDaUrl();
+    }
     renderAll();
+    showToast(`"${obraNome}" removida.`);
   };
   renderCronogramaBox();
   renderCronogramaAditivoBox();
 }
 
-export function renderAll(){ renderObrasBox(); renderTable(); updateDashboard(); }
-let importFileFn = ()=>{};
-export function setImportFileFn(fn){ importFileFn = fn; }
+export function renderAll() { renderObrasBox(); renderTable(); updateDashboard(); }
+let importFileFn = () => {};
+export function setImportFileFn(fn) { importFileFn = fn; }
 
 /* ── ADMIN ── */
 
-export function renderAdminStats(){
-  let tot=0,tvc=0,tac=0;
-  Object.values(state.allUsers).forEach(u=>{
-    if(u.role==='admin') return;
-    (u.obras||[]).forEach(o=>{
+export function renderAdminStats() {
+  let tot=0, tvc=0, tac=0;
+  Object.values(state.allUsers).forEach(u => {
+    if (u.role === 'admin') return;
+    // P-007: ignora obras com soft delete no painel admin também
+    (u.obras || []).filter(o => !o.deletedAt).forEach(o => {
       tot++;
-      const it=Array.isArray(o.itens)?o.itens:[];
-      tvc+=Number(o.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
-      tac+=Number(o.resumo?.acumuladoTotal)||it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+      const it = Array.isArray(o.itens) ? o.itens : [];
+      tvc += Number(o.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
+      tac += Number(o.resumo?.acumuladoTotal)       || it.reduce((a,i)=>a+Number(i.acumulado||0),0);
     });
   });
-  const p=tvc>0?+(tac/tvc*100).toFixed(2):0;
-  const LS='font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
-  const VS='font-size:.95rem;font-weight:700;margin-top:.2rem';
-  if($('adminStats')) $('adminStats').innerHTML=
+  const p  = tvc > 0 ? +(tac/tvc*100).toFixed(2) : 0;
+  const LS = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
+  const VS = 'font-size:.95rem;font-weight:700;margin-top:.2rem';
+  if ($('adminStats')) $('adminStats').innerHTML =
     `<div class="stat-card"><span class="stat-label" style="${LS}">Total de Obras</span><span class="stat-value" style="${VS}">${tot}</span></div>
      <div class="stat-card"><span class="stat-label" style="${LS}">Soma dos Contratos</span><span class="stat-value" style="${VS}">${money(tvc)}</span></div>
      <div class="stat-card"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>
      <div class="stat-card"><span class="stat-label" style="${LS}">Acumulado Geral</span><span class="stat-value" style="${VS}">${money(tac)}</span></div>`;
 }
 
-export function renderColabList(){
-  const box=$('colabList'); if(!box) return;
-  const colabs=Object.entries(state.allUsers).filter(([,u])=>u.role!=='admin');
-  if(!colabs.length){ box.innerHTML='<p style="color:var(--text-muted);font-size:.875rem">Nenhum colaborador.</p>'; return; }
-  box.innerHTML=colabs.map(([uid,u])=>
-    `<div class="colab-item" style="${u.blocked?'opacity:.7':''}">
+export function renderColabList() {
+  const box = $('colabList'); if (!box) return;
+  const colabs = Object.entries(state.allUsers).filter(([,u]) => u.role !== 'admin');
+  if (!colabs.length) { box.innerHTML = '<p style="color:var(--text-muted);font-size:.875rem">Nenhum colaborador.</p>'; return; }
+  box.innerHTML = colabs.map(([uid, u]) =>
+    `<div class="colab-item" style="${u.blocked ? 'opacity:.7' : ''}">
        <div><strong>${esc(u.nome)}</strong>
-         ${u.blocked?'<span style="margin-left:.5rem;font-size:.7rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.1rem .4rem;border-radius:999px">🔒 Bloqueado</span>':''}
+         ${u.blocked ? '<span style="margin-left:.5rem;font-size:.7rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.1rem .4rem;border-radius:999px">🔒 Bloqueado</span>' : ''}
          <br><small style="color:var(--text-muted)">${esc(u.email)}</small></div>
        <div style="display:flex;gap:.4rem;flex-wrap:wrap">
-         <button class="btn ${u.blocked?'btn-success':'btn-warning'}" style="padding:.3rem .65rem;font-size:.72rem" onclick="toggleBloqueio('${uid}',${u.blocked})">${u.blocked?'✅ Desbloquear':'🔒 Bloquear'}</button>
+         <button class="btn ${u.blocked ? 'btn-success' : 'btn-warning'}" style="padding:.3rem .65rem;font-size:.72rem" onclick="toggleBloqueio('${uid}',${u.blocked})">${u.blocked ? '✅ Desbloquear' : '🔒 Bloquear'}</button>
          <button class="btn btn-danger" style="padding:.3rem .65rem;font-size:.72rem" onclick="removeColab('${uid}')">Remover</button>
        </div>
      </div>`).join('');
 }
 
-function colabSidebarHTML(colabs){
-  if(!colabs.length) return '<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem">Nenhum colaborador.</p>';
-  if(state.adminSelectedUid&&state.allUsers[state.adminSelectedUid]){
-    const u=state.allUsers[state.adminSelectedUid],n=(u.obras||[]).length;
+function colabSidebarHTML(colabs) {
+  if (!colabs.length) return '<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem">Nenhum colaborador.</p>';
+  if (state.adminSelectedUid && state.allUsers[state.adminSelectedUid]) {
+    const u = state.allUsers[state.adminSelectedUid];
+    const n = (u.obras || []).filter(o => !o.deletedAt).length;
     return `<button class="btn btn-sec" onclick="adminDeselectColab()" style="width:100%;margin-bottom:.75rem;font-size:.8rem">← Todos</button>
        <div class="colab-sidebar-item active">
-         <div style="font-weight:600;font-size:.875rem">${u.blocked?'🔒 ':''}${esc(u.nome)}</div>
-         <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n!==1?'s':''}</div>
+         <div style="font-weight:600;font-size:.875rem">${u.blocked ? '🔒 ' : ''}${esc(u.nome)}</div>
+         <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n !== 1 ? 's' : ''}</div>
        </div>`;
   }
-  return colabs.map(([uid,u])=>
-    `<div class="colab-sidebar-item" style="${u.blocked?'opacity:.55':''}" onclick="adminSelectColab('${uid}')">
-       <div style="font-weight:600;font-size:.875rem">${u.blocked?'🔒 ':''}${esc(u.nome)}</div>
-       <div style="font-size:.75rem;color:var(--text-muted)">${(u.obras||[]).length} obra${(u.obras||[]).length!==1?'s':''}</div>
-     </div>`).join('');
+  return colabs.map(([uid, u]) => {
+    const n = (u.obras || []).filter(o => !o.deletedAt).length;
+    return `<div class="colab-sidebar-item" style="${u.blocked ? 'opacity:.55' : ''}" onclick="adminSelectColab('${uid}')">
+       <div style="font-weight:600;font-size:.875rem">${u.blocked ? '🔒 ' : ''}${esc(u.nome)}</div>
+       <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n !== 1 ? 's' : ''}</div>
+     </div>`;
+  }).join('');
 }
 
-export function renderAdminSidebar(){
-  const colabs=Object.entries(state.allUsers).filter(([,u])=>u.role!=='admin');
-  const html=colabSidebarHTML(colabs);
-  const box=$('adminColabSidebar'); if(box) box.innerHTML=html;
-  const mob=$('adminColabSidebarMobile'); if(mob) mob.innerHTML=html;
+export function renderAdminSidebar() {
+  const colabs = Object.entries(state.allUsers).filter(([,u]) => u.role !== 'admin');
+  const html   = colabSidebarHTML(colabs);
+  const box    = $('adminColabSidebar');       if (box) box.innerHTML = html;
+  const mob    = $('adminColabSidebarMobile'); if (mob) mob.innerHTML = html;
 }
 
-export function adminObraCardHTML(obra){
-  const it=Array.isArray(obra.itens)?obra.itens:[];
-  const vc=Number(obra.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
-  const ac=Number(obra.resumo?.acumuladoTotal)||it.reduce((a,i)=>a+Number(i.acumulado||0),0);
-  const p=calcPctGeral(obra.resumo,it);
-  const temCrono=Array.isArray(obra.cronograma)&&obra.cronograma.length>0;
-  const temData=!!obra.dataInicio;
-  const temAditivo=Array.isArray(obra.cronogramaAditivo)&&obra.cronogramaAditivo.length>0;
+export function adminObraCardHTML(obra) {
+  if (obra.deletedAt) return ''; // P-007: não renderiza obras removidas
+  const it = Array.isArray(obra.itens) ? obra.itens : [];
+  const vc = Number(obra.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
+  const ac = Number(obra.resumo?.acumuladoTotal)       || it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+  const p  = calcPctGeral(obra.resumo, it);
+  const temCrono   = Array.isArray(obra.cronograma) && obra.cronograma.length > 0;
+  const temData    = !!obra.dataInicio;
+  const temAditivo = Array.isArray(obra.cronogramaAditivo) && obra.cronogramaAditivo.length > 0;
   return `<div class="obra-card" style="cursor:pointer" onclick="adminSelectObra('${obra.id}')">
     <div class="obra-card-header">
-      <div><div class="obra-card-title">${esc(obra.nome||'Sem nome')}</div>
-      <div class="obra-card-sub">${it.length} itens | Aba: ${esc(obra.medicaoAtual||'-')}${temCrono&&temData?' | 📅 Cronograma':''}${temAditivo?' | 📋 Aditivo':''}</div></div>
+      <div><div class="obra-card-title">${esc(obra.nome || 'Sem nome')}</div>
+      <div class="obra-card-sub">${it.length} itens | Aba: ${esc(obra.medicaoAtual || '-')}${temCrono && temData ? ' | 📅 Cronograma' : ''}${temAditivo ? ' | 📋 Aditivo' : ''}</div></div>
       <div class="obra-card-pct">${pct(p)}</div></div>
     <div class="obra-progress-bar"><div class="obra-progress-fill" style="width:${Math.min(100,p)}%"></div></div>
     <div class="obra-card-footer">
@@ -510,59 +550,54 @@ export function adminObraCardHTML(obra){
     </div></div>`;
 }
 
-export function renderAdminDetail(){
-  const panel=$('adminDetailPanel'); if(!panel) return;
-
-  /* FIX Bug 3: nulifica chartAdmin2 antes de reescrever o DOM,
-     evitando destroy() em canvas já removido do DOM em outra obra */
-  if(state.chartAdmin2){ state.chartAdmin2.destroy(); state.chartAdmin2 = null; }
-
-  if(!state.adminSelectedUid){ panel.innerHTML='<p style="color:var(--text-muted);padding:1rem">Selecione um colaborador ao lado.</p>'; return; }
-  const u=state.allUsers[state.adminSelectedUid];
-  if(!u){ panel.innerHTML=''; return; }
-  const obrasList=u.obras||[];
-  let html=`<div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
-    <div style="font-weight:700;font-size:1.1rem">👤 ${esc(u.nome)}${u.blocked?' <span style="font-size:.75rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.2rem .6rem;border-radius:999px">🔒</span>':''}</div>
+export function renderAdminDetail() {
+  const panel = $('adminDetailPanel'); if (!panel) return;
+  if (state.chartAdmin2) { state.chartAdmin2.destroy(); state.chartAdmin2 = null; }
+  if (!state.adminSelectedUid) { panel.innerHTML = '<p style="color:var(--text-muted);padding:1rem">Selecione um colaborador ao lado.</p>'; return; }
+  const u = state.allUsers[state.adminSelectedUid];
+  if (!u) { panel.innerHTML = ''; return; }
+  // P-007: exclui obras com soft delete da visão admin
+  const obrasList = (u.obras || []).filter(o => !o.deletedAt);
+  let html = `<div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
+    <div style="font-weight:700;font-size:1.1rem">👤 ${esc(u.nome)}${u.blocked ? ' <span style="font-size:.75rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.2rem .6rem;border-radius:999px">🔒</span>' : ''}</div>
     <div class="form-group" style="margin:0;min-width:220px">
       <select id="adminObraSelect" class="form-control" onchange="adminSelectObra(this.value)">
         <option value="">-- Selecione uma obra --</option>
-        ${obrasList.map(o=>`<option value="${o.id}" ${o.id===state.adminSelectedObraId?'selected':''}>${esc(o.nome||'Obra')}</option>`).join('')}
+        ${obrasList.map(o => `<option value="${o.id}" ${o.id === state.adminSelectedObraId ? 'selected' : ''}>${esc(o.nome || 'Obra')}</option>`).join('')}
       </select></div></div>`;
-  if(!state.adminSelectedObraId||!obrasList.length){
-    panel.innerHTML=html+(obrasList.length?obrasList.map(adminObraCardHTML).join(''):'<p style="color:var(--text-muted)">Sem obras.</p>');
+  if (!state.adminSelectedObraId || !obrasList.length) {
+    panel.innerHTML = html + (obrasList.length ? obrasList.map(adminObraCardHTML).join('') : '<p style="color:var(--text-muted)">Sem obras.</p>');
     return;
   }
-  const obra=obrasList.find(o=>o.id===state.adminSelectedObraId);
-  if(!obra){ panel.innerHTML=html+'<p style="color:var(--text-muted)">Obra não encontrada.</p>'; return; }
-  const it      = Array.isArray(obra.itens)?obra.itens:[];
-  const vc      = Number(obra.resumo?.valorContratoAditivo)||it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
-  const ac      = Number(obra.resumo?.acumuladoTotal)     ||it.reduce((a,i)=>a+Number(i.acumulado||0),0);
-  const estaMed = Number(obra.resumo?.estaMedicao)        ||it.reduce((a,i)=>a+Number(i.medicao||0),0);
+  const obra = obrasList.find(o => o.id === state.adminSelectedObraId);
+  if (!obra) { panel.innerHTML = html + '<p style="color:var(--text-muted)">Obra não encontrada.</p>'; return; }
+  const it      = Array.isArray(obra.itens) ? obra.itens : [];
+  const vc      = Number(obra.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
+  const ac      = Number(obra.resumo?.acumuladoTotal)       || it.reduce((a,i)=>a+Number(i.acumulado||0),0);
+  const estaMed = Number(obra.resumo?.estaMedicao)          || it.reduce((a,i)=>a+Number(i.medicao||0),0);
   const p       = calcPctGeral(obra.resumo, it);
   const saldo   = vc - ac;
-  const contratadaNome = obra.contratada||'-';
+  const contratadaNome = obra.contratada || '-';
   const dataInicioStr  = fmtDate(obra.dataInicio);
-  const totalMeses     = Array.isArray(obra.cronograma)?obra.cronograma.length:0;
+  const totalMeses     = Array.isArray(obra.cronograma) ? obra.cronograma.length : 0;
   const dataFimISO     = calcDataFim(obra.dataInicio, totalMeses);
   const dataFimStr     = dataFimISO ? fmtDate(dataFimISO) : '-';
-  const temCrono       = Array.isArray(obra.cronograma)&&obra.cronograma.length>0;
-  const temAditivo     = Array.isArray(obra.cronogramaAditivo)&&obra.cronogramaAditivo.length>0;
+  const temCrono       = Array.isArray(obra.cronograma) && obra.cronograma.length > 0;
+  const temAditivo     = Array.isArray(obra.cronogramaAditivo) && obra.cronogramaAditivo.length > 0;
   const LS   = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
   const VS   = 'font-size:.95rem;font-weight:700;margin-top:.15rem';
   const VSSM = 'font-size:.82rem;font-weight:700;margin-top:.15rem;word-break:break-word';
-
   const curvaSAditivoHTML = temAditivo
     ? `<div class="panel" style="margin-bottom:1.5rem">
          <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S — Cronograma de Aditivo</h3>
          <div class="chart-scroll-wrap" id="adminCurvaSAditivoWrap"><div class="chart-container"><canvas id="adminCurvaSAditivo"></canvas></div></div>
        </div>`
     : '';
-
   html +=
     `<div class="admin-stats-grid">
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Contratada</span><span class="stat-value" style="${VSSM}">${esc(contratadaNome)}</span></div>
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Esta Medição</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>
-       <div class="stat-card compact"><span class="stat-label" style="${LS}">📅 INÍCIO DA OBRA</span><span class="stat-value" style="${VS}">${dataInicioStr}</span></div>
+       <div class="stat-card compact"><span class="stat-label" style="${LS}">📅 Início da Obra</span><span class="stat-value" style="${VS}">${dataInicioStr}</span></div>
        <div class="stat-card compact"><span class="stat-label" style="${LS}">🏁 Término Previsto</span><span class="stat-value" style="${VS}">${dataFimStr}</span></div>
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Valor CT / Aditivo</span><span class="stat-value" style="${VS}">${money(vc)}</span></div>
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Acumulado Total</span><span class="stat-value" style="${VS};color:var(--success)">${money(ac)}</span></div>
@@ -570,7 +605,7 @@ export function renderAdminDetail(){
        <div class="stat-card compact"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>
      </div>
      <div class="panel" style="margin-bottom:1.5rem">
-       <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S${temCrono&&obra.dataInicio?' — Planejado vs Executado':' — Progresso Físico'}</h3>
+       <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S${temCrono && obra.dataInicio ? ' — Planejado vs Executado' : ' — Progresso Físico'}</h3>
        <div class="chart-scroll-wrap" id="adminCurvaSwrap"><div class="chart-container"><canvas id="adminCurvaS"></canvas></div></div>
      </div>
      ${curvaSAditivoHTML}
@@ -586,9 +621,9 @@ export function renderAdminDetail(){
            <th class="th-sticky" style="text-align:right" data-label="SALDO" data-full="Saldo"></th>
            <th class="th-sticky" style="text-align:right" data-label="%" data-full="% Exec."></th>
          </tr></thead>
-         <tbody>${it.map(r=>{
-           const rp=Number(r.percentualExecutado||0);
-           const rpc=rp>=99.95?'color:var(--success);font-weight:700':'font-weight:700';
+         <tbody>${it.map(r => {
+           const rp  = Number(r.percentualExecutado || 0);
+           const rpc = rp >= 99.95 ? 'color:var(--success);font-weight:700' : 'font-weight:700';
            return `<tr>
              <td style="font-size:.82rem">${esc(r.item)}</td>
              <td class="td-desc" style="font-size:.82rem">${esc(r.descricao)}</td>
@@ -601,27 +636,23 @@ export function renderAdminDetail(){
          }).join('')}</tbody>
        </table></div>
      </div>`;
-  panel.innerHTML=html;
-  requestAnimationFrame(()=>{
-    /* Curva S 1 — Contrato oficial */
+  panel.innerHTML = html;
+  requestAnimationFrame(() => {
     state.chartAdmin = renderCurvaS(
       'adminCurvaS', 'adminCurvaSwrap',
       it, state.chartAdmin,
       obra.cronograma, obra.dataInicio, obra.dataEmissao
     );
-    /* Curva S 2 — Aditivo
-       FIX Bug 1: usa dataInicioAditivo com fallback para dataInicio
-       FIX Bug 3: state.chartAdmin2 já está null aqui (zerado no início da função) */
-    if(temAditivo){
+    if (temAditivo) {
       state.chartAdmin2 = renderCurvaS(
         'adminCurvaSAditivo', 'adminCurvaSAditivoWrap',
         it, state.chartAdmin2,
         obra.cronogramaAditivo,
-        obra.dataInicioAditivo || obra.dataInicio,   /* FIX Bug 1 */
+        obra.dataInicioAditivo || obra.dataInicio,
         obra.dataEmissaoAditivo
       );
     }
   });
 }
 
-export function renderAdminViews(){ renderAdminStats(); renderAdminSidebar(); renderColabList(); }
+export function renderAdminViews() { renderAdminStats(); renderAdminSidebar(); renderColabList(); }
