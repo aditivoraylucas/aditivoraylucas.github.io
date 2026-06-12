@@ -6,7 +6,7 @@ import { readExcelFile, normalizeRows } from './excel.js';
 import {
   saveObra, deleteObra, scheduleSave, currentObra,
   renderAll, renderCurvaS, applySelected, setImportFileFn,
-  updateDashboard, renderCronogramaBox,
+  updateDashboard, renderCronogramaBox, renderCronogramaAditivoBox,
   renderAdminViews, renderAdminDetail, renderColabList, renderAdminSidebar
 } from './render.js';
 import { parseCronogramaXLSX } from './cronograma.js';
@@ -30,7 +30,7 @@ export async function importFile(replace=false){
       } else if(ext==='json'){
         const text=await file.text(); obj=JSON.parse(text);
         rows=Array.isArray(obj)?normalizeRows(obj):normalizeRows(obj.itens);
-        if(!rows.length&&!Array.isArray(obj)&&!Array.isArray(obj.itens)) throw new Error('JSON inválido.');
+        if(!rows.length&&!Array.isArray(obj)&&!Array.isArray(obj.itens)) throw new Error('JSON inv\u00e1lido.');
       } else { obj=await readExcelFile(file); rows=normalizeRows(obj.itens); }
 
       const obraId=replace&&state.selectedObraId?state.selectedObraId:('obra_'+Date.now());
@@ -41,22 +41,25 @@ export async function importFile(replace=false){
 
       if(replace){
         const existente=currentObra();
-        if(existente?.cronograma)   obra.cronograma   = existente.cronograma;
-        if(existente?.dataInicio)   obra.dataInicio    = existente.dataInicio;
-        if(existente?.dataEmissao)  obra.dataEmissao   = existente.dataEmissao;
+        if(existente?.cronograma)         obra.cronograma          = existente.cronograma;
+        if(existente?.dataInicio)         obra.dataInicio           = existente.dataInicio;
+        if(existente?.dataEmissao)        obra.dataEmissao          = existente.dataEmissao;
+        if(existente?.cronogramaAditivo)  obra.cronogramaAditivo   = existente.cronogramaAditivo;
+        if(existente?.dataInicioAditivo)  obra.dataInicioAditivo   = existente.dataInicioAditivo;
+        if(existente?.dataEmissaoAditivo) obra.dataEmissaoAditivo  = existente.dataEmissaoAditivo;
       }
 
       await saveObra(obra);
       state.selectedObraId=obraId;
-      showToast(`✅ ${rows.length} itens importados`);
-    } catch(err){ showToast('❌ '+err.message,true); console.error(err); }
+      showToast(`\u2705 ${rows.length} itens importados`);
+    } catch(err){ showToast('\u274c '+err.message,true); console.error(err); }
   };
   input.click();
 }
 
 export async function importCronograma(){
   const o=currentObra();
-  if(!o){ showToast('⚠️ Selecione uma obra antes de importar o cronograma.',true); return; }
+  if(!o){ showToast('\u26a0\ufe0f Selecione uma obra antes de importar o cronograma.',true); return; }
   const input=document.createElement('input');
   input.type='file';
   input.accept='.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
@@ -68,14 +71,40 @@ export async function importCronograma(){
       const wb=XLSX.read(buf,{type:'array'});
       const { cronograma, totalMeses, dataEmissao } = parseCronogramaXLSX(wb);
       o.cronograma  = cronograma;
-      // Salva dataEmissao (apenas mes e ano) para uso na Curva S
       if(dataEmissao) o.dataEmissao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
       await saveObra(o);
-      const emissaoTxt = dataEmissao ? ` | Emissão: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
-      showToast(`✅ Cronograma importado: ${totalMeses} meses${emissaoTxt}.`);
+      const emissaoTxt = dataEmissao ? ` | Emiss\u00e3o: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
+      showToast(`\u2705 Cronograma importado: ${totalMeses} meses${emissaoTxt}.`);
       renderCronogramaBox();
       updateDashboard();
-    } catch(err){ showToast('❌ '+err.message,true); console.error(err); }
+    } catch(err){ showToast('\u274c '+err.message,true); console.error(err); }
+  };
+  input.click();
+}
+
+/* Importa o cronograma de aditivo — salva em obra.cronogramaAditivo (independente do contrato) */
+export async function importCronogramaAditivo(){
+  const o=currentObra();
+  if(!o){ showToast('\u26a0\ufe0f Selecione uma obra antes de importar o cronograma de aditivo.',true); return; }
+  const input=document.createElement('input');
+  input.type='file';
+  input.accept='.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
+  input.onchange=async e=>{
+    if(!e.target.files.length) return;
+    const file=e.target.files[0];
+    try{
+      const buf=await file.arrayBuffer();
+      const wb=XLSX.read(buf,{type:'array'});
+      const { cronograma, totalMeses, dataEmissao } = parseCronogramaXLSX(wb);
+      /* Salva nos campos exclusivos do aditivo — nunca toca em obra.cronograma */
+      o.cronogramaAditivo  = cronograma;
+      if(dataEmissao) o.dataEmissaoAditivo = { mes: dataEmissao.mes, ano: dataEmissao.ano };
+      await saveObra(o);
+      const emissaoTxt = dataEmissao ? ` | Emiss\u00e3o: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
+      showToast(`\u2705 Cronograma de aditivo importado: ${totalMeses} meses${emissaoTxt}.`);
+      renderCronogramaAditivoBox();
+      updateDashboard();
+    } catch(err){ showToast('\u274c '+err.message,true); console.error(err); }
   };
   input.click();
 }
@@ -95,7 +124,7 @@ export function setupColabForm(){
       await signOut(auth);
       await signInWithEmailAndPassword(auth,adminEmail,ADMIN_SENHA);
       $('colabNome').value=''; $('colabEmail').value=''; $('colabSenha').value='';
-      showToast(`✅ "${nome}" cadastrado!`);
+      showToast(`\u2705 "${nome}" cadastrado!`);
     }catch(err){ msgEl.textContent=err?.message||'Erro.'; msgEl.style.display='block'; }
     finally{ btn.disabled=false; btn.textContent='Cadastrar colaborador'; }
   });
@@ -111,14 +140,14 @@ export function setupNovaAtividade(){
   const addRowBtn=$('addRow');
   if(addRowBtn) addRowBtn.onclick=()=>{
     const item=$('fItem').value.trim(), desc=$('fName').value.trim();
-    if(!item&&!desc){ showToast('⚠️ Preencha item ou descrição.',true); return; }
+    if(!item&&!desc){ showToast('\u26a0\ufe0f Preencha item ou descri\u00e7\u00e3o.',true); return; }
     const vc=parseMoney($('fValorContrato').value), med=parseMoney($('fMedicao').value), acu=parseMoney($('fAcumulado').value);
     const saldo=vc>0?vc-acu:0, p=vc>0?+(acu/vc*100).toFixed(2):0;
     state.rows.push({item,descricao:desc,valorContrato:vc,medicao:med,acumulado:acu,saldo,percentualExecutado:p});
     const o=currentObra(); if(o){ o.itens=state.rows; saveObra(o); }
     renderAll();
     $('fItem').value=''; $('fName').value=''; $('fValorContrato').value=''; $('fMedicao').value=''; $('fAcumulado').value=''; $('fSaldo').value=''; $('fPct').value='';
-    showToast('✅ Item adicionado.');
+    showToast('\u2705 Item adicionado.');
   };
 }
 
@@ -129,7 +158,7 @@ export function bindEvents(){
     const email=$('loginEmail').value.trim(), senha=$('loginSenha').value, btn=$('loginBtn');
     btn.disabled=true; btn.textContent='Entrando...'; $('loginError').style.display='none';
     try{ await signInWithEmailAndPassword(auth,email,senha); }
-    catch{ $('loginError').textContent='E-mail ou senha inválidos.'; $('loginError').style.display='block'; }
+    catch{ $('loginError').textContent='E-mail ou senha inv\u00e1lidos.'; $('loginError').style.display='block'; }
     finally{ btn.disabled=false; btn.textContent='Entrar'; }
   });
   const logoutAdmin=$('logoutBtnAdmin'); if(logoutAdmin) logoutAdmin.addEventListener('click',()=>{ cleanup(); signOut(auth); });
@@ -139,7 +168,10 @@ export function bindEvents(){
   if(toggleThemeBtn) toggleThemeBtn.onclick=()=>{
     document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';
     const o=currentObra();
-    if(state.rows.length) state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser,o?.cronograma,o?.dataInicio);
+    if(state.rows.length){
+      state.chartUser=renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser,o?.cronograma,o?.dataInicio,o?.dataEmissao);
+      state.chartUser2=renderCurvaS('sCurveAditivoChart','sCurveAditivoScrollWrap',state.rows,state.chartUser2,o?.cronogramaAditivo,o?.dataInicio,o?.dataEmissaoAditivo);
+    }
   };
 
   const menuBtn=$('menuBtn');
@@ -147,14 +179,14 @@ export function bindEvents(){
     const aside=document.querySelector('#appView .app-aside');
     if(!aside) return;
     const open=aside.classList.toggle('aside-open');
-    menuBtn.textContent=open?'✕':'☰';
+    menuBtn.textContent=open?'\u2715':'\u2630';
   };
   const menuBtnAdmin=$('menuBtnAdmin');
   if(menuBtnAdmin) menuBtnAdmin.onclick=()=>{
     const aside=$('adminAside');
     if(!aside) return;
     const open=aside.classList.toggle('aside-open');
-    menuBtnAdmin.textContent=open?'✕':'☰';
+    menuBtnAdmin.textContent=open?'\u2715':'\u2630';
   };
   const adminToggleColab=$('adminToggleColab');
   if(adminToggleColab) adminToggleColab.onclick=()=>{ const p=$('adminColabPanel'); if(p) p.style.display=p.style.display==='none'?'block':'none'; };
@@ -164,6 +196,10 @@ export function bindEvents(){
   const loadCronoBtn=$('loadCronograma');
   if(loadCronoBtn) loadCronoBtn.onclick=()=>importCronograma();
 
+  /* Bind do bot\u00e3o de aditivo — independente do bot\u00e3o do cronograma do contrato */
+  const loadAditivoBtn=$('loadCronogramaAditivo');
+  if(loadAditivoBtn) loadAditivoBtn.onclick=()=>importCronogramaAditivo();
+
   const projDataInicio=$('projDataInicio');
   if(projDataInicio) projDataInicio.addEventListener('change',async()=>{
     const o=currentObra(); if(!o) return;
@@ -171,7 +207,7 @@ export function bindEvents(){
     await saveObra(o);
     renderCronogramaBox();
     updateDashboard();
-    showToast('✅ Data de início salva.');
+    showToast('\u2705 Data de in\u00edcio salva.');
   });
 
   const fillSampleBtn=$('fillSample'); if(fillSampleBtn) fillSampleBtn.onclick=()=>{
@@ -216,7 +252,7 @@ export function bindEvents(){
       const b=e.target.closest('button[data-del]'); if(!b) return;
       const idx=+b.dataset.del;
       const desc=state.rows[idx]?.descricao||state.rows[idx]?.item||'este item';
-      if(!confirm(`Remover "${desc}" do índice de itens?`)) return;
+      if(!confirm(`Remover "${desc}" do \u00edndice de itens?`)) return;
       state.rows.splice(idx,1);
       const o=currentObra(); if(o){ o.itens=state.rows; saveObra(o); }
       renderAll();
@@ -240,6 +276,6 @@ export function bindEvents(){
     if(state.adminSubs[uid]){ state.adminSubs[uid](); delete state.adminSubs[uid]; }
     if(state.adminSelectedUid===uid){ state.adminSelectedUid=null; state.adminSelectedObraId=null; }
     renderAdminViews(); renderAdminDetail();
-    showToast('✅ Colaborador removido.');
+    showToast('\u2705 Colaborador removido.');
   };
 }
