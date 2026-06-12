@@ -109,10 +109,9 @@ export function importCronogramaMensal(){
   input.click();
 }
 
-/* ── Importa cronograma PREVISTO de um aditivo específico ── */
 export function importCronogramaPrevistoAditivo(aditivoId){
   const o=currentObra();
-  if(!o||!aditivoId){ showToast('\u26a0\ufe0f Obra ou aditivo não encontrado.',true); return; }
+  if(!o||!aditivoId){ showToast('\u26a0\ufe0f Obra ou aditivo n\u00e3o encontrado.',true); return; }
   const input=document.createElement('input');
   input.type='file';
   input.accept='.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
@@ -124,7 +123,7 @@ export function importCronogramaPrevistoAditivo(aditivoId){
       const wb=XLSX.read(buf,{type:'array'});
       const { cronograma, totalMeses, dataEmissao } = parseCronogramaXLSX(wb);
       const ad = (o.aditivos||[]).find(a=>a.id===aditivoId);
-      if(!ad) throw new Error('Aditivo não encontrado.');
+      if(!ad) throw new Error('Aditivo n\u00e3o encontrado.');
       ad.cronograma = cronograma;
       if(dataEmissao) ad.dataEmissao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
       await saveObra(o);
@@ -137,10 +136,9 @@ export function importCronogramaPrevistoAditivo(aditivoId){
   input.click();
 }
 
-/* ── Importa cronograma MENSAL (executado) de um aditivo específico ── */
 export function importCronogramaMensalAditivo(aditivoId){
   const o=currentObra();
-  if(!o||!aditivoId){ showToast('\u26a0\ufe0f Obra ou aditivo não encontrado.',true); return; }
+  if(!o||!aditivoId){ showToast('\u26a0\ufe0f Obra ou aditivo n\u00e3o encontrado.',true); return; }
   const input=document.createElement('input');
   input.type='file';
   input.accept='.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
@@ -152,7 +150,7 @@ export function importCronogramaMensalAditivo(aditivoId){
       const wb=XLSX.read(buf,{type:'array'});
       const { cronograma, totalMeses } = parseCronogramaXLSX(wb);
       const ad = (o.aditivos||[]).find(a=>a.id===aditivoId);
-      if(!ad) throw new Error('Aditivo não encontrado.');
+      if(!ad) throw new Error('Aditivo n\u00e3o encontrado.');
       ad.cronogramaExecucao = cronograma.map(m => ({
         mes: m.mes,
         executadoPct:   m.planejadoPct,
@@ -167,7 +165,6 @@ export function importCronogramaMensalAditivo(aditivoId){
   input.click();
 }
 
-/* ── Cria um novo aditivo vazio ── */
 export async function addNovoAditivo(){
   const o=currentObra();
   if(!o){ showToast('\u26a0\ufe0f Selecione uma obra antes de adicionar um aditivo.',true); return; }
@@ -185,7 +182,6 @@ export async function addNovoAditivo(){
   updateDashboard();
 }
 
-/* ── Renomeia aditivo ── */
 export async function renomearAditivo(aditivoId, novoNome){
   const o=currentObra(); if(!o) return;
   const ad=(o.aditivos||[]).find(a=>a.id===aditivoId); if(!ad) return;
@@ -194,7 +190,6 @@ export async function renomearAditivo(aditivoId, novoNome){
   renderAditivosSection();
 }
 
-/* ── Remove aditivo ── */
 export async function removerAditivo(aditivoId){
   const o=currentObra(); if(!o) return;
   if(!confirm('Remover este aditivo e seu cronograma?')) return;
@@ -227,6 +222,37 @@ export function setupColabForm(){
 }
 
 export function bindEvents(){
+  /* ── Expõe funções admin no window para uso via onclick inline no HTML gerado ── */
+  window.adminSelectColab = (uid) => {
+    state.adminSelectedUid  = uid;
+    state.adminSelectedObraId = null;
+    renderAdminSidebar();
+    renderAdminDetail();
+  };
+  window.adminDeselectColab = () => {
+    state.adminSelectedUid  = null;
+    state.adminSelectedObraId = null;
+    renderAdminSidebar();
+    renderAdminDetail();
+  };
+  window.adminSelectObra = (obraId) => {
+    state.adminSelectedObraId = obraId || null;
+    renderAdminDetail();
+  };
+  window.toggleBloqueio = async (uid, bloqueado) => {
+    try {
+      await updateDoc(doc(db,'users',uid),{ blocked: !bloqueado });
+      showToast(bloqueado ? '\u2705 Colaborador desbloqueado.' : '\ud83d\udd12 Colaborador bloqueado.');
+    } catch(err){ showToast('\u274c '+err.message,true); }
+  };
+  window.removeColab = async (uid) => {
+    if(!confirm('Remover este colaborador permanentemente?')) return;
+    try {
+      await updateDoc(doc(db,'users',uid),{ disabled: true });
+      showToast('\u2705 Colaborador removido.');
+    } catch(err){ showToast('\u274c '+err.message,true); }
+  };
+
   const loginForm=$('loginForm');
   if(loginForm) loginForm.addEventListener('submit',async e=>{
     e.preventDefault();
@@ -253,10 +279,11 @@ export function bindEvents(){
     updateDashboard();
   };
 
+  // Corrigido: usa 'aside-open' (classe correta do CSS)
   const menuBtn=$('menuBtn');
-  if(menuBtn) menuBtn.onclick=()=>{ const a=document.querySelector('.app-aside'); if(a) a.classList.toggle('open'); };
+  if(menuBtn) menuBtn.onclick=()=>{ const a=document.querySelector('.app-aside'); if(a) a.classList.toggle('aside-open'); };
   const menuBtnAdmin=$('menuBtnAdmin');
-  if(menuBtnAdmin) menuBtnAdmin.onclick=()=>{ const a=$('adminAside'); if(a) a.classList.toggle('open'); };
+  if(menuBtnAdmin) menuBtnAdmin.onclick=()=>{ const a=$('adminAside'); if(a) a.classList.toggle('aside-open'); };
 
   const loadFileBtn=$('loadFile');  if(loadFileBtn) loadFileBtn.onclick=()=>importFile(false);
   const addObraBtn=$('addObraBtn'); if(addObraBtn)  addObraBtn.onclick=()=>importFile(false);
@@ -268,11 +295,9 @@ export function bindEvents(){
   const loadMensal=$('loadCronogramaMensal');
   if(loadMensal) loadMensal.onclick=()=>importCronogramaMensal();
 
-  // Botão novo aditivo (sidebar)
   const btnNovoAditivo=$('btnNovoAditivo');
   if(btnNovoAditivo) btnNovoAditivo.onclick=()=>addNovoAditivo();
 
-  // Delegação de eventos para cards de aditivo (sidebar)
   const aditivosBox=$('aditivosBox');
   if(aditivosBox){
     aditivosBox.addEventListener('click', e=>{
