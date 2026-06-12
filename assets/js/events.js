@@ -12,7 +12,7 @@ import {
 } from './render.js';
 import { parseCronogramaXLSX } from './cronograma.js';
 
-export async function importFile(replace=false){
+export function importFile(replace=false){
   const input=document.createElement('input');
   input.type='file';
   input.accept=['.xlsx','.xls','.xlsm','.xlsb','.xlam','.xla','.ods','.csv','.json',
@@ -33,33 +33,30 @@ export async function importFile(replace=false){
         rows=Array.isArray(obj)?normalizeRows(obj):normalizeRows(obj.itens);
         if(!rows.length&&!Array.isArray(obj)&&!Array.isArray(obj.itens)) throw new Error('JSON inv\u00e1lido.');
       } else { obj=await readExcelFile(file); rows=normalizeRows(obj.itens); }
-
       const obraId=replace&&state.selectedObraId?state.selectedObraId:('obra_'+Date.now());
       const obraNome=baseName(file.name)||obj?.nome||'Nova obra';
       const obra={ id:obraId, nome:obraNome, nomeProjeto:obj?.nomeProjeto||obj?.obra||obraNome,
         contratada:obj?.contratada||'', arquivoNome:file.name, origem:ext,
         medicaoAtual:obj?.medicaoAtual||'', itens:rows, resumo:obj?.resumo||{percentual:0} };
-
       if(replace){
         const existente=currentObra();
-        if(existente?.cronograma)              obra.cronograma             = existente.cronograma;
-        if(existente?.dataInicio)              obra.dataInicio             = existente.dataInicio;
-        if(existente?.dataEmissao)             obra.dataEmissao            = existente.dataEmissao;
-        if(existente?.cronogramaExecucao)      obra.cronogramaExecucao     = existente.cronogramaExecucao;
-        if(existente?.cronogramaAditivo)       obra.cronogramaAditivo      = existente.cronogramaAditivo;
-        if(existente?.dataInicioAditivo)       obra.dataInicioAditivo      = existente.dataInicioAditivo;
-        if(existente?.dataEmissaoAditivo)      obra.dataEmissaoAditivo     = existente.dataEmissaoAditivo;
+        if(existente?.cronograma)         obra.cronograma         = existente.cronograma;
+        if(existente?.dataInicio)         obra.dataInicio         = existente.dataInicio;
+        if(existente?.dataEmissao)        obra.dataEmissao        = existente.dataEmissao;
+        if(existente?.cronogramaExecucao) obra.cronogramaExecucao = existente.cronogramaExecucao;
+        if(existente?.cronogramaAditivo)  obra.cronogramaAditivo  = existente.cronogramaAditivo;
+        if(existente?.dataInicioAditivo)  obra.dataInicioAditivo  = existente.dataInicioAditivo;
+        if(existente?.dataEmissaoAditivo) obra.dataEmissaoAditivo = existente.dataEmissaoAditivo;
       }
-
       await saveObra(obra);
       state.selectedObraId=obraId;
       showToast(`\u2705 ${rows.length} itens importados`);
     } catch(err){ showToast('\u274c '+err.message,true); console.error(err); }
   };
-  input.click();
+  input.click(); // sempre sinóncrono, sem await antes
 }
 
-export async function importCronograma(){
+export function importCronograma(){
   const o=currentObra();
   if(!o){ showToast('\u26a0\ufe0f Selecione uma obra antes de importar o cronograma.',true); return; }
   const input=document.createElement('input');
@@ -72,7 +69,7 @@ export async function importCronograma(){
       const buf=await file.arrayBuffer();
       const wb=XLSX.read(buf,{type:'array'});
       const { cronograma, totalMeses, dataEmissao } = parseCronogramaXLSX(wb);
-      o.cronograma  = cronograma;
+      o.cronograma = cronograma;
       if(dataEmissao) o.dataEmissao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
       await saveObra(o);
       const emissaoTxt = dataEmissao ? ` | Emiss\u00e3o: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
@@ -84,7 +81,7 @@ export async function importCronograma(){
   input.click();
 }
 
-export async function importCronogramaMensal(){
+export function importCronogramaMensal(){
   const o=currentObra();
   if(!o){ showToast('\u26a0\ufe0f Selecione uma obra antes de importar o cronograma mensal.',true); return; }
   const input=document.createElement('input');
@@ -96,9 +93,7 @@ export async function importCronogramaMensal(){
     try{
       const buf=await file.arrayBuffer();
       const wb=XLSX.read(buf,{type:'array'});
-      // Reutiliza o mesmo parser — a coluna planejadoPct vira executadoPct
       const { cronograma, totalMeses } = parseCronogramaXLSX(wb);
-      // Remapeia: planejadoPct => executadoPct (execu\u00e7\u00e3o real mensal)
       o.cronogramaExecucao = cronograma.map(m => ({
         mes: m.mes,
         executadoPct:   m.planejadoPct,
@@ -113,7 +108,7 @@ export async function importCronogramaMensal(){
   input.click();
 }
 
-export async function importCronogramaAditivo(){
+export function importCronogramaAditivo(){
   const o=currentObra();
   if(!o){ showToast('\u26a0\ufe0f Selecione uma obra antes de importar o cronograma de aditivo.',true); return; }
   const input=document.createElement('input');
@@ -126,7 +121,7 @@ export async function importCronogramaAditivo(){
       const buf=await file.arrayBuffer();
       const wb=XLSX.read(buf,{type:'array'});
       const { cronograma, totalMeses, dataEmissao } = parseCronogramaXLSX(wb);
-      o.cronogramaAditivo  = cronograma;
+      o.cronogramaAditivo = cronograma;
       if(dataEmissao) o.dataEmissaoAditivo = { mes: dataEmissao.mes, ano: dataEmissao.ano };
       if(!o.dataInicioAditivo) o.dataInicioAditivo = o.dataInicio || null;
       await saveObra(o);
@@ -161,7 +156,6 @@ export function setupColabForm(){
 }
 
 export function bindEvents(){
-  /* ---- Login / Logout ---- */
   const loginForm=$('loginForm');
   if(loginForm) loginForm.addEventListener('submit',async e=>{
     e.preventDefault();
@@ -179,7 +173,6 @@ export function bindEvents(){
   const logoutAdmin=$('logoutBtnAdmin');
   if(logoutAdmin) logoutAdmin.onclick=async()=>{ await signOut(auth); cleanup(); };
 
-  /* ---- Tema ---- */
   const themeBtn=$('toggleTheme');
   if(themeBtn) themeBtn.onclick=()=>{
     const html=document.documentElement;
@@ -189,30 +182,24 @@ export function bindEvents(){
     updateDashboard();
   };
 
-  /* ---- Menu lateral ---- */
   const menuBtn=$('menuBtn');
   if(menuBtn) menuBtn.onclick=()=>{ const a=document.querySelector('.app-aside'); if(a) a.classList.toggle('open'); };
   const menuBtnAdmin=$('menuBtnAdmin');
   if(menuBtnAdmin) menuBtnAdmin.onclick=()=>{ const a=$('adminAside'); if(a) a.classList.toggle('open'); };
 
-  /* ---- Importar Excel / Nova Obra ---- */
-  const loadFileBtn=$('loadFile');   if(loadFileBtn) loadFileBtn.onclick=()=>importFile(false);
-  const addObraBtn=$('addObraBtn');  if(addObraBtn)  addObraBtn.onclick=()=>importFile(false);
+  const loadFileBtn=$('loadFile');  if(loadFileBtn) loadFileBtn.onclick=()=>importFile(false);
+  const addObraBtn=$('addObraBtn'); if(addObraBtn)  addObraBtn.onclick=()=>importFile(false);
   setImportFileFn((replace)=>importFile(replace));
 
-  /* ---- Cronograma do Contrato ---- */
   const loadCrono=$('loadCronograma');
   if(loadCrono) loadCrono.onclick=()=>importCronograma();
 
-  /* ---- Cronograma Mensal (execu\u00e7\u00e3o real) ---- */
   const loadMensal=$('loadCronogramaMensal');
   if(loadMensal) loadMensal.onclick=()=>importCronogramaMensal();
 
-  /* ---- Cronograma de Aditivo ---- */
   const loadAditivo=$('loadCronogramaAditivo');
   if(loadAditivo) loadAditivo.onclick=()=>importCronogramaAditivo();
 
-  /* ---- Exportar CSV ---- */
   const exportCsv=$('exportCsv');
   if(exportCsv) exportCsv.onclick=()=>{
     if(!state.rows.length){ showToast('Nenhum dado para exportar.',true); return; }
@@ -224,7 +211,6 @@ export function bindEvents(){
     a.download='medicao.csv'; a.click();
   };
 
-  /* ---- Salvar JSON ---- */
   const saveJson=$('saveJson');
   if(saveJson) saveJson.onclick=()=>{
     const o=currentObra()||{};
@@ -234,7 +220,6 @@ export function bindEvents(){
     a.download=(o.nome||'obra')+'.json'; a.click();
   };
 
-  /* ---- Limpar itens ---- */
   const fillSample=$('fillSample');
   if(fillSample) fillSample.onclick=async()=>{
     if(!confirm('Limpar todos os itens da obra atual?')) return;
@@ -243,7 +228,6 @@ export function bindEvents(){
     renderAll();
   };
 
-  /* ---- Adicionar linha ---- */
   const addRowBtn=$('addRow');
   if(addRowBtn) addRowBtn.onclick=()=>{
     const vc=parseMoney($('fValorContrato').value);
@@ -260,7 +244,6 @@ export function bindEvents(){
     scheduleSave(); renderAll();
   };
 
-  /* ---- Editar c\u00e9lulas da tabela ---- */
   const tbody=$('tbody');
   if(tbody){
     tbody.addEventListener('blur',e=>{
@@ -289,7 +272,6 @@ export function bindEvents(){
     });
   }
 
-  /* ---- Data de in\u00edcio da obra ---- */
   const projDataInicio=$('projDataInicio');
   if(projDataInicio) projDataInicio.addEventListener('change',async()=>{
     const o=currentObra(); if(!o) return;
@@ -298,14 +280,12 @@ export function bindEvents(){
     updateDashboard();
   });
 
-  /* ---- Admin: painel colaboradores ---- */
   const adminToggle=$('adminToggleColab');
   if(adminToggle) adminToggle.onclick=()=>{
     const p=$('adminColabPanel');
     if(p) p.style.display=p.style.display==='none'?'block':'none';
   };
 
-  /* ---- Topo (mobile) ---- */
   window.addEventListener('scroll',()=>{
     const btn=$('btnTopo'); if(btn) btn.style.display=window.scrollY>300?'flex':'none';
   });
