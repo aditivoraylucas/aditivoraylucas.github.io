@@ -44,9 +44,7 @@ export function importFile(replace=false){
         if(existente?.dataInicio)         obra.dataInicio         = existente.dataInicio;
         if(existente?.dataEmissao)        obra.dataEmissao        = existente.dataEmissao;
         if(existente?.cronogramaExecucao) obra.cronogramaExecucao = existente.cronogramaExecucao;
-        // preserva array de aditivos
         if(existente?.aditivos)           obra.aditivos           = existente.aditivos;
-        // compat legado
         if(existente?.cronogramaAditivo)  obra.cronogramaAditivo  = existente.cronogramaAditivo;
         if(existente?.dataInicioAditivo)  obra.dataInicioAditivo  = existente.dataInicioAditivo;
         if(existente?.dataEmissaoAditivo) obra.dataEmissaoAditivo = existente.dataEmissaoAditivo;
@@ -174,16 +172,15 @@ export async function addNovoAditivo(){
   const o=currentObra();
   if(!o){ showToast('\u26a0\ufe0f Selecione uma obra antes de adicionar um aditivo.',true); return; }
   if(!o.aditivos) o.aditivos=[];
-  const idx = o.aditivos.length + 1;
   o.aditivos.push({
-    id:   'aditivo_'+Date.now(),
-    nome: `Aditivo ${idx}`,
-    cronograma: null,
-    cronogramaExecucao: null,
-    dataEmissao: null
+    id:                 'aditivo_'+Date.now(),
+    nome:               'Novo aditivo',
+    cronograma:         [],
+    cronogramaExecucao: [],
+    dataEmissao:        null
   });
   await saveObra(o);
-  showToast(`\u2705 Aditivo ${idx} criado.`);
+  showToast('\u2705 Aditivo criado.');
   renderAditivosSection();
   updateDashboard();
 }
