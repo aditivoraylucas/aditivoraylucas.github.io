@@ -50,7 +50,6 @@ function calcDataFim(dataInicio, totalMeses) {
   return `${fimAno}-${String(fimMes).padStart(2,'0')}-${String(fimDia).padStart(2,'0')}`;
 }
 
-/** Dado dataInicio e totalMeses do contrato, retorna o dataInicio do próximo período (aditivo). */
 function calcDataInicioProximo(dataInicio, totalMeses) {
   if (!dataInicio || !totalMeses) return dataInicio || null;
   const [ano, mes] = dataInicio.split('-').map(Number);
@@ -58,6 +57,25 @@ function calcDataInicioProximo(dataInicio, totalMeses) {
   const novoAno = ano + Math.floor(base0 / 12);
   const novoMes = (base0 % 12) + 1;
   return `${novoAno}-${String(novoMes).padStart(2,'0')}-01`;
+}
+
+/**
+ * Garante que todos os aditivos da obra têm campo `id`.
+ * Migra silenciosamente os que não têm e salva no Firestore.
+ */
+async function migrarAditivosSemId(o) {
+  if (!Array.isArray(o.aditivos)) return false;
+  let precisaSalvar = false;
+  o.aditivos.forEach((ad, idx) => {
+    if (!ad.id) {
+      ad.id = 'aditivo_legado_' + idx + '_' + Date.now();
+      if (!Array.isArray(ad.cronograma))         ad.cronograma         = ad.cronograma         ? [ad.cronograma]         : [];
+      if (!Array.isArray(ad.cronogramaExecucao)) ad.cronogramaExecucao = ad.cronogramaExecucao ? [ad.cronogramaExecucao] : [];
+      precisaSalvar = true;
+    }
+  });
+  if (precisaSalvar) await saveObra(o);
+  return precisaSalvar;
 }
 
 /* ============================================================
@@ -101,8 +119,7 @@ export function renderCurvaS1(canvasId, wrapId, itens, prevChart) {
 }
 
 /* ============================================================
-   CURVA S2 — Genérica: recebe crono previsto + execução + dataInicio
-   Usada tanto para o contrato quanto para cada aditivo.
+   CURVA S2 — Genérica
    ============================================================ */
 export function renderCurvaS2(canvasId, wrapId, obra, prevChart) {
   return _renderCurvaS2Generica(canvasId, wrapId, {
@@ -113,7 +130,6 @@ export function renderCurvaS2(canvasId, wrapId, obra, prevChart) {
   }, prevChart);
 }
 
-/** Renderiza Curva S para um aditivo individual. */
 export function renderCurvaS2Aditivo(canvasId, wrapId, aditivo, dataInicioAditivo, prevChart) {
   return _renderCurvaS2Generica(canvasId, wrapId, {
     cronograma:         Array.isArray(aditivo?.cronograma)         ? aditivo.cronograma         : [],
@@ -230,7 +246,6 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
   });
 }
 
-// Compat alias
 export function renderCurvaS(canvasId, wrapId, itens, prev) {
   return renderCurvaS1(canvasId, wrapId, itens, prev);
 }
@@ -261,8 +276,6 @@ export function renderTable() {
     </tr>`;
   }).join('');
 }
-
-/* ---- Caixas de status na sidebar ---- */
 
 export function renderCronogramaBox() {
   const box = $('cronogramaBox'); if (!box) return;
@@ -310,14 +323,19 @@ export function renderCronogramaMensalBox() {
 }
 
 /* ============================================================
-   SEÇÃO DE ADITIVOS — sidebar + curvas S dinâmicas
+   SEÇÃO DE ADITIVOS
    ============================================================ */
-
-/** Renderiza os cards de aditivos na sidebar (box #aditivosBox). */
 export function renderAditivosSection() {
   const box = $('aditivosBox'); if (!box) return;
   const o = currentObra();
   if (!o) { box.innerHTML = ''; return; }
+
+  // Migra aditivos legados que não têm campo id
+  const precisaMigrar = Array.isArray(o.aditivos) && o.aditivos.some(ad => !ad.id);
+  if (precisaMigrar) {
+    migrarAditivosSemId(o).then(() => renderAditivosSection());
+    return;
+  }
 
   const aditivos = Array.isArray(o.aditivos) ? o.aditivos : [];
 
@@ -337,7 +355,7 @@ export function renderAditivosSection() {
           <input
             type="text"
             data-aditivo-nome="${ad.id}"
-            value="${esc(ad.nome)}"
+            value="${esc(ad.nome || 'Aditivo')}"
             style="flex:1;font-size:.82rem;font-weight:600;border:1px solid var(--border);border-radius:5px;padding:.25rem .4rem;background:var(--bg);color:var(--text)"
           />
           <button data-aditivo-action="remover" data-aditivo-id="${ad.id}" class="btn btn-danger" style="padding:.25rem .45rem;font-size:.75rem">\ud83d\uddd1</button>
@@ -354,34 +372,28 @@ export function renderAditivosSection() {
   }).join('');
 }
 
-/** Renderiza as Curvas S dos aditivos no painel principal (container #aditivosCurvasContainer). */
 export function renderAditivosCurvas() {
   const container = $('aditivosCurvasContainer'); if (!container) return;
   const o = currentObra();
   if (!o) { container.innerHTML = ''; return; }
 
   const aditivos = Array.isArray(o.aditivos) ? o.aditivos : [];
-  // calcula o dataInicio de cada aditivo (contínuo)
   const nContrato = Array.isArray(o.cronograma) ? o.cronograma.length : 0;
   let dataInicioBase = calcDataInicioProximo(o.dataInicio, nContrato);
 
-  // Destrói charts anteriores
   if (!state._aditivoCharts) state._aditivoCharts = {};
   Object.values(state._aditivoCharts).forEach(c => { try { c.destroy(); } catch(_){} });
   state._aditivoCharts = {};
-
-  // Remove aditivos que não existem mais
   container.innerHTML = '';
 
   aditivos.forEach((ad, idx) => {
     const nPrev = Array.isArray(ad.cronograma) ? ad.cronograma.length : 0;
     const dataInicioAd = dataInicioBase;
-    // próximo aditivo começa onde este termina
     dataInicioBase = calcDataInicioProximo(dataInicioBase, nPrev) || dataInicioBase;
 
     const temPrevisto = nPrev > 0;
     const temMensal   = Array.isArray(ad.cronogramaExecucao) && ad.cronogramaExecucao.length > 0;
-    if (!temPrevisto && !temMensal) return; // sem dados, não exibe painel
+    if (!temPrevisto && !temMensal) return;
 
     const canvasId = `curvaS_aditivo_${ad.id}`;
     const wrapId   = `curvaS_aditivo_wrap_${ad.id}`;
@@ -395,8 +407,8 @@ export function renderAditivosCurvas() {
     panel.style.marginBottom = '1.5rem';
     panel.innerHTML = `
       <div style="display:flex;align-items:baseline;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap">
-        <h3 style="font-size:.95rem;font-weight:700;margin:0">Curva S — ${esc(ad.nome)}</h3>
-        ${dataFimStr ? `<span style="font-size:.75rem;color:var(--text-muted)">\ud83c\udfc1 Término: <strong>${dataFimStr}</strong></span>` : ''}
+        <h3 style="font-size:.95rem;font-weight:700;margin:0">Curva S \u2014 ${esc(ad.nome || 'Aditivo')}</h3>
+        ${dataFimStr ? `<span style="font-size:.75rem;color:var(--text-muted)">\ud83c\udfc1 T\u00e9rmino: <strong>${dataFimStr}</strong></span>` : ''}
       </div>
       <div class="chart-scroll-wrap" id="${wrapId}"><div class="chart-container"><canvas id="${canvasId}"></canvas></div></div>`;
     container.appendChild(panel);
@@ -431,10 +443,8 @@ export function updateDashboard() {
   if ($('mainProjContratada')) $('mainProjContratada').textContent = o?.contratada || '-';
   if ($('mainProjScope'))      $('mainProjScope').textContent      = o?.medicaoAtual || '-';
 
-  // Curva S1 — barras por item
   state.chartUser = renderCurvaS1('sCurveChart', 'sCurveScrollWrap', itens, state.chartUser);
 
-  // Curva S2 — Contrato (previsto × mensal do contrato)
   const temCrono  = Array.isArray(o?.cronograma)         && o.cronograma.length         > 0;
   const temMensal = Array.isArray(o?.cronogramaExecucao) && o.cronogramaExecucao.length > 0;
   const panelS2   = $('sCurveAditivoPanel');
@@ -449,7 +459,6 @@ export function updateDashboard() {
     if (state.chartUser2) { try { state.chartUser2.destroy(); } catch(_){} state.chartUser2 = null; }
   }
 
-  // Curvas S dos aditivos
   renderAditivosCurvas();
 }
 
@@ -626,7 +635,6 @@ export function renderAdminDetail() {
   const VS   = 'font-size:.95rem;font-weight:700;margin-top:.15rem';
   const VSSM = 'font-size:.82rem;font-weight:700;margin-top:.15rem;word-break:break-word';
 
-  // Curva S2 do contrato
   const curvaS2HTML = (temCrono && temMensal)
     ? `<div class="panel" style="margin-bottom:1.5rem">
          <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S \u2014 Cronograma F\u00edsico-Financeiro (Contrato)</h3>
@@ -634,7 +642,6 @@ export function renderAdminDetail() {
        </div>`
     : '';
 
-  // Curvas S dos aditivos (admin view)
   const aditivos = Array.isArray(obra.aditivos) ? obra.aditivos : [];
   let nContrato = totalMeses;
   let dataInicioBase = calcDataInicioProximo(obra.dataInicio, nContrato);
@@ -650,8 +657,8 @@ export function renderAdminDetail() {
     const dataFimAd = (nP && di) ? fmtDate(calcDataFim(di, nP)) : null;
     return `<div class="panel" style="margin-bottom:1.5rem">
       <div style="display:flex;align-items:baseline;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap">
-        <h3 style="font-size:.95rem;font-weight:700;margin:0">Curva S \u2014 ${esc(ad.nome)}</h3>
-        ${dataFimAd ? `<span style="font-size:.75rem;color:var(--text-muted)">\ud83c\udfc1 Término: <strong>${dataFimAd}</strong></span>` : ''}
+        <h3 style="font-size:.95rem;font-weight:700;margin:0">Curva S \u2014 ${esc(ad.nome || 'Aditivo')}</h3>
+        ${dataFimAd ? `<span style="font-size:.75rem;color:var(--text-muted)">\ud83c\udfc1 T\u00e9rmino: <strong>${dataFimAd}</strong></span>` : ''}
       </div>
       <div class="chart-scroll-wrap" id="${wrapId}"><div class="chart-container"><canvas id="${canvasId}"></canvas></div></div>
     </div>`;
@@ -703,7 +710,6 @@ export function renderAdminDetail() {
      </div>`;
   panel.innerHTML = html;
 
-  // recalcula dataInicio dos aditivos para renderizar gráficos
   let dataInicioBaseCharts = calcDataInicioProximo(obra.dataInicio, totalMeses);
   requestAnimationFrame(() => {
     state.chartAdmin = renderCurvaS1('adminCurvaS', 'adminCurvaSwrap', it, state.chartAdmin);
