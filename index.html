@@ -93,6 +93,29 @@
         <button id="addObraBtn" class="btn btn-primary" style="width:100%;margin-top:.75rem">&#65039; Nova Obra</button>
       </div>
 
+      <!-- DADOS DA OBRA -->
+      <div class="panel" style="padding:1rem">
+        <div class="section-title" style="margin-bottom:.75rem">&#128196; Dados da Obra</div>
+        <div style="display:flex;flex-direction:column;gap:.75rem">
+          <div class="form-group" style="margin:0">
+            <label style="font-size:.75rem;font-weight:600;color:var(--text-muted)">Nome do Projeto</label>
+            <input id="projName" type="text" class="form-control" placeholder="Nome do projeto"/>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label style="font-size:.75rem;font-weight:600;color:var(--text-muted)">Contratada</label>
+            <input id="projContratada" type="text" class="form-control" placeholder="Nome da empresa"/>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label style="font-size:.75rem;font-weight:600;color:var(--text-muted)">&#128197; Data de In&#237;cio da Obra</label>
+            <input id="projDataInicio" type="date" class="form-control"/>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label style="font-size:.75rem;font-weight:600;color:var(--text-muted)">Medi&#231;&#227;o Atual (aba)</label>
+            <input id="projScope" type="text" class="form-control" placeholder="ex: Med. 03" readonly style="background:var(--bg)"/>
+          </div>
+        </div>
+      </div>
+
       <!-- CRONOGRAMA DO CONTRATO -->
       <div class="panel" style="padding:1rem">
         <div class="section-title" style="margin-bottom:.75rem">&#128197; Cronograma do Contrato</div>
@@ -118,9 +141,6 @@
         </div>
       </div>
 
-      <input id="projName"       type="hidden"/>
-      <input id="projContratada" type="hidden"/>
-      <input id="projScope"      type="hidden" readonly/>
     </aside>
 
     <main class="app-main">
@@ -138,17 +158,6 @@
         <div class="proj-banner-item">
           <span class="lbl">Medi&#231;&#227;o atual</span>
           <span class="val" id="mainProjScope">&#8212;</span>
-        </div>
-      </div>
-
-      <!-- Painel: DATA DE IN&#205;CIO DA OBRA -->
-      <div class="panel" style="margin-bottom:1.25rem">
-        <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
-          <div class="form-group" style="margin:0;flex:1;min-width:200px">
-            <label style="font-size:.8rem;font-weight:600;color:var(--text-muted)">&#128197; DATA DE IN&#205;CIO DA OBRA</label>
-            <input id="projDataInicio" type="date" class="form-control" style="max-width:220px"/>
-          </div>
-          <div id="cronoStatus" style="font-size:.8rem;color:var(--text-muted);padding-top:.25rem"></div>
         </div>
       </div>
 
