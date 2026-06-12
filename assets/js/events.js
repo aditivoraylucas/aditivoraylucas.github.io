@@ -5,8 +5,9 @@ import { doc, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12
 import { readExcelFile, normalizeRows } from './excel.js';
 import {
   saveObra, deleteObra, scheduleSave, currentObra,
-  renderAll, renderCurvaS, applySelected, setImportFileFn,
+  renderAll, renderCurvaS1, renderCurvaS2, applySelected, setImportFileFn,
   updateDashboard, renderCronogramaBox, renderCronogramaAditivoBox,
+  renderCronogramaMensalBox,
   renderAdminViews, renderAdminDetail, renderColabList, renderAdminSidebar
 } from './render.js';
 import { parseCronogramaXLSX } from './cronograma.js';
@@ -30,7 +31,7 @@ export async function importFile(replace=false){
       } else if(ext==='json'){
         const text=await file.text(); obj=JSON.parse(text);
         rows=Array.isArray(obj)?normalizeRows(obj):normalizeRows(obj.itens);
-        if(!rows.length&&!Array.isArray(obj)&&!Array.isArray(obj.itens)) throw new Error('JSON inválido.');
+        if(!rows.length&&!Array.isArray(obj)&&!Array.isArray(obj.itens)) throw new Error('JSON inv\u00e1lido.');
       } else { obj=await readExcelFile(file); rows=normalizeRows(obj.itens); }
 
       const obraId=replace&&state.selectedObraId?state.selectedObraId:('obra_'+Date.now());
@@ -41,25 +42,26 @@ export async function importFile(replace=false){
 
       if(replace){
         const existente=currentObra();
-        if(existente?.cronograma)         obra.cronograma          = existente.cronograma;
-        if(existente?.dataInicio)         obra.dataInicio          = existente.dataInicio;
-        if(existente?.dataEmissao)        obra.dataEmissao         = existente.dataEmissao;
-        if(existente?.cronogramaAditivo)  obra.cronogramaAditivo   = existente.cronogramaAditivo;
-        if(existente?.dataInicioAditivo)  obra.dataInicioAditivo   = existente.dataInicioAditivo;
-        if(existente?.dataEmissaoAditivo) obra.dataEmissaoAditivo  = existente.dataEmissaoAditivo;
+        if(existente?.cronograma)              obra.cronograma             = existente.cronograma;
+        if(existente?.dataInicio)              obra.dataInicio             = existente.dataInicio;
+        if(existente?.dataEmissao)             obra.dataEmissao            = existente.dataEmissao;
+        if(existente?.cronogramaExecucao)      obra.cronogramaExecucao     = existente.cronogramaExecucao;
+        if(existente?.cronogramaAditivo)       obra.cronogramaAditivo      = existente.cronogramaAditivo;
+        if(existente?.dataInicioAditivo)       obra.dataInicioAditivo      = existente.dataInicioAditivo;
+        if(existente?.dataEmissaoAditivo)      obra.dataEmissaoAditivo     = existente.dataEmissaoAditivo;
       }
 
       await saveObra(obra);
       state.selectedObraId=obraId;
-      showToast(`✅ ${rows.length} itens importados`);
-    } catch(err){ showToast('❌ '+err.message,true); console.error(err); }
+      showToast(`\u2705 ${rows.length} itens importados`);
+    } catch(err){ showToast('\u274c '+err.message,true); console.error(err); }
   };
   input.click();
 }
 
 export async function importCronograma(){
   const o=currentObra();
-  if(!o){ showToast('⚠️ Selecione uma obra antes de importar o cronograma.',true); return; }
+  if(!o){ showToast('\u26a0\ufe0f Selecione uma obra antes de importar o cronograma.',true); return; }
   const input=document.createElement('input');
   input.type='file';
   input.accept='.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
@@ -73,20 +75,47 @@ export async function importCronograma(){
       o.cronograma  = cronograma;
       if(dataEmissao) o.dataEmissao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
       await saveObra(o);
-      const emissaoTxt = dataEmissao ? ` | Emissão: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
-      showToast(`✅ Cronograma do contrato importado: ${totalMeses} meses${emissaoTxt}.`);
+      const emissaoTxt = dataEmissao ? ` | Emiss\u00e3o: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
+      showToast(`\u2705 Cronograma do contrato importado: ${totalMeses} meses${emissaoTxt}.`);
       renderCronogramaBox();
       updateDashboard();
-    } catch(err){ showToast('❌ '+err.message,true); console.error(err); }
+    } catch(err){ showToast('\u274c '+err.message,true); console.error(err); }
   };
   input.click();
 }
 
-/* Importa o cronograma de aditivo — salva em campos exclusivos (cronogramaAditivo / dataInicioAditivo / dataEmissaoAditivo).
-   Não toca em obra.cronograma nem em obra.dataEmissao. */
+export async function importCronogramaMensal(){
+  const o=currentObra();
+  if(!o){ showToast('\u26a0\ufe0f Selecione uma obra antes de importar o cronograma mensal.',true); return; }
+  const input=document.createElement('input');
+  input.type='file';
+  input.accept='.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
+  input.onchange=async e=>{
+    if(!e.target.files.length) return;
+    const file=e.target.files[0];
+    try{
+      const buf=await file.arrayBuffer();
+      const wb=XLSX.read(buf,{type:'array'});
+      // Reutiliza o mesmo parser — a coluna planejadoPct vira executadoPct
+      const { cronograma, totalMeses } = parseCronogramaXLSX(wb);
+      // Remapeia: planejadoPct => executadoPct (execu\u00e7\u00e3o real mensal)
+      o.cronogramaExecucao = cronograma.map(m => ({
+        mes: m.mes,
+        executadoPct:   m.planejadoPct,
+        executadoValor: m.planejadoValor
+      }));
+      await saveObra(o);
+      showToast(`\u2705 Cronograma mensal importado: ${totalMeses} meses.`);
+      renderCronogramaMensalBox();
+      updateDashboard();
+    } catch(err){ showToast('\u274c '+err.message,true); console.error(err); }
+  };
+  input.click();
+}
+
 export async function importCronogramaAditivo(){
   const o=currentObra();
-  if(!o){ showToast('⚠️ Selecione uma obra antes de importar o cronograma de aditivo.',true); return; }
+  if(!o){ showToast('\u26a0\ufe0f Selecione uma obra antes de importar o cronograma de aditivo.',true); return; }
   const input=document.createElement('input');
   input.type='file';
   input.accept='.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
@@ -97,17 +126,15 @@ export async function importCronogramaAditivo(){
       const buf=await file.arrayBuffer();
       const wb=XLSX.read(buf,{type:'array'});
       const { cronograma, totalMeses, dataEmissao } = parseCronogramaXLSX(wb);
-      // Salva exclusivamente nos campos de aditivo — nunca altera o cronograma original
       o.cronogramaAditivo  = cronograma;
       if(dataEmissao) o.dataEmissaoAditivo = { mes: dataEmissao.mes, ano: dataEmissao.ano };
-      // dataInicioAditivo: se obra ainda não tiver, usa a mesma dataInicio do contrato como ponto de partida
       if(!o.dataInicioAditivo) o.dataInicioAditivo = o.dataInicio || null;
       await saveObra(o);
-      const emissaoTxt = dataEmissao ? ` | Emissão: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
-      showToast(`✅ Cronograma de aditivo importado: ${totalMeses} meses${emissaoTxt}.`);
+      const emissaoTxt = dataEmissao ? ` | Emiss\u00e3o: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
+      showToast(`\u2705 Cronograma de aditivo importado: ${totalMeses} meses${emissaoTxt}.`);
       renderCronogramaAditivoBox();
       updateDashboard();
-    } catch(err){ showToast('❌ '+err.message,true); console.error(err); }
+    } catch(err){ showToast('\u274c '+err.message,true); console.error(err); }
   };
   input.click();
 }
@@ -116,172 +143,184 @@ export function setupColabForm(){
   const form=$('addColabForm'); if(!form) return;
   form.addEventListener('submit',async e=>{
     e.preventDefault();
-    const nome=$('colabNome').value.trim(), email=$('colabEmail').value.trim(), senha=$('colabSenha').value;
-    const msgEl=$('colabMsgError'), btn=$('addColabBtn');
-    if(!nome||!email||!senha) return;
-    btn.disabled=true; btn.textContent='Cadastrando...'; msgEl.style.display='none';
-    const adminEmail=state.user.email;
+    const nome=$('colabNome').value.trim(),
+          email=$('colabEmail').value.trim(),
+          senha=$('colabSenha').value;
+    const errBox=$('colabMsgError');
+    errBox.style.display='none';
+    const btn=$('addColabBtn'); btn.disabled=true; btn.textContent='Aguarde...';
     try{
       const cred=await createUserWithEmailAndPassword(auth,email,senha);
-      await setDoc(doc(db,'users',cred.user.uid),{nome,email,role:'colaborador',criadoEm:Date.now(),disabled:false,blocked:false});
-      await signOut(auth);
-      await signInWithEmailAndPassword(auth,adminEmail,ADMIN_SENHA);
-      $('colabNome').value=''; $('colabEmail').value=''; $('colabSenha').value='';
-      showToast(`✅ "${nome}" cadastrado!`);
-    }catch(err){ msgEl.textContent=err?.message||'Erro.'; msgEl.style.display='block'; }
-    finally{ btn.disabled=false; btn.textContent='Cadastrar colaborador'; }
+      await setDoc(doc(db,'users',cred.user.uid),{nome,email,role:'colaborador',blocked:false,createdAt:new Date().toISOString()});
+      showToast('\u2705 Colaborador cadastrado!');
+      form.reset();
+    } catch(err){
+      errBox.textContent=err.message; errBox.style.display='block';
+    } finally { btn.disabled=false; btn.textContent='Cadastrar colaborador'; }
   });
-}
-
-export function setupNovaAtividade(){
-  const recalc=()=>{
-    const vc=parseMoney($('fValorContrato').value), acu=parseMoney($('fAcumulado').value);
-    if(vc>0){ $('fSaldo').value=(vc-acu).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); $('fPct').value=(acu/vc*100).toFixed(2); }
-    else{ $('fSaldo').value=''; $('fPct').value=''; }
-  };
-  ['fValorContrato','fMedicao','fAcumulado'].forEach(id=>{ const el=$(id); if(el) el.addEventListener('input',recalc); });
-  const addRowBtn=$('addRow');
-  if(addRowBtn) addRowBtn.onclick=()=>{
-    const item=$('fItem').value.trim(), desc=$('fName').value.trim();
-    if(!item&&!desc){ showToast('⚠️ Preencha item ou descrição.',true); return; }
-    const vc=parseMoney($('fValorContrato').value), med=parseMoney($('fMedicao').value), acu=parseMoney($('fAcumulado').value);
-    const saldo=vc>0?vc-acu:0, p=vc>0?+(acu/vc*100).toFixed(2):0;
-    state.rows.push({item,descricao:desc,valorContrato:vc,medicao:med,acumulado:acu,saldo,percentualExecutado:p});
-    const o=currentObra(); if(o){ o.itens=state.rows; saveObra(o); }
-    renderAll();
-    $('fItem').value=''; $('fName').value=''; $('fValorContrato').value=''; $('fMedicao').value=''; $('fAcumulado').value=''; $('fSaldo').value=''; $('fPct').value='';
-    showToast('✅ Item adicionado.');
-  };
 }
 
 export function bindEvents(){
-  setImportFileFn(importFile);
-  $('loginForm').addEventListener('submit',async e=>{
+  /* ---- Login / Logout ---- */
+  const loginForm=$('loginForm');
+  if(loginForm) loginForm.addEventListener('submit',async e=>{
     e.preventDefault();
-    const email=$('loginEmail').value.trim(), senha=$('loginSenha').value, btn=$('loginBtn');
-    btn.disabled=true; btn.textContent='Entrando...'; $('loginError').style.display='none';
-    try{ await signInWithEmailAndPassword(auth,email,senha); }
-    catch{ $('loginError').textContent='E-mail ou senha inválidos.'; $('loginError').style.display='block'; }
-    finally{ btn.disabled=false; btn.textContent='Entrar'; }
+    const btn=$('loginBtn'); btn.disabled=true; btn.textContent='Entrando...';
+    const errBox=$('loginError'); errBox.style.display='none';
+    try{
+      await signInWithEmailAndPassword(auth,$('loginEmail').value.trim(),$('loginSenha').value);
+    } catch(err){
+      errBox.textContent='E-mail ou senha incorretos.'; errBox.style.display='block';
+    } finally { btn.disabled=false; btn.textContent='Entrar'; }
   });
-  const logoutAdmin=$('logoutBtnAdmin'); if(logoutAdmin) logoutAdmin.addEventListener('click',()=>{ cleanup(); signOut(auth); });
-  const logoutUser=$('logoutBtnUser');   if(logoutUser)  logoutUser.addEventListener('click',()=>{ cleanup(); signOut(auth); });
 
-  const toggleThemeBtn=$('toggleTheme');
-  if(toggleThemeBtn) toggleThemeBtn.onclick=()=>{
-    document.documentElement.dataset.theme=document.documentElement.dataset.theme==='dark'?'light':'dark';
-    const o=currentObra();
-    if(state.rows.length){
-      state.chartUser =renderCurvaS('sCurveChart','sCurveScrollWrap',state.rows,state.chartUser,o?.cronograma,o?.dataInicio,o?.dataEmissao);
-      state.chartUser2=renderCurvaS('sCurveAditivoChart','sCurveAditivoScrollWrap',state.rows,state.chartUser2,o?.cronogramaAditivo,o?.dataInicioAditivo||o?.dataInicio,o?.dataEmissaoAditivo);
-    }
+  const logoutUser=$('logoutBtnUser');
+  if(logoutUser) logoutUser.onclick=async()=>{ await signOut(auth); cleanup(); };
+  const logoutAdmin=$('logoutBtnAdmin');
+  if(logoutAdmin) logoutAdmin.onclick=async()=>{ await signOut(auth); cleanup(); };
+
+  /* ---- Tema ---- */
+  const themeBtn=$('toggleTheme');
+  if(themeBtn) themeBtn.onclick=()=>{
+    const html=document.documentElement;
+    const dark=html.dataset.theme==='dark';
+    html.dataset.theme=dark?'light':'dark';
+    themeBtn.textContent=dark?'\ud83c\udf19':'\u2600\ufe0f';
+    updateDashboard();
   };
 
+  /* ---- Menu lateral ---- */
   const menuBtn=$('menuBtn');
-  if(menuBtn) menuBtn.onclick=()=>{
-    const aside=document.querySelector('#appView .app-aside');
-    if(!aside) return;
-    const open=aside.classList.toggle('aside-open');
-    menuBtn.textContent=open?'✕':'☰';
-  };
+  if(menuBtn) menuBtn.onclick=()=>{ const a=document.querySelector('.app-aside'); if(a) a.classList.toggle('open'); };
   const menuBtnAdmin=$('menuBtnAdmin');
-  if(menuBtnAdmin) menuBtnAdmin.onclick=()=>{
-    const aside=$('adminAside');
-    if(!aside) return;
-    const open=aside.classList.toggle('aside-open');
-    menuBtnAdmin.textContent=open?'✕':'☰';
+  if(menuBtnAdmin) menuBtnAdmin.onclick=()=>{ const a=$('adminAside'); if(a) a.classList.toggle('open'); };
+
+  /* ---- Importar Excel / Nova Obra ---- */
+  const loadFileBtn=$('loadFile');   if(loadFileBtn) loadFileBtn.onclick=()=>importFile(false);
+  const addObraBtn=$('addObraBtn');  if(addObraBtn)  addObraBtn.onclick=()=>importFile(false);
+  setImportFileFn((replace)=>importFile(replace));
+
+  /* ---- Cronograma do Contrato ---- */
+  const loadCrono=$('loadCronograma');
+  if(loadCrono) loadCrono.onclick=()=>importCronograma();
+
+  /* ---- Cronograma Mensal (execu\u00e7\u00e3o real) ---- */
+  const loadMensal=$('loadCronogramaMensal');
+  if(loadMensal) loadMensal.onclick=()=>importCronogramaMensal();
+
+  /* ---- Cronograma de Aditivo ---- */
+  const loadAditivo=$('loadCronogramaAditivo');
+  if(loadAditivo) loadAditivo.onclick=()=>importCronogramaAditivo();
+
+  /* ---- Exportar CSV ---- */
+  const exportCsv=$('exportCsv');
+  if(exportCsv) exportCsv.onclick=()=>{
+    if(!state.rows.length){ showToast('Nenhum dado para exportar.',true); return; }
+    const header=['Item','Descri\u00e7\u00e3o','Valor Contrato','Medi\u00e7\u00e3o','Acumulado','Saldo','% Exec.'];
+    const rows=state.rows.map(r=>[r.item,r.descricao,r.valorContrato,r.medicao,r.acumulado,r.saldo,r.percentualExecutado]);
+    const csv=[header,...rows].map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(';')).join('\n');
+    const a=document.createElement('a');
+    a.href='data:text/csv;charset=utf-8,\uFEFF'+encodeURIComponent(csv);
+    a.download='medicao.csv'; a.click();
   };
-  const adminToggleColab=$('adminToggleColab');
-  if(adminToggleColab) adminToggleColab.onclick=()=>{ const p=$('adminColabPanel'); if(p) p.style.display=p.style.display==='none'?'block':'none'; };
-  const loadFileBtn=$('loadFile');     if(loadFileBtn)  loadFileBtn.onclick=()=>importFile(false);
-  const addObraBtn=$('addObraBtn');    if(addObraBtn)   addObraBtn.onclick=()=>importFile(false);
 
-  const loadCronoBtn=$('loadCronograma');
-  if(loadCronoBtn) loadCronoBtn.onclick=()=>importCronograma();
+  /* ---- Salvar JSON ---- */
+  const saveJson=$('saveJson');
+  if(saveJson) saveJson.onclick=()=>{
+    const o=currentObra()||{};
+    const blob=new Blob([JSON.stringify({...o,itens:state.rows},null,2)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=(o.nome||'obra')+'.json'; a.click();
+  };
 
-  // Bind do botão Importar Aditivo — exclusivo, não interfere com o cronograma original
-  const loadCronoAditivoBtn=$('loadCronogramaAditivo');
-  if(loadCronoAditivoBtn) loadCronoAditivoBtn.onclick=()=>importCronogramaAditivo();
+  /* ---- Limpar itens ---- */
+  const fillSample=$('fillSample');
+  if(fillSample) fillSample.onclick=async()=>{
+    if(!confirm('Limpar todos os itens da obra atual?')) return;
+    state.rows=[];
+    const o=currentObra(); if(o){ o.itens=[]; await saveObra(o); }
+    renderAll();
+  };
 
+  /* ---- Adicionar linha ---- */
+  const addRowBtn=$('addRow');
+  if(addRowBtn) addRowBtn.onclick=()=>{
+    const vc=parseMoney($('fValorContrato').value);
+    const med=parseMoney($('fMedicao').value);
+    const acu=parseMoney($('fAcumulado').value);
+    const saldo=vc-acu;
+    const pct=vc>0?+(acu/vc*100).toFixed(2):0;
+    state.rows.push({
+      item:$('fItem').value.trim()||String(state.rows.length+1),
+      descricao:$('fName').value.trim(),
+      valorContrato:vc, medicao:med, acumulado:acu, saldo, percentualExecutado:pct
+    });
+    ['fItem','fName','fValorContrato','fMedicao','fAcumulado'].forEach(id=>{ const el=$(id); if(el) el.value=''; });
+    scheduleSave(); renderAll();
+  };
+
+  /* ---- Editar c\u00e9lulas da tabela ---- */
+  const tbody=$('tbody');
+  if(tbody){
+    tbody.addEventListener('blur',e=>{
+      const td=e.target.closest('[data-k]'); if(!td) return;
+      const tr=td.closest('[data-i]'); if(!tr) return;
+      const i=+tr.dataset.i; const k=td.dataset.k;
+      const raw=td.textContent.trim();
+      const r=state.rows[i]; if(!r) return;
+      if(['valorContrato','medicao','acumulado','saldo','percentualExecutado'].includes(k)){
+        r[k]=parseMoney(raw);
+      } else { r[k]=raw; }
+      if(k==='valorContrato'||k==='acumulado'||k==='medicao'){
+        const vc=Number(r.valorContrato)||0;
+        const ac=Number(r.acumulado)||0;
+        r.saldo=vc-ac;
+        r.percentualExecutado=vc>0?+(ac/vc*100).toFixed(2):0;
+        renderAll();
+      }
+      scheduleSave();
+    },true);
+    tbody.addEventListener('click',async e=>{
+      const btn=e.target.closest('[data-del]'); if(!btn) return;
+      const i=+btn.dataset.del;
+      state.rows.splice(i,1);
+      scheduleSave(); renderAll();
+    });
+  }
+
+  /* ---- Data de in\u00edcio da obra ---- */
   const projDataInicio=$('projDataInicio');
   if(projDataInicio) projDataInicio.addEventListener('change',async()=>{
     const o=currentObra(); if(!o) return;
     o.dataInicio=projDataInicio.value;
-    // Se o aditivo ainda não tem data própria, espelha a data de início do contrato
-    if(!o.dataInicioAditivo) o.dataInicioAditivo = projDataInicio.value;
     await saveObra(o);
-    renderCronogramaBox();
-    renderCronogramaAditivoBox();
     updateDashboard();
-    showToast('✅ Data de início salva.');
   });
 
-  const fillSampleBtn=$('fillSample'); if(fillSampleBtn) fillSampleBtn.onclick=()=>{
-    if(!confirm('Limpar todos os itens?')) return;
-    state.rows=[]; const o=currentObra(); if(o){ o.itens=[]; saveObra(o); } renderAll();
+  /* ---- Admin: painel colaboradores ---- */
+  const adminToggle=$('adminToggleColab');
+  if(adminToggle) adminToggle.onclick=()=>{
+    const p=$('adminColabPanel');
+    if(p) p.style.display=p.style.display==='none'?'block':'none';
   };
-  const exportCsvBtn=$('exportCsv');
-  if(exportCsvBtn) exportCsvBtn.onclick=()=>{
-    const fields=['item','descricao','valorContrato','medicao','acumulado','saldo','percentualExecutado'];
-    const body=state.rows.map(r=>fields.map(k=>`"${String(r[k]??'').replace(/"/g,'""')}"`).join(',')).join('\n');
-    const blob=new Blob([fields.join(',')+' \n'+body],{type:'text/csv;charset=utf-8'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='cronograma.csv'; a.click(); URL.revokeObjectURL(a.href);
-  };
-  const saveJsonBtn=$('saveJson');
-  if(saveJsonBtn) saveJsonBtn.onclick=()=>{
-    const o=currentObra(), name=($('projName')?.value||'').trim()||'projeto';
-    const blob=new Blob([JSON.stringify({obra:name,medicaoAtual:o?.medicaoAtual||'',itens:state.rows},null,2)],{type:'application/json;charset=utf-8'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name.replace(/[^a-zA-Z0-9\-_]/g,'-').toLowerCase()+'.json'; a.click(); URL.revokeObjectURL(a.href);
-  };
-  const projContratada=$('projContratada');
-  if(projContratada) projContratada.addEventListener('input',()=>{
-    const o=currentObra(); if(!o) return;
-    o.contratada=projContratada.value.trim(); scheduleSave();
-  });
-  const tbody=$('tbody');
-  if(tbody){
-    tbody.addEventListener('input',e=>{
-      const t=e.target, tr=t.closest('tr'); if(!tr) return;
-      const i=+tr.dataset.i, k=t.dataset.k; if(!k) return;
-      if(['valorContrato','medicao','acumulado','saldo','percentualExecutado'].includes(k))
-        state.rows[i][k]=Number(t.textContent.replace(',','.').replace(/[^\d.-]/g,''))||0;
-      else state.rows[i][k]=t.textContent.trim();
-      updateDashboard(); scheduleSave();
-    });
-    tbody.addEventListener('focusout',e=>{
-      const t=e.target, tr=t.closest('tr'); if(!tr) return;
-      const i=+tr.dataset.i, k=t.dataset.k;
-      if(k&&['valorContrato','medicao','acumulado','saldo'].includes(k)) t.textContent=money(state.rows[i][k]);
-      else if(k==='percentualExecutado') t.textContent=Number(state.rows[i][k]).toFixed(2);
-    });
-    tbody.addEventListener('click',e=>{
-      const b=e.target.closest('button[data-del]'); if(!b) return;
-      const idx=+b.dataset.del;
-      const desc=state.rows[idx]?.descricao||state.rows[idx]?.item||'este item';
-      if(!confirm(`Remover "${desc}" do índice de itens?`)) return;
-      state.rows.splice(idx,1);
-      const o=currentObra(); if(o){ o.itens=state.rows; saveObra(o); }
-      renderAll();
-    });
-  }
-  window.addEventListener('scroll',()=>{ const b=$('btnTopo'); if(b) b.classList.toggle('visible',window.scrollY>200); });
 
-  window.adminSelectColab  =uid=>{ state.adminSelectedUid=uid; state.adminSelectedObraId=null; renderAdminSidebar(); renderAdminDetail(); };
-  window.adminDeselectColab=()=>{ state.adminSelectedUid=null; state.adminSelectedObraId=null; renderAdminSidebar(); renderAdminDetail(); };
-  window.adminSelectObra   =id=>{ state.adminSelectedObraId=id||null; renderAdminDetail(); };
-  window.toggleBloqueio=async(uid,isBlocked)=>{
-    await updateDoc(doc(db,'users',uid),{blocked:!isBlocked});
-    state.allUsers[uid].blocked=!isBlocked;
-    renderColabList(); renderAdminSidebar();
-    if(state.adminSelectedUid===uid) renderAdminDetail();
+  /* ---- Topo (mobile) ---- */
+  window.addEventListener('scroll',()=>{
+    const btn=$('btnTopo'); if(btn) btn.style.display=window.scrollY>300?'flex':'none';
+  });
+}
+
+export function setupNovaAtividade(){
+  const vc=$('fValorContrato'), med=$('fMedicao'), acu=$('fAcumulado');
+  const update=()=>{
+    if(!vc||!med||!acu) return;
+    const v=parseMoney(vc.value), a=parseMoney(acu.value);
+    const saldoEl=$('fSaldo'), pctEl=$('fPct');
+    if(saldoEl) saldoEl.value=money(v-a);
+    if(pctEl)   pctEl.value=(v>0?+(a/v*100).toFixed(2):0)+'%';
   };
-  window.removeColab=async uid=>{
-    if(!confirm('Remover colaborador?')) return;
-    await updateDoc(doc(db,'users',uid),{disabled:true});
-    delete state.allUsers[uid];
-    if(state.adminSubs[uid]){ state.adminSubs[uid](); delete state.adminSubs[uid]; }
-    if(state.adminSelectedUid===uid){ state.adminSelectedUid=null; state.adminSelectedObraId=null; }
-    renderAdminViews(); renderAdminDetail();
-    showToast('✅ Colaborador removido.');
-  };
+  if(vc) vc.addEventListener('input',update);
+  if(med) med.addEventListener('input',update);
+  if(acu) acu.addEventListener('input',update);
 }
