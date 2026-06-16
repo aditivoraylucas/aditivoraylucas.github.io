@@ -102,33 +102,26 @@ export function importCronogramaMensal(){
       const wb=XLSX.read(buf,{type:'array'});
       const { cronograma, totalMeses, itens, dataEmissao } = parseCronogramaXLSX(wb);
 
-      // Salva total da obra por mês (curva S geral — igual a antes)
+      // Salva o total da obra por mês (curva S geral — comportamento anterior mantido)
       o.cronogramaExecucao = cronograma.map(m => ({
         mes:            m.mes,
         executadoPct:   m.planejadoPct,
         executadoValor: m.planejadoValor
       }));
 
-      // NOVO: salva execução real por serviço/item para as curvas S individuais
+      // NOVO: salva os itens de execução por serviço (curvas S individuais)
       if(Array.isArray(itens) && itens.length > 0){
-        o.cronogramaItensExecucao = itens.map(it => ({
-          item:      it.item,
-          descricao: it.descricao,
-          meses:     it.meses.map(m => ({
-            mes:   m.mes,
-            pct:   m.pct,
-            valor: m.valor
-          }))
-        }));
+        o.cronogramaItensExecucao = itens;
       }
 
-      // Usa dataEmissao do cronograma de execução como referência de "hoje"
+      // Salva data de emissão do cronograma de execução separadamente
       if(dataEmissao) o.dataEmissaoExecucao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
 
       await saveObra(o);
+
       const emissaoTxt = dataEmissao ? ` | Emissão: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
       const itensTxt   = Array.isArray(itens) && itens.length > 0 ? ` | ${itens.length} serviços` : '';
-      showToast(`✅ Cronograma mensal importado: ${totalMeses} meses${emissaoTxt}${itensTxt}.`);
+      showToast(`✅ Cronograma de execução importado: ${totalMeses} meses${emissaoTxt}${itensTxt}.`);
       renderCronogramaMensalBox();
       updateDashboard();
     } catch(err){ showToast('❌ '+err.message,true); console.error(err); }
@@ -249,6 +242,7 @@ export function setupColabForm(){
 }
 
 export function bindEvents(){
+  /* ── Expõe funções admin no window para uso via onclick inline no HTML gerado ── */
   window.adminSelectColab = (uid) => {
     state.adminSelectedUid  = uid;
     state.adminSelectedObraId = null;
