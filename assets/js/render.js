@@ -5,7 +5,7 @@ import { setObraIdNaUrl, limparObraIdDaUrl } from './url-state.js';
 import { doc, setDoc, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 
 export async function saveObra(obra) {
-  if (!state.user?.uid) return; // guard: não salva se não estiver logado
+  if (!state.user?.uid) return;
   await setDoc(doc(db, 'users', state.user.uid, 'obras', obra.id), obra);
 }
 
@@ -252,6 +252,13 @@ export function renderCurvaS(canvasId, wrapId, itens, prev) {
    CURVA S POR SERVIÇO
    ============================================================ */
 
+/**
+ * _renderCurvaServico
+ *
+ * Quando dados.execAcum[] está disponível (cronogramaItensExecucao importado),
+ * plota a LINHA REAL mês a mês (com null para meses futuros).
+ * Caso contrário, plota apenas 1 ponto no mês atual (comportamento legado).
+ */
 function _renderCurvaServico(canvasId, wrapId, dados, prevChart) {
   const canvas = $(canvasId); if (!canvas) return prevChart;
   if (prevChart) { try { prevChart.destroy(); } catch(_){} }
@@ -263,14 +270,52 @@ function _renderCurvaServico(canvasId, wrapId, dados, prevChart) {
   const wrap   = $(wrapId);
   if (wrap) wrap.style.overflowX = 'auto';
 
-  const { labels, planAcum, execAcumPct, mesAtualIdx, mesesDecorridos } = dados;
+  const { labels, planAcum, execAcum, execAcumPct, mesAtualIdx, mesesDecorridos } = dados;
   const n = labels.length;
   if (!n) return prevChart;
 
-  const execData = new Array(n).fill(null);
-  if (mesesDecorridos > 0 && mesAtualIdx >= 0 && execAcumPct > 0) {
-    execData[mesAtualIdx] = execAcumPct;
+  // Verifica se temos a linha real mês a mês
+  const temLinhaReal = Array.isArray(execAcum) && execAcum.some(v => v !== null && v > 0);
+
+  let execData;
+  if (temLinhaReal) {
+    // Linha real completa mês a mês (null para meses futuros)
+    execData = execAcum.slice();
+  } else {
+    // Fallback legado: 1 ponto no mês atual
+    execData = new Array(n).fill(null);
+    if (mesesDecorridos > 0 && mesAtualIdx >= 0 && execAcumPct > 0) {
+      execData[mesAtualIdx] = execAcumPct;
+    }
   }
+
+  const execDataset = temLinhaReal
+    ? {
+        label: 'Executado Real (%)',
+        data: execData,
+        borderColor: '#10b981',
+        backgroundColor: 'rgba(16,185,129,0.08)',
+        borderWidth: 2.5,
+        pointRadius: mobile ? 2 : 3,
+        pointBackgroundColor: '#10b981',
+        tension: 0.35,
+        fill: false,
+        spanGaps: false
+      }
+    : {
+        // Ponto único (sem linha) quando não há cronograma de execução
+        label: 'Executado Real (%)',
+        data: execData,
+        borderColor: '#10b981',
+        backgroundColor: 'rgba(16,185,129,0.9)',
+        borderWidth: 0,
+        pointRadius: mobile ? 5 : 7,
+        pointBackgroundColor: '#10b981',
+        pointBorderColor: '#fff',
+        pointBorderWidth: 2,
+        showLine: false,
+        spanGaps: false
+      };
 
   const hojeAnnotation = mesesDecorridos > 0 && mesAtualIdx >= 0 ? {
     type: 'line',
@@ -307,19 +352,7 @@ function _renderCurvaServico(canvasId, wrapId, dados, prevChart) {
           tension: 0.35,
           fill: false
         },
-        {
-          label: 'Executado Real (%)',
-          data: execData,
-          borderColor: '#10b981',
-          backgroundColor: 'rgba(16,185,129,0.9)',
-          borderWidth: 0,
-          pointRadius: mobile ? 5 : 7,
-          pointBackgroundColor: '#10b981',
-          pointBorderColor: '#fff',
-          pointBorderWidth: 2,
-          showLine: false,
-          spanGaps: false
-        }
+        execDataset
       ]
     },
     options: {
@@ -381,12 +414,18 @@ function _statusBadge(status) {
 }
 
 function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
-  const { descricao, item, execAcumPct, execAcumValor, valorContrato, planAcum, mesAtualIdx, status } = dados;
+  const { descricao, item, execAcumPct, execAcumValor, valorContrato, planAcum, planValorAcum, mesAtualIdx, status, execAcum } = dados;
   const planAteAgora = (mesAtualIdx >= 0 && planAcum[mesAtualIdx] != null) ? planAcum[mesAtualIdx] : 0;
+  const planValorAteAgora = (mesAtualIdx >= 0 && planValorAcum && planValorAcum[mesAtualIdx] != null) ? planValorAcum[mesAtualIdx] : 0;
   const desvio = +(execAcumPct - planAteAgora).toFixed(2);
   const desvioColor = desvio >= 0 ? '#10b981' : '#ef4444';
   const desvioSinal = desvio >= 0 ? '+' : '';
   const temDados = valorContrato > 0 || planAcum.some(v => v > 0);
+  // Indica se já tem execução real mês a mês
+  const temLinhaReal = Array.isArray(execAcum) && execAcum.some(v => v !== null && v > 0);
+  const execBadge = temLinhaReal
+    ? `<span style="font-size:.68rem;background:rgba(16,185,129,.12);color:#10b981;padding:.1rem .4rem;border-radius:4px;margin-left:.3rem">\u{1F4C8} Real mês a mês</span>`
+    : '';
 
   return `
   <div class="servico-card" style="border:1px solid var(--border,#e2e8f0);border-radius:10px;margin-bottom:.75rem;overflow:hidden;background:var(--surface,#fff)">
@@ -397,7 +436,7 @@ function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
       onclick="this.setAttribute('aria-expanded', this.getAttribute('aria-expanded')==='true'?'false':'true'); this.nextElementSibling.style.display = this.getAttribute('aria-expanded')==='true' ? '' : 'none';"
     >
       <span style="font-size:.7rem;font-weight:700;color:var(--text-muted,#64748b);min-width:1.8rem">${esc(String(item))}</span>
-      <span style="flex:1;font-size:.82rem;font-weight:600;color:var(--text,#0f172a)">${esc(descricao)}</span>
+      <span style="flex:1;font-size:.82rem;font-weight:600;color:var(--text,#0f172a)">${esc(descricao)}${execBadge}</span>
       ${_statusBadge(status)}
       <span style="font-size:.78rem;color:var(--text-muted,#64748b);white-space:nowrap">${execAcumPct.toFixed(1)}% exec.</span>
       <span style="font-size:.9rem;transition:transform .2s;display:inline-block">${isOpen ? '\u25B2' : '\u25BC'}</span>
@@ -406,7 +445,10 @@ function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
       ${temDados ? `
       <div style="display:flex;gap:1rem;flex-wrap:wrap;padding:.5rem 1rem .25rem;border-top:1px solid var(--border,#e2e8f0)">
         <div style="font-size:.75rem;color:var(--text-muted)">
-          <span style="font-weight:600;color:var(--text)">Planejado até hoje:</span> ${planAteAgora.toFixed(1)}%
+          <span style="font-weight:600;color:var(--text)">Planejado até hoje (%):</span> ${planAteAgora.toFixed(1)}%
+        </div>
+        <div style="font-size:.75rem;color:var(--text-muted)">
+          <span style="font-weight:600;color:var(--text)">Planejado até hoje (R$):</span> ${money(planValorAteAgora)}
         </div>
         <div style="font-size:.75rem;color:var(--text-muted)">
           <span style="font-weight:600;color:var(--text)">Executado:</span> ${execAcumPct.toFixed(1)}%
@@ -429,6 +471,14 @@ function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
   </div>`;
 }
 
+/**
+ * renderCurvasPorServico
+ *
+ * Agora recebe obra.cronogramaItensExecucao (real mês a mês) e
+ * passa para buildCurvaServico como 6º parâmetro.
+ * O mês de referência usa obra.dataEmissaoExecucao (da planilha real),
+ * com fallback para obra.dataEmissao (planilha prevista).
+ */
 export function renderCurvasPorServico(containerId, obra, prefix) {
   const container = $(containerId); if (!container) return;
 
@@ -439,10 +489,21 @@ export function renderCurvasPorServico(containerId, obra, prefix) {
   state[chartsKey] = {};
   container.innerHTML = '';
 
-  const itensCrono    = Array.isArray(obra?.cronogramaItens) ? obra.cronogramaItens : [];
-  const itensExecucao = Array.isArray(obra?.itens)           ? obra.itens           : [];
-  const totalMeses    = Array.isArray(obra?.cronograma)      ? obra.cronograma.length : 0;
-  const dataInicio    = obra?.dataInicio || null;
+  const itensCrono      = Array.isArray(obra?.cronogramaItens)         ? obra.cronogramaItens         : [];
+  const itensExecMensal = Array.isArray(obra?.cronogramaItensExecucao) ? obra.cronogramaItensExecucao : [];
+  const itensExecucao   = Array.isArray(obra?.itens)                   ? obra.itens                   : [];
+  const totalMeses      = Array.isArray(obra?.cronograma)              ? obra.cronograma.length       : 0;
+  const dataInicio      = obra?.dataInicio || null;
+
+  // Mês de referência: usa o dataEmissao da planilha real (execução)
+  // com fallback para o dataEmissao da planilha prevista
+  const dataEmissaoRef = obra?.dataEmissaoExecucao || obra?.dataEmissao || null;
+
+  // Mapeia itens de execução mensal por item para lookup rápido
+  const execMensalMap = {};
+  itensExecMensal.forEach(it => {
+    execMensalMap[String(it.item).trim()] = it;
+  });
 
   const painel = $('curvasPorServicoPanel');
   const badge  = $('curvasPorServicoBadge');
@@ -451,14 +512,20 @@ export function renderCurvasPorServico(containerId, obra, prefix) {
     return;
   }
   if (painel) painel.style.display = '';
-  if (badge)  badge.textContent = `${itensCrono.length} serviços`;
+  if (badge) {
+    const temReal = itensExecMensal.length > 0;
+    badge.textContent = `${itensCrono.length} serviços${temReal ? ' • Real mês a mês' : ''}`;
+  }
 
   let html = '';
   itensCrono.forEach((itemCrono, idx) => {
     const canvasId = `${prefix}_servico_canvas_${idx}`;
     const wrapId   = `${prefix}_servico_wrap_${idx}`;
     const isOpen   = idx === 0;
-    const dados    = buildCurvaServico(dataInicio, itemCrono, itensExecucao, totalMeses);
+    const itemExecMensal = execMensalMap[String(itemCrono.item).trim()] || null;
+    const dados = buildCurvaServico(
+      dataInicio, itemCrono, itensExecucao, totalMeses, dataEmissaoRef, itemExecMensal
+    );
     if (!dados) return;
     html += _servicoCardHTML(dados, canvasId, wrapId, isOpen);
   });
@@ -472,10 +539,13 @@ export function renderCurvasPorServico(containerId, obra, prefix) {
 
   function renderNext(idx) {
     if (idx >= itensCrono.length) return;
-    const itemCrono = itensCrono[idx];
-    const canvasId  = `${prefix}_servico_canvas_${idx}`;
-    const wrapId    = `${prefix}_servico_wrap_${idx}`;
-    const dados     = buildCurvaServico(dataInicio, itemCrono, itensExecucao, totalMeses);
+    const itemCrono      = itensCrono[idx];
+    const canvasId       = `${prefix}_servico_canvas_${idx}`;
+    const wrapId         = `${prefix}_servico_wrap_${idx}`;
+    const itemExecMensal = execMensalMap[String(itemCrono.item).trim()] || null;
+    const dados = buildCurvaServico(
+      dataInicio, itemCrono, itensExecucao, totalMeses, dataEmissaoRef, itemExecMensal
+    );
     if (dados && $(canvasId)) {
       state[chartsKey][idx] = _renderCurvaServico(
         canvasId, wrapId, dados, state[chartsKey][idx] || null
@@ -545,10 +615,15 @@ export function renderCronogramaMensalBox() {
   const box = $('cronogramaMensalBox'); if (!box) return;
   const o = currentObra();
   if (!o) { box.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem">Selecione uma obra.</p>'; return; }
-  const tem = Array.isArray(o.cronogramaExecucao) && o.cronogramaExecucao.length > 0;
+  const tem      = Array.isArray(o.cronogramaExecucao) && o.cronogramaExecucao.length > 0;
+  const temItens = Array.isArray(o.cronogramaItensExecucao) && o.cronogramaItensExecucao.length > 0;
   if (tem) {
+    const emissaoTxt = o.dataEmissaoExecucao
+      ? ` · Emissão: <strong>${String(o.dataEmissaoExecucao.mes).padStart(2,'0')}/${o.dataEmissaoExecucao.ano}</strong>`
+      : '';
     box.innerHTML =
-      `<div style="font-size:.8rem;color:var(--text-muted)">\u{1F4C8} <strong style="color:var(--text)">${o.cronogramaExecucao.length} meses</strong> importados</div>
+      `<div style="font-size:.8rem;color:var(--text-muted)">\u{1F4C8} <strong style="color:var(--text)">${o.cronogramaExecucao.length} meses</strong> importados${emissaoTxt}</div>
+       ${temItens ? `<div style="font-size:.75rem;color:var(--text-muted)">\u{1F4CA} <strong style="color:var(--text)">${o.cronogramaItensExecucao.length} serviços</strong> com execução real mês a mês</div>` : ''}
        <button id="removeCronogramaMensalBtn" class="btn btn-danger" style="width:100%;margin-top:.5rem;font-size:.8rem">\u{1F5D1} Remover</button>`;
   } else {
     box.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem">Nenhum cronograma mensal importado.</p>';
@@ -557,6 +632,8 @@ export function renderCronogramaMensalBox() {
   if (removeBtn) removeBtn.onclick = async () => {
     if (!confirm('Remover o cronograma mensal desta obra?')) return;
     delete o.cronogramaExecucao;
+    delete o.cronogramaItensExecucao;
+    delete o.dataEmissaoExecucao;
     await saveObra(o); renderCronogramaMensalBox(); updateDashboard();
     showToast('\u2705 Cronograma mensal removido.');
   };
@@ -679,10 +756,8 @@ export function updateDashboard() {
   if ($('mainProjContratada')) $('mainProjContratada').textContent = o?.contratada || '-';
   if ($('mainProjScope'))      $('mainProjScope').textContent      = o?.medicaoAtual || '-';
 
-  // Curva S1 — Índice de Itens
   state.chartUser = renderCurvaS1('sCurveChart', 'sCurveScrollWrap', itens, state.chartUser);
 
-  // Curva S2 — Contrato planejado x executado real
   const temCrono  = Array.isArray(o?.cronograma)         && o.cronograma.length         > 0;
   const temMensal = Array.isArray(o?.cronogramaExecucao) && o.cronogramaExecucao.length > 0;
   const panelS2   = $('sCurveAditivoPanel');
@@ -697,13 +772,9 @@ export function updateDashboard() {
     if (state.chartUser2) { try { state.chartUser2.destroy(); } catch(_){} state.chartUser2 = null; }
   }
 
-  // Curvas S dos Aditivos
   renderAditivosCurvas();
-
-  // Curvas S por Serviço
   renderCurvasPorServico('curvasPorServicoContainer', o, 'colab');
 
-  // Banner de status do cronograma
   const cronoStatus = $('cronoStatus');
   if (cronoStatus) {
     if (temCrono && o?.dataInicio) {
@@ -717,8 +788,8 @@ export function updateDashboard() {
         const txt  = diasRestantes < 0
           ? `⚠️ Prazo vencido há ${Math.abs(diasRestantes)} dias`
           : diasRestantes === 0
-          ? '🏁 Término hoje'
-          : `🗓️ ${diasRestantes} dias restantes`;
+          ? '\u{1F3C1} Término hoje'
+          : `\u{1F5D3}\uFE0F ${diasRestantes} dias restantes`;
         cronoStatus.innerHTML = `<span style="color:${cor};font-weight:600">${txt}</span>`;
       } else { cronoStatus.innerHTML = ''; }
     } else { cronoStatus.innerHTML = ''; }
