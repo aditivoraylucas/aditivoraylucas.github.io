@@ -99,43 +99,56 @@ export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
   return result;
 }
 
-/* ── Curva S por Serviço ─────────────────────────────────────────────────────
+/* ── Curva S por Serviço ─────────────────────────────────────────────────────────────────
  *
- * buildCurvaServico(dataInicio, itemCronograma, itensExecucao, totalMeses)
+ * buildCurvaServico(dataInicio, itemCronograma, itensExecucao, totalMeses, dataEmissaoObra?)
  *
  * Parâmetros:
  *   dataInicio      — string 'YYYY-MM-DD' — data de início da obra
- *   itemCronograma  — objeto do cronograma por item salvo no Firebase:
- *                     { item, descricao, meses: [{mes, pct, valor}, ...] }
- *   itensExecucao   — array de itens de medição da obra (o.itens) com
- *                     { item, descricao, valorContrato, acumulado, ... }
- *   totalMeses      — número total de meses do cronograma (cronograma.length)
+ *   itemCronograma  — objeto salvo no Firebase:
+ *                     { item, descricao, pesoTotal, valorTotal, meses: [{mes, pct, valor}, ...] }
+ *   itensExecucao   — array de itens de medição (o.itens) com
+ *                     { item, descricao, valorContrato, acumulado, percentualExecutado, ... }
+ *   totalMeses      — número total de meses do cronograma
+ *   dataEmissaoObra — (opcional) { mes, ano } para calcular mês de referência
+ *                     da planilha; se omitido usa data atual do sistema
  *
  * Retorna:
  *   {
- *     descricao,       — nome do serviço
- *     labels[],        — labels de mês (ex: 'abr. 25')
- *     planMensal[],    — % planejado de cada mês (não acumulado)
- *     planAcum[],      — % planejado acumulado
- *     planValorMensal[], — R$ planejado de cada mês
- *     planValorAcum[],   — R$ planejado acumulado
- *     execAcumPct,     — % real executado acumulado deste serviço
- *     execAcumValor,   — R$ real executado acumulado deste serviço
- *     valorContrato,   — R$ total do contrato deste serviço
- *     status,          — 'em_dia' | 'atrasado' | 'adiantado' | 'nao_iniciado'
- *     mesAtualIdx,     — índice (0-based) do mês atual no array
+ *     descricao,          — nome do serviço
+ *     item,               — número do item
+ *     labels[],           — labels de mês (ex: 'abr. 25')
+ *     planMensal[],       — % planejado de cada mês (não acumulado)
+ *     planAcum[],         — % planejado acumulado
+ *     planValorMensal[],  — R$ planejado de cada mês
+ *     planValorAcum[],    — R$ planejado acumulado
+ *     execAcumPct,        — % real executado acumulado deste serviço
+ *     execAcumValor,      — R$ real executado acumulado deste serviço
+ *     valorContrato,      — R$ total do item (de valorTotal do cronograma ou itensExecucao)
+ *     pesoTotal,          — peso (%) do item no total do contrato
+ *     status,             — 'em_dia' | 'atrasado' | 'adiantado' | 'nao_iniciado'
+ *     mesAtualIdx,        — índice (0-based) do mês atual no array
+ *     mesesDecorridos,    — quantos meses já decorreram desde o início da obra
  *   }
  */
-export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, totalMeses) {
+export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, totalMeses, dataEmissaoObra) {
   if (!dataInicio || !itemCronograma) return null;
 
   const [iniAno, iniMes] = dataInicio.split('-').map(Number);
-  const now      = new Date();
-  const refAno   = now.getFullYear();
-  const refMes   = now.getMonth() + 1;
+
+  // Mês de referência: usa dataEmissao da planilha se disponível, senão data atual
+  let refAno, refMes;
+  if (dataEmissaoObra && dataEmissaoObra.mes && dataEmissaoObra.ano) {
+    refMes = dataEmissaoObra.mes;
+    refAno = dataEmissaoObra.ano;
+  } else {
+    const now = new Date();
+    refMes = now.getMonth() + 1;
+    refAno = now.getFullYear();
+  }
   const mesesDecorridos = Math.max(0, (refAno - iniAno) * 12 + (refMes - iniMes));
 
-  // meses do item (array de {mes:1..N, pct, valor}), garantindo totalMeses slots
+  // Mapeia os meses do item pelo número do mês (1-based)
   const mesesItem = Array.isArray(itemCronograma.meses) ? itemCronograma.meses : [];
   const mesesMap  = {};
   mesesItem.forEach(m => { mesesMap[m.mes] = m; });
@@ -150,7 +163,6 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
   let   mesAtualIdx      = 0;
 
   for (let m = 1; m <= totalMeses; m++) {
-    // label: mês de encerramento do período (offset = m)
     const base0 = (iniMes - 1) + m;
     const sAno  = iniAno + Math.floor(base0 / 12);
     const sMes  = (base0 % 12) + 1;
@@ -169,13 +181,25 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     if (m <= mesesDecorridos) mesAtualIdx = m - 1;
   }
 
-  // Execução real: busca o item correspondente em itensExecucao pelo número do item
-  const execItem     = (itensExecucao || []).find(r =>
+  // Execução real: busca o item correspondente em itensExecucao
+  const execItem      = (itensExecucao || []).find(r =>
     String(r.item).trim() === String(itemCronograma.item).trim()
   );
-  const execAcumPct  = execItem ? +Number(execItem.percentualExecutado || 0).toFixed(2) : 0;
-  const execAcumValor= execItem ? +Number(execItem.acumulado           || 0).toFixed(2) : 0;
-  const valorContrato= execItem ? +Number(execItem.valorContrato        || 0).toFixed(2) : 0;
+  const execAcumPct   = execItem ? +Number(execItem.percentualExecutado || 0).toFixed(2) : 0;
+  const execAcumValor = execItem ? +Number(execItem.acumulado           || 0).toFixed(2) : 0;
+
+  // valorContrato: prioridade —
+  //   1º valorTotal do cronograma (salvo pelo parser atualizado)
+  //   2º valorContrato do item de execução
+  //   3º soma dos valores mensais planejados (planValorAcum final)
+  const valorContrato = +Number(
+    itemCronograma.valorTotal ||
+    execItem?.valorContrato   ||
+    planValorAcum[planValorAcum.length - 1] ||
+    0
+  ).toFixed(2);
+
+  const pesoTotal = +Number(itemCronograma.pesoTotal || 0).toFixed(4);
 
   // Status: compara execução acumulada real vs planejada até o mês atual
   const planAteAgora = planAcum[mesAtualIdx] || 0;
@@ -197,6 +221,7 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     execAcumPct,
     execAcumValor,
     valorContrato,
+    pesoTotal,
     status,
     mesAtualIdx,
     mesesDecorridos
