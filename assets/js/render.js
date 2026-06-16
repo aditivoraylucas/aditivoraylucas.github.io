@@ -1,4 +1,4 @@
-import { $, state, esc, money, pct, calcPctGeral, buildCronogramaTimeline, showToast } from './state.js';
+import { $, state, esc, money, pct, calcPctGeral, buildCronogramaTimeline, buildCurvaServico, showToast } from './state.js';
 import { db } from './firebase.js';
 import { registrarEvento } from './auditoria.js';
 import { setObraIdNaUrl, limparObraIdDaUrl } from './url-state.js';
@@ -59,10 +59,6 @@ function calcDataInicioProximo(dataInicio, totalMeses) {
   return `${novoAno}-${String(novoMes).padStart(2,'0')}-01`;
 }
 
-/**
- * Garante que todos os aditivos da obra têm campo `id`.
- * Migra silenciosamente os que não têm e salva no Firestore.
- */
 async function migrarAditivosSemId(o) {
   if (!Array.isArray(o.aditivos)) return false;
   let precisaSalvar = false;
@@ -119,7 +115,7 @@ export function renderCurvaS1(canvasId, wrapId, itens, prevChart) {
 }
 
 /* ============================================================
-   CURVA S2 — Genérica
+   CURVA S2 — Genérica (contrato / aditivo)
    ============================================================ */
 export function renderCurvaS2(canvasId, wrapId, obra, prevChart) {
   return _renderCurvaS2Generica(canvasId, wrapId, {
@@ -250,6 +246,261 @@ export function renderCurvaS(canvasId, wrapId, itens, prev) {
   return renderCurvaS1(canvasId, wrapId, itens, prev);
 }
 
+/* ============================================================
+   CURVA S POR SERVIÇO
+   ============================================================ */
+
+/**
+ * Renderiza um único gráfico de Curva S para um serviço específico.
+ * Exibe: linha planejada acumulada (laranja) + ponto de execução real (verde).
+ */
+function _renderCurvaServico(canvasId, wrapId, dados, prevChart) {
+  const canvas = $(canvasId); if (!canvas) return prevChart;
+  if (prevChart) { try { prevChart.destroy(); } catch(_){} }
+
+  const dark   = document.documentElement.dataset.theme === 'dark';
+  const gc     = dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+  const tc     = dark ? '#94a3b8' : '#64748b';
+  const mobile = window.innerWidth <= 900;
+  const wrap   = $(wrapId);
+  if (wrap) wrap.style.overflowX = 'auto';
+
+  const { labels, planAcum, execAcumPct, mesAtualIdx, mesesDecorridos } = dados;
+  const n = labels.length;
+  if (!n) return prevChart;
+
+  // Ponto único de execução real: coloca no índice do mês atual, null nos demais
+  const execData = new Array(n).fill(null);
+  if (mesesDecorridos > 0 && mesAtualIdx >= 0 && execAcumPct > 0) {
+    execData[mesAtualIdx] = execAcumPct;
+  }
+
+  // Linha "Hoje"
+  const hojeAnnotation = mesesDecorridos > 0 && mesAtualIdx >= 0 ? {
+    type: 'line',
+    scaleID: 'x',
+    value: mesAtualIdx,
+    borderColor: 'rgba(239,68,68,0.6)',
+    borderWidth: 1.5,
+    borderDash: [4, 4],
+    label: {
+      display: true,
+      content: 'Hoje',
+      position: 'start',
+      backgroundColor: '#ef4444',
+      color: '#fff',
+      font: { size: 9 },
+      padding: { x: 4, y: 2 },
+      borderRadius: 3
+    }
+  } : null;
+
+  return new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Planejado (%)',
+          data: planAcum,
+          borderColor: '#f59e0b',
+          backgroundColor: 'rgba(245,158,11,0.08)',
+          borderWidth: 2,
+          pointRadius: mobile ? 1.5 : 2.5,
+          pointBackgroundColor: '#f59e0b',
+          tension: 0.35,
+          fill: false
+        },
+        {
+          label: 'Executado Real (%)',
+          data: execData,
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16,185,129,0.9)',
+          borderWidth: 0,
+          pointRadius: mobile ? 5 : 7,
+          pointBackgroundColor: '#10b981',
+          pointBorderColor: '#fff',
+          pointBorderWidth: 2,
+          showLine: false,
+          spanGaps: false
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        y: {
+          beginAtZero: true, max: 100,
+          grid: { color: gc },
+          ticks: { color: tc, callback: v => v + '%', font: { size: mobile ? 9 : 11 } }
+        },
+        x: {
+          grid: { display: false },
+          ticks: { color: tc, font: { size: mobile ? 7 : 9 }, maxRotation: mobile ? 90 : 45 }
+        }
+      },
+      plugins: {
+        legend: { labels: { color: tc, font: { size: mobile ? 9 : 10 }, usePointStyle: true, pointStyleWidth: 8 } },
+        annotation: hojeAnnotation ? { annotations: { hojeServico: hojeAnnotation } } : {},
+        tooltip: {
+          callbacks: {
+            title: items => `\ud83d\udcc5 ${items[0].label}`,
+            label: item => {
+              const v = item.parsed.y;
+              if (v === null || v === undefined) return null;
+              return ` ${item.dataset.label}: ${Number(v).toFixed(1)}%`;
+            },
+            afterBody: items => {
+              const plan = items.find(i => i.datasetIndex === 0)?.parsed.y;
+              const exec = items.find(i => i.datasetIndex === 1)?.parsed.y;
+              if (plan == null || exec == null) return [];
+              const dev  = +(exec - plan).toFixed(1);
+              const icon = dev >= 0 ? '\u2705' : '\u26a0\ufe0f';
+              const txt  = dev >= 0 ? `Adiantado ${dev}%` : `Atrasado ${Math.abs(dev)}%`;
+              return ['\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500', ` ${icon} ${txt}`];
+            }
+          },
+          backgroundColor: dark ? '#1e293b' : '#fff',
+          titleColor:      dark ? '#f8fafc' : '#0f172a',
+          bodyColor:       dark ? '#94a3b8' : '#475569',
+          borderColor:     dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
+          borderWidth: 1, padding: 10, cornerRadius: 8
+        }
+      }
+    }
+  });
+}
+
+/**
+ * Badge de status HTML.
+ */
+function _statusBadge(status) {
+  const cfg = {
+    em_dia:      { icon: '\u2705', label: 'Em dia',       bg: 'rgba(16,185,129,.15)',  color: '#10b981' },
+    adiantado:   { icon: '\ud83d\ude80', label: 'Adiantado',   bg: 'rgba(99,102,241,.15)',  color: '#6366f1' },
+    atrasado:    { icon: '\u26a0\ufe0f', label: 'Atrasado',    bg: 'rgba(239,68,68,.15)',   color: '#ef4444' },
+    nao_iniciado:{ icon: '\u23f3', label: 'Não iniciado', bg: 'rgba(100,116,139,.12)', color: '#64748b' }
+  };
+  const c = cfg[status] || cfg.nao_iniciado;
+  return `<span style="display:inline-flex;align-items:center;gap:.3rem;padding:.2rem .6rem;border-radius:999px;font-size:.72rem;font-weight:600;background:${c.bg};color:${c.color}">${c.icon} ${c.label}</span>`;
+}
+
+/**
+ * Gera o HTML de um card de serviço (recolhível).
+ */
+function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
+  const { descricao, item, execAcumPct, execAcumValor, valorContrato, planAcum, mesAtualIdx, status } = dados;
+  const planAteAgora = planAcum[mesAtualIdx] || 0;
+  const desvio = +(execAcumPct - planAteAgora).toFixed(2);
+  const desvioColor = desvio >= 0 ? '#10b981' : '#ef4444';
+  const desvioSinal = desvio >= 0 ? '+' : '';
+  const temDados = valorContrato > 0 || planAcum.some(v => v > 0);
+
+  return `
+  <div class="servico-card" style="border:1px solid var(--border,#e2e8f0);border-radius:10px;margin-bottom:.75rem;overflow:hidden;background:var(--surface,#fff)">
+    <button
+      class="servico-card-header"
+      aria-expanded="${isOpen}"
+      style="width:100%;display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem;background:none;border:none;cursor:pointer;text-align:left;transition:background .15s"
+      onclick="this.setAttribute('aria-expanded', this.getAttribute('aria-expanded')==='true'?'false':'true'); this.nextElementSibling.style.display = this.getAttribute('aria-expanded')==='true' ? '' : 'none';"
+    >
+      <span style="font-size:.7rem;font-weight:700;color:var(--text-muted,#64748b);min-width:1.8rem">${esc(String(item))}</span>
+      <span style="flex:1;font-size:.82rem;font-weight:600;color:var(--text,#0f172a)">${esc(descricao)}</span>
+      ${_statusBadge(status)}
+      <span style="font-size:.78rem;color:var(--text-muted,#64748b);white-space:nowrap">${execAcumPct.toFixed(1)}% exec.</span>
+      <span style="font-size:.9rem;transition:transform .2s;display:inline-block">${isOpen ? '\u25b2' : '\u25bc'}</span>
+    </button>
+    <div style="display:${isOpen ? '' : 'none'}">
+      ${temDados ? `
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;padding:.5rem 1rem .25rem;border-top:1px solid var(--border,#e2e8f0)">
+        <div style="font-size:.75rem;color:var(--text-muted)">
+          <span style="font-weight:600;color:var(--text)">Planejado até hoje:</span> ${planAteAgora.toFixed(1)}%
+        </div>
+        <div style="font-size:.75rem;color:var(--text-muted)">
+          <span style="font-weight:600;color:var(--text)">Executado:</span> ${execAcumPct.toFixed(1)}%
+        </div>
+        <div style="font-size:.75rem">
+          <span style="font-weight:600;color:var(--text)">Desvio:</span>
+          <span style="color:${desvioColor};font-weight:700">${desvioSinal}${desvio}%</span>
+        </div>
+        <div style="font-size:.75rem;color:var(--text-muted)">
+          <span style="font-weight:600;color:var(--text)">Valor Contrato:</span> ${money(valorContrato)}
+        </div>
+        <div style="font-size:.75rem;color:var(--text-muted)">
+          <span style="font-weight:600;color:var(--text)">Acumulado R$:</span> ${money(execAcumValor)}
+        </div>
+      </div>
+      <div class="chart-scroll-wrap" id="${wrapId}" style="padding:.5rem 1rem 1rem">
+        <div class="chart-container" style="height:200px"><canvas id="${canvasId}"></canvas></div>
+      </div>` : `<div style="padding:.75rem 1rem;font-size:.8rem;color:var(--text-muted)">Sem dados de cronograma para este serviço.</div>`}
+    </div>
+  </div>`;
+}
+
+/**
+ * Renderiza a seção completa de Curvas S por serviço num container qualquer.
+ * prefix: string única para evitar colisão de IDs entre colaborador e admin.
+ */
+export function renderCurvasPorServico(containerId, obra, prefix) {
+  const container = $(containerId); if (!container) return;
+
+  // Limpa gráficos anteriores guardados no state
+  const chartsKey = `_servicoCharts_${prefix}`;
+  if (state[chartsKey]) {
+    Object.values(state[chartsKey]).forEach(c => { try { c.destroy(); } catch(_){} });
+  }
+  state[chartsKey] = {};
+  container.innerHTML = '';
+
+  const itensCrono   = Array.isArray(obra?.cronogramaItens) ? obra.cronogramaItens : [];
+  const itensExecucao= Array.isArray(obra?.itens)           ? obra.itens           : [];
+  const totalMeses   = Array.isArray(obra?.cronograma)      ? obra.cronograma.length : 0;
+  const dataInicio   = obra?.dataInicio || null;
+
+  if (!itensCrono.length || !totalMeses || !dataInicio) {
+    container.innerHTML = `<div style="padding:1rem;font-size:.82rem;color:var(--text-muted)">\u2139\ufe0f Nenhum item de cronograma disponível. Reimporte o cronograma para habilitar as curvas por serviço.</div>`;
+    return;
+  }
+
+  let html = '';
+  itensCrono.forEach((itemCrono, idx) => {
+    const canvasId = `${prefix}_servico_canvas_${idx}`;
+    const wrapId   = `${prefix}_servico_wrap_${idx}`;
+    const isOpen   = idx === 0; // primeiro card aberto por padrão
+    const dados    = buildCurvaServico(dataInicio, itemCrono, itensExecucao, totalMeses);
+    if (!dados) return;
+    html += _servicoCardHTML(dados, canvasId, wrapId, isOpen);
+  });
+
+  if (!html) {
+    container.innerHTML = `<div style="padding:1rem;font-size:.82rem;color:var(--text-muted)">Nenhum serviço encontrado.</div>`;
+    return;
+  }
+
+  container.innerHTML = html;
+
+  // Renderiza os gráficos com requestAnimationFrame para não bloquear o DOM
+  function renderNext(idx) {
+    if (idx >= itensCrono.length) return;
+    const itemCrono = itensCrono[idx];
+    const canvasId  = `${prefix}_servico_canvas_${idx}`;
+    const wrapId    = `${prefix}_servico_wrap_${idx}`;
+    const dados     = buildCurvaServico(dataInicio, itemCrono, itensExecucao, totalMeses);
+    if (dados && $(canvasId)) {
+      state[chartsKey][idx] = _renderCurvaServico(
+        canvasId, wrapId, dados, state[chartsKey][idx] || null
+      );
+    }
+    requestAnimationFrame(() => renderNext(idx + 1));
+  }
+  requestAnimationFrame(() => renderNext(0));
+}
+
+/* ============================================================
+   DEMAIS FUNÇÕES EXISTENTES (sem alteração)
+   ============================================================ */
 export function applySelected(o) {
   state.rows = Array.isArray(o.itens) ? o.itens : [];
   const pn = $('projName');       if (pn) pn.value = o.nomeProjeto || o.nome || 'Nova obra';
@@ -322,15 +573,11 @@ export function renderCronogramaMensalBox() {
   };
 }
 
-/* ============================================================
-   SEÇÃO DE ADITIVOS
-   ============================================================ */
 export function renderAditivosSection() {
   const box = $('aditivosBox'); if (!box) return;
   const o = currentObra();
   if (!o) { box.innerHTML = ''; return; }
 
-  // Migra aditivos legados que não têm campo id
   const precisaMigrar = Array.isArray(o.aditivos) && o.aditivos.some(ad => !ad.id);
   if (precisaMigrar) {
     migrarAditivosSemId(o).then(() => renderAditivosSection());
@@ -460,6 +707,14 @@ export function updateDashboard() {
   }
 
   renderAditivosCurvas();
+
+  // ── Curvas S por serviço (colaborador) ──
+  const panelServicos = $('curvasPorServicoPanel');
+  const temItens = Array.isArray(o?.cronogramaItens) && o.cronogramaItens.length > 0;
+  if (panelServicos) panelServicos.style.display = temItens ? '' : 'none';
+  if (temItens) {
+    renderCurvasPorServico('curvasPorServicoContainer', o, 'colab');
+  }
 }
 
 export function renderObrasBox() {
@@ -664,6 +919,15 @@ export function renderAdminDetail() {
     </div>`;
   }).join('');
 
+  // ── Curvas S por serviço (admin) ──
+  const temItensAdmin = Array.isArray(obra.cronogramaItens) && obra.cronogramaItens.length > 0;
+  const curvasPorServicoHTML = temItensAdmin
+    ? `<div class="panel" style="margin-bottom:1.5rem">
+         <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">\ud83d\udcca Curvas S por Servi\u00e7o</h3>
+         <div id="adminCurvasPorServicoContainer"></div>
+       </div>`
+    : '';
+
   html +=
     `<div class="admin-stats-grid">
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Contratada</span><span class="stat-value" style="${VSSM}">${esc(obra.contratada||'-')}</span></div>
@@ -681,6 +945,7 @@ export function renderAdminDetail() {
      </div>
      ${curvaS2HTML}
      ${aditivosHTML}
+     ${curvasPorServicoHTML}
      <div class="panel">
        <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">\u00cdndice de Itens</h3>
        <div class="table-container"><table class="admin-table">
@@ -723,6 +988,10 @@ export function renderAdminDetail() {
       dataInicioBaseCharts = calcDataInicioProximo(dataInicioBaseCharts, nP) || dataInicioBaseCharts;
       renderCurvaS2Aditivo(`adminCurvaS_ad_${ad.id}`, `adminCurvaS_wrap_${ad.id}`, ad, di, null);
     });
+    // Curvas por serviço — admin
+    if (temItensAdmin) {
+      renderCurvasPorServico('adminCurvasPorServicoContainer', obra, `admin_${state.adminSelectedObraId}`);
+    }
   });
 }
 

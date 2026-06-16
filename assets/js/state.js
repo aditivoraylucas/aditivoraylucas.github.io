@@ -63,7 +63,6 @@ export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
 
   const [iniAno, iniMes] = dataInicio.split('-').map(Number);
 
-  // Referência do "Hoje": dataEmissao da planilha (apenas mês/ano) ou sistema
   let refAno, refMes;
   if(dataEmissao && dataEmissao.mes && dataEmissao.ano){
     refMes = dataEmissao.mes;
@@ -98,4 +97,108 @@ export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
     });
   }
   return result;
+}
+
+/* ── Curva S por Serviço ─────────────────────────────────────────────────────
+ *
+ * buildCurvaServico(dataInicio, itemCronograma, itensExecucao, totalMeses)
+ *
+ * Parâmetros:
+ *   dataInicio      — string 'YYYY-MM-DD' — data de início da obra
+ *   itemCronograma  — objeto do cronograma por item salvo no Firebase:
+ *                     { item, descricao, meses: [{mes, pct, valor}, ...] }
+ *   itensExecucao   — array de itens de medição da obra (o.itens) com
+ *                     { item, descricao, valorContrato, acumulado, ... }
+ *   totalMeses      — número total de meses do cronograma (cronograma.length)
+ *
+ * Retorna:
+ *   {
+ *     descricao,       — nome do serviço
+ *     labels[],        — labels de mês (ex: 'abr. 25')
+ *     planMensal[],    — % planejado de cada mês (não acumulado)
+ *     planAcum[],      — % planejado acumulado
+ *     planValorMensal[], — R$ planejado de cada mês
+ *     planValorAcum[],   — R$ planejado acumulado
+ *     execAcumPct,     — % real executado acumulado deste serviço
+ *     execAcumValor,   — R$ real executado acumulado deste serviço
+ *     valorContrato,   — R$ total do contrato deste serviço
+ *     status,          — 'em_dia' | 'atrasado' | 'adiantado' | 'nao_iniciado'
+ *     mesAtualIdx,     — índice (0-based) do mês atual no array
+ *   }
+ */
+export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, totalMeses) {
+  if (!dataInicio || !itemCronograma) return null;
+
+  const [iniAno, iniMes] = dataInicio.split('-').map(Number);
+  const now      = new Date();
+  const refAno   = now.getFullYear();
+  const refMes   = now.getMonth() + 1;
+  const mesesDecorridos = Math.max(0, (refAno - iniAno) * 12 + (refMes - iniMes));
+
+  // meses do item (array de {mes:1..N, pct, valor}), garantindo totalMeses slots
+  const mesesItem = Array.isArray(itemCronograma.meses) ? itemCronograma.meses : [];
+  const mesesMap  = {};
+  mesesItem.forEach(m => { mesesMap[m.mes] = m; });
+
+  const labels           = [];
+  const planMensal       = [];
+  const planAcum         = [];
+  const planValorMensal  = [];
+  const planValorAcum    = [];
+  let   acumPct          = 0;
+  let   acumValor        = 0;
+  let   mesAtualIdx      = 0;
+
+  for (let m = 1; m <= totalMeses; m++) {
+    // label: mês de encerramento do período (offset = m)
+    const base0 = (iniMes - 1) + m;
+    const sAno  = iniAno + Math.floor(base0 / 12);
+    const sMes  = (base0 % 12) + 1;
+    labels.push(new Date(sAno, sMes - 1, 1).toLocaleDateString('pt-BR', { month:'short', year:'2-digit' }));
+
+    const slot = mesesMap[m] || { pct: 0, valor: 0 };
+    const mp   = +Number(slot.pct   || 0).toFixed(4);
+    const mv   = +Number(slot.valor || 0).toFixed(2);
+    acumPct   += mp;
+    acumValor += mv;
+    planMensal.push(mp);
+    planAcum.push(+Math.min(acumPct, 100).toFixed(2));
+    planValorMensal.push(mv);
+    planValorAcum.push(+acumValor.toFixed(2));
+
+    if (m <= mesesDecorridos) mesAtualIdx = m - 1;
+  }
+
+  // Execução real: busca o item correspondente em itensExecucao pelo número do item
+  const execItem     = (itensExecucao || []).find(r =>
+    String(r.item).trim() === String(itemCronograma.item).trim()
+  );
+  const execAcumPct  = execItem ? +Number(execItem.percentualExecutado || 0).toFixed(2) : 0;
+  const execAcumValor= execItem ? +Number(execItem.acumulado           || 0).toFixed(2) : 0;
+  const valorContrato= execItem ? +Number(execItem.valorContrato        || 0).toFixed(2) : 0;
+
+  // Status: compara execução acumulada real vs planejada até o mês atual
+  const planAteAgora = planAcum[mesAtualIdx] || 0;
+  let status = 'nao_iniciado';
+  if (planAteAgora > 0 || execAcumPct > 0) {
+    if (execAcumPct === 0 && planAteAgora > 0) status = 'atrasado';
+    else if (execAcumPct >= planAteAgora - 0.01) status = execAcumPct > planAteAgora + 0.01 ? 'adiantado' : 'em_dia';
+    else status = 'atrasado';
+  }
+
+  return {
+    descricao:       itemCronograma.descricao || `Serviço ${itemCronograma.item}`,
+    item:            itemCronograma.item,
+    labels,
+    planMensal,
+    planAcum,
+    planValorMensal,
+    planValorAcum,
+    execAcumPct,
+    execAcumValor,
+    valorContrato,
+    status,
+    mesAtualIdx,
+    mesesDecorridos
+  };
 }
