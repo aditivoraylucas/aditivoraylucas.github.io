@@ -40,15 +40,16 @@ export function importFile(replace=false){
         medicaoAtual:obj?.medicaoAtual||'', itens:rows, resumo:obj?.resumo||{percentual:0} };
       if(replace){
         const existente=currentObra();
-        if(existente?.cronograma)         obra.cronograma         = existente.cronograma;
-        if(existente?.dataInicio)         obra.dataInicio         = existente.dataInicio;
-        if(existente?.dataEmissao)        obra.dataEmissao        = existente.dataEmissao;
-        if(existente?.cronogramaExecucao) obra.cronogramaExecucao = existente.cronogramaExecucao;
-        if(existente?.aditivos)           obra.aditivos           = existente.aditivos;
-        if(existente?.cronogramaAditivo)  obra.cronogramaAditivo  = existente.cronogramaAditivo;
-        if(existente?.dataInicioAditivo)  obra.dataInicioAditivo  = existente.dataInicioAditivo;
-        if(existente?.dataEmissaoAditivo) obra.dataEmissaoAditivo = existente.dataEmissaoAditivo;
-        if(existente?.cronogramaItens)    obra.cronogramaItens    = existente.cronogramaItens;
+        if(existente?.cronograma)               obra.cronograma               = existente.cronograma;
+        if(existente?.dataInicio)               obra.dataInicio               = existente.dataInicio;
+        if(existente?.dataEmissao)              obra.dataEmissao              = existente.dataEmissao;
+        if(existente?.cronogramaExecucao)       obra.cronogramaExecucao       = existente.cronogramaExecucao;
+        if(existente?.aditivos)                 obra.aditivos                 = existente.aditivos;
+        if(existente?.cronogramaAditivo)        obra.cronogramaAditivo        = existente.cronogramaAditivo;
+        if(existente?.dataInicioAditivo)        obra.dataInicioAditivo        = existente.dataInicioAditivo;
+        if(existente?.dataEmissaoAditivo)       obra.dataEmissaoAditivo       = existente.dataEmissaoAditivo;
+        if(existente?.cronogramaItens)          obra.cronogramaItens          = existente.cronogramaItens;
+        if(existente?.cronogramaItensExecucao)  obra.cronogramaItensExecucao  = existente.cronogramaItensExecucao;
       }
       await saveObra(obra);
       state.selectedObraId=obraId;
@@ -72,7 +73,6 @@ export function importCronograma(){
       const wb=XLSX.read(buf,{type:'array'});
       const { cronograma, totalMeses, itens, dataEmissao } = parseCronogramaXLSX(wb);
       o.cronograma = cronograma;
-      // Salva os itens do cronograma para habilitar as Curvas S por serviço
       if(Array.isArray(itens) && itens.length > 0){
         o.cronogramaItens = itens;
       }
@@ -100,14 +100,35 @@ export function importCronogramaMensal(){
     try{
       const buf=await file.arrayBuffer();
       const wb=XLSX.read(buf,{type:'array'});
-      const { cronograma, totalMeses } = parseCronogramaXLSX(wb);
+      const { cronograma, totalMeses, itens, dataEmissao } = parseCronogramaXLSX(wb);
+
+      // Salva total da obra por mês (curva S geral — igual a antes)
       o.cronogramaExecucao = cronograma.map(m => ({
-        mes: m.mes,
+        mes:            m.mes,
         executadoPct:   m.planejadoPct,
         executadoValor: m.planejadoValor
       }));
+
+      // NOVO: salva execução real por serviço/item para as curvas S individuais
+      if(Array.isArray(itens) && itens.length > 0){
+        o.cronogramaItensExecucao = itens.map(it => ({
+          item:      it.item,
+          descricao: it.descricao,
+          meses:     it.meses.map(m => ({
+            mes:   m.mes,
+            pct:   m.pct,
+            valor: m.valor
+          }))
+        }));
+      }
+
+      // Usa dataEmissao do cronograma de execução como referência de "hoje"
+      if(dataEmissao) o.dataEmissaoExecucao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
+
       await saveObra(o);
-      showToast(`✅ Cronograma mensal importado: ${totalMeses} meses.`);
+      const emissaoTxt = dataEmissao ? ` | Emissão: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
+      const itensTxt   = Array.isArray(itens) && itens.length > 0 ? ` | ${itens.length} serviços` : '';
+      showToast(`✅ Cronograma mensal importado: ${totalMeses} meses${emissaoTxt}${itensTxt}.`);
       renderCronogramaMensalBox();
       updateDashboard();
     } catch(err){ showToast('❌ '+err.message,true); console.error(err); }
@@ -228,7 +249,6 @@ export function setupColabForm(){
 }
 
 export function bindEvents(){
-  /* ── Expõe funções admin no window para uso via onclick inline no HTML gerado ── */
   window.adminSelectColab = (uid) => {
     state.adminSelectedUid  = uid;
     state.adminSelectedObraId = null;
@@ -285,7 +305,6 @@ export function bindEvents(){
     updateDashboard();
   };
 
-  // Corrigido: usa 'aside-open' (classe correta do CSS)
   const menuBtn=$('menuBtn');
   if(menuBtn) menuBtn.onclick=()=>{ const a=document.querySelector('.app-aside'); if(a) a.classList.toggle('aside-open'); };
   const menuBtnAdmin=$('menuBtnAdmin');
