@@ -31,7 +31,7 @@ export function importFile(replace=false){
       } else if(ext==='json'){
         const text=await file.text(); obj=JSON.parse(text);
         rows=Array.isArray(obj)?normalizeRows(obj):normalizeRows(obj.itens);
-        if(!rows.length&&!Array.isArray(obj)&&!Array.isArray(obj.itens)) throw new Error('JSON inv\u00e1lido.');
+        if(!rows.length&&!Array.isArray(obj)&&!Array.isArray(obj.itens)) throw new Error('JSON inválido.');
       } else { obj=await readExcelFile(file); rows=normalizeRows(obj.itens); }
       const obraId=replace&&state.selectedObraId?state.selectedObraId:('obra_'+Date.now());
       const obraNome=baseName(file.name)||obj?.nome||'Nova obra';
@@ -48,18 +48,19 @@ export function importFile(replace=false){
         if(existente?.cronogramaAditivo)  obra.cronogramaAditivo  = existente.cronogramaAditivo;
         if(existente?.dataInicioAditivo)  obra.dataInicioAditivo  = existente.dataInicioAditivo;
         if(existente?.dataEmissaoAditivo) obra.dataEmissaoAditivo = existente.dataEmissaoAditivo;
+        if(existente?.cronogramaItens)    obra.cronogramaItens    = existente.cronogramaItens;
       }
       await saveObra(obra);
       state.selectedObraId=obraId;
-      showToast(`\u2705 ${rows.length} itens importados`);
-    } catch(err){ showToast('\u274c '+err.message,true); console.error(err); }
+      showToast(`✅ ${rows.length} itens importados`);
+    } catch(err){ showToast('❌ '+err.message,true); console.error(err); }
   };
   input.click();
 }
 
 export function importCronograma(){
   const o=currentObra();
-  if(!o){ showToast('\u26a0\ufe0f Selecione uma obra antes de importar o cronograma.',true); return; }
+  if(!o){ showToast('⚠️ Selecione uma obra antes de importar o cronograma.',true); return; }
   const input=document.createElement('input');
   input.type='file';
   input.accept='.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
@@ -69,22 +70,27 @@ export function importCronograma(){
     try{
       const buf=await file.arrayBuffer();
       const wb=XLSX.read(buf,{type:'array'});
-      const { cronograma, totalMeses, dataEmissao } = parseCronogramaXLSX(wb);
+      const { cronograma, totalMeses, itens, dataEmissao } = parseCronogramaXLSX(wb);
       o.cronograma = cronograma;
+      // Salva os itens do cronograma para habilitar as Curvas S por serviço
+      if(Array.isArray(itens) && itens.length > 0){
+        o.cronogramaItens = itens;
+      }
       if(dataEmissao) o.dataEmissao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
       await saveObra(o);
-      const emissaoTxt = dataEmissao ? ` | Emiss\u00e3o: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
-      showToast(`\u2705 Cronograma do contrato importado: ${totalMeses} meses${emissaoTxt}.`);
+      const emissaoTxt = dataEmissao ? ` | Emissão: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
+      const itensTxt   = Array.isArray(itens) && itens.length > 0 ? ` | ${itens.length} serviços` : '';
+      showToast(`✅ Cronograma do contrato importado: ${totalMeses} meses${emissaoTxt}${itensTxt}.`);
       renderCronogramaBox();
       updateDashboard();
-    } catch(err){ showToast('\u274c '+err.message,true); console.error(err); }
+    } catch(err){ showToast('❌ '+err.message,true); console.error(err); }
   };
   input.click();
 }
 
 export function importCronogramaMensal(){
   const o=currentObra();
-  if(!o){ showToast('\u26a0\ufe0f Selecione uma obra antes de importar o cronograma mensal.',true); return; }
+  if(!o){ showToast('⚠️ Selecione uma obra antes de importar o cronograma mensal.',true); return; }
   const input=document.createElement('input');
   input.type='file';
   input.accept='.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
@@ -101,17 +107,17 @@ export function importCronogramaMensal(){
         executadoValor: m.planejadoValor
       }));
       await saveObra(o);
-      showToast(`\u2705 Cronograma mensal importado: ${totalMeses} meses.`);
+      showToast(`✅ Cronograma mensal importado: ${totalMeses} meses.`);
       renderCronogramaMensalBox();
       updateDashboard();
-    } catch(err){ showToast('\u274c '+err.message,true); console.error(err); }
+    } catch(err){ showToast('❌ '+err.message,true); console.error(err); }
   };
   input.click();
 }
 
 export function importCronogramaPrevistoAditivo(aditivoId){
   const o=currentObra();
-  if(!o||!aditivoId){ showToast('\u26a0\ufe0f Obra ou aditivo n\u00e3o encontrado.',true); return; }
+  if(!o||!aditivoId){ showToast('⚠️ Obra ou aditivo não encontrado.',true); return; }
   const input=document.createElement('input');
   input.type='file';
   input.accept='.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
@@ -123,22 +129,22 @@ export function importCronogramaPrevistoAditivo(aditivoId){
       const wb=XLSX.read(buf,{type:'array'});
       const { cronograma, totalMeses, dataEmissao } = parseCronogramaXLSX(wb);
       const ad = (o.aditivos||[]).find(a=>a.id===aditivoId);
-      if(!ad) throw new Error('Aditivo n\u00e3o encontrado.');
+      if(!ad) throw new Error('Aditivo não encontrado.');
       ad.cronograma = cronograma;
       if(dataEmissao) ad.dataEmissao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
       await saveObra(o);
-      const emissaoTxt = dataEmissao ? ` | Emiss\u00e3o: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
-      showToast(`\u2705 Previsto importado: ${totalMeses} meses${emissaoTxt}.`);
+      const emissaoTxt = dataEmissao ? ` | Emissão: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
+      showToast(`✅ Previsto importado: ${totalMeses} meses${emissaoTxt}.`);
       renderAditivosSection();
       updateDashboard();
-    } catch(err){ showToast('\u274c '+err.message,true); console.error(err); }
+    } catch(err){ showToast('❌ '+err.message,true); console.error(err); }
   };
   input.click();
 }
 
 export function importCronogramaMensalAditivo(aditivoId){
   const o=currentObra();
-  if(!o||!aditivoId){ showToast('\u26a0\ufe0f Obra ou aditivo n\u00e3o encontrado.',true); return; }
+  if(!o||!aditivoId){ showToast('⚠️ Obra ou aditivo não encontrado.',true); return; }
   const input=document.createElement('input');
   input.type='file';
   input.accept='.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel';
@@ -150,24 +156,24 @@ export function importCronogramaMensalAditivo(aditivoId){
       const wb=XLSX.read(buf,{type:'array'});
       const { cronograma, totalMeses } = parseCronogramaXLSX(wb);
       const ad = (o.aditivos||[]).find(a=>a.id===aditivoId);
-      if(!ad) throw new Error('Aditivo n\u00e3o encontrado.');
+      if(!ad) throw new Error('Aditivo não encontrado.');
       ad.cronogramaExecucao = cronograma.map(m => ({
         mes: m.mes,
         executadoPct:   m.planejadoPct,
         executadoValor: m.planejadoValor
       }));
       await saveObra(o);
-      showToast(`\u2705 Mensal do aditivo importado: ${totalMeses} meses.`);
+      showToast(`✅ Mensal do aditivo importado: ${totalMeses} meses.`);
       renderAditivosSection();
       updateDashboard();
-    } catch(err){ showToast('\u274c '+err.message,true); console.error(err); }
+    } catch(err){ showToast('❌ '+err.message,true); console.error(err); }
   };
   input.click();
 }
 
 export async function addNovoAditivo(){
   const o=currentObra();
-  if(!o){ showToast('\u26a0\ufe0f Selecione uma obra antes de adicionar um aditivo.',true); return; }
+  if(!o){ showToast('⚠️ Selecione uma obra antes de adicionar um aditivo.',true); return; }
   if(!o.aditivos) o.aditivos=[];
   o.aditivos.push({
     id:                 'aditivo_'+Date.now(),
@@ -177,7 +183,7 @@ export async function addNovoAditivo(){
     dataEmissao:        null
   });
   await saveObra(o);
-  showToast('\u2705 Aditivo criado.');
+  showToast('✅ Aditivo criado.');
   renderAditivosSection();
   updateDashboard();
 }
@@ -195,7 +201,7 @@ export async function removerAditivo(aditivoId){
   if(!confirm('Remover este aditivo e seu cronograma?')) return;
   o.aditivos=(o.aditivos||[]).filter(a=>a.id!==aditivoId);
   await saveObra(o);
-  showToast('\u2705 Aditivo removido.');
+  showToast('✅ Aditivo removido.');
   renderAditivosSection();
   updateDashboard();
 }
@@ -213,7 +219,7 @@ export function setupColabForm(){
     try{
       const cred=await createUserWithEmailAndPassword(auth,email,senha);
       await setDoc(doc(db,'users',cred.user.uid),{nome,email,role:'colaborador',blocked:false,createdAt:new Date().toISOString()});
-      showToast('\u2705 Colaborador cadastrado!');
+      showToast('✅ Colaborador cadastrado!');
       form.reset();
     } catch(err){
       errBox.textContent=err.message; errBox.style.display='block';
@@ -242,15 +248,15 @@ export function bindEvents(){
   window.toggleBloqueio = async (uid, bloqueado) => {
     try {
       await updateDoc(doc(db,'users',uid),{ blocked: !bloqueado });
-      showToast(bloqueado ? '\u2705 Colaborador desbloqueado.' : '\ud83d\udd12 Colaborador bloqueado.');
-    } catch(err){ showToast('\u274c '+err.message,true); }
+      showToast(bloqueado ? '✅ Colaborador desbloqueado.' : '🔒 Colaborador bloqueado.');
+    } catch(err){ showToast('❌ '+err.message,true); }
   };
   window.removeColab = async (uid) => {
     if(!confirm('Remover este colaborador permanentemente?')) return;
     try {
       await updateDoc(doc(db,'users',uid),{ disabled: true });
-      showToast('\u2705 Colaborador removido.');
-    } catch(err){ showToast('\u274c '+err.message,true); }
+      showToast('✅ Colaborador removido.');
+    } catch(err){ showToast('❌ '+err.message,true); }
   };
 
   const loginForm=$('loginForm');
@@ -275,7 +281,7 @@ export function bindEvents(){
     const html=document.documentElement;
     const dark=html.dataset.theme==='dark';
     html.dataset.theme=dark?'light':'dark';
-    themeBtn.textContent=dark?'\ud83c\udf19':'\u2600\ufe0f';
+    themeBtn.textContent=dark?'🌙':'☀️';
     updateDashboard();
   };
 
@@ -320,7 +326,7 @@ export function bindEvents(){
   const exportCsv=$('exportCsv');
   if(exportCsv) exportCsv.onclick=()=>{
     if(!state.rows.length){ showToast('Nenhum dado para exportar.',true); return; }
-    const header=['Item','Descri\u00e7\u00e3o','Valor Contrato','Medi\u00e7\u00e3o','Acumulado','Saldo','% Exec.'];
+    const header=['Item','Descrição','Valor Contrato','Medição','Acumulado','Saldo','% Exec.'];
     const rows=state.rows.map(r=>[r.item,r.descricao,r.valorContrato,r.medicao,r.acumulado,r.saldo,r.percentualExecutado]);
     const csv=[header,...rows].map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(';')).join('\n');
     const a=document.createElement('a');
