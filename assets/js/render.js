@@ -250,10 +250,6 @@ export function renderCurvaS(canvasId, wrapId, itens, prev) {
    CURVA S POR SERVIÇO
    ============================================================ */
 
-/**
- * Renderiza um único gráfico de Curva S para um serviço específico.
- * Exibe: linha planejada acumulada (laranja) + ponto de execução real (verde).
- */
 function _renderCurvaServico(canvasId, wrapId, dados, prevChart) {
   const canvas = $(canvasId); if (!canvas) return prevChart;
   if (prevChart) { try { prevChart.destroy(); } catch(_){} }
@@ -269,13 +265,11 @@ function _renderCurvaServico(canvasId, wrapId, dados, prevChart) {
   const n = labels.length;
   if (!n) return prevChart;
 
-  // Ponto único de execução real: coloca no índice do mês atual, null nos demais
   const execData = new Array(n).fill(null);
   if (mesesDecorridos > 0 && mesAtualIdx >= 0 && execAcumPct > 0) {
     execData[mesAtualIdx] = execAcumPct;
   }
 
-  // Linha "Hoje"
   const hojeAnnotation = mesesDecorridos > 0 && mesAtualIdx >= 0 ? {
     type: 'line',
     scaleID: 'x',
@@ -373,9 +367,6 @@ function _renderCurvaServico(canvasId, wrapId, dados, prevChart) {
   });
 }
 
-/**
- * Badge de status HTML.
- */
 function _statusBadge(status) {
   const cfg = {
     em_dia:      { icon: '\u2705', label: 'Em dia',       bg: 'rgba(16,185,129,.15)',  color: '#10b981' },
@@ -387,12 +378,9 @@ function _statusBadge(status) {
   return `<span style="display:inline-flex;align-items:center;gap:.3rem;padding:.2rem .6rem;border-radius:999px;font-size:.72rem;font-weight:600;background:${c.bg};color:${c.color}">${c.icon} ${c.label}</span>`;
 }
 
-/**
- * Gera o HTML de um card de serviço (recolhível).
- */
 function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
   const { descricao, item, execAcumPct, execAcumValor, valorContrato, planAcum, mesAtualIdx, status } = dados;
-  const planAteAgora = planAcum[mesAtualIdx] || 0;
+  const planAteAgora = (mesAtualIdx >= 0 && planAcum[mesAtualIdx] != null) ? planAcum[mesAtualIdx] : 0;
   const desvio = +(execAcumPct - planAteAgora).toFixed(2);
   const desvioColor = desvio >= 0 ? '#10b981' : '#ef4444';
   const desvioSinal = desvio >= 0 ? '+' : '';
@@ -439,14 +427,9 @@ function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
   </div>`;
 }
 
-/**
- * Renderiza a seção completa de Curvas S por serviço num container qualquer.
- * prefix: string única para evitar colisão de IDs entre colaborador e admin.
- */
 export function renderCurvasPorServico(containerId, obra, prefix) {
   const container = $(containerId); if (!container) return;
 
-  // Limpa gráficos anteriores guardados no state
   const chartsKey = `_servicoCharts_${prefix}`;
   if (state[chartsKey]) {
     Object.values(state[chartsKey]).forEach(c => { try { c.destroy(); } catch(_){} });
@@ -454,34 +437,38 @@ export function renderCurvasPorServico(containerId, obra, prefix) {
   state[chartsKey] = {};
   container.innerHTML = '';
 
-  const itensCrono   = Array.isArray(obra?.cronogramaItens) ? obra.cronogramaItens : [];
-  const itensExecucao= Array.isArray(obra?.itens)           ? obra.itens           : [];
-  const totalMeses   = Array.isArray(obra?.cronograma)      ? obra.cronograma.length : 0;
-  const dataInicio   = obra?.dataInicio || null;
+  const itensCrono    = Array.isArray(obra?.cronogramaItens) ? obra.cronogramaItens : [];
+  const itensExecucao = Array.isArray(obra?.itens)           ? obra.itens           : [];
+  const totalMeses    = Array.isArray(obra?.cronograma)      ? obra.cronograma.length : 0;
+  const dataInicio    = obra?.dataInicio || null;
 
+  // Mostra/oculta o painel pai
+  const painel = $('curvasPorServicoPanel');
+  const badge  = $('curvasPorServicoBadge');
   if (!itensCrono.length || !totalMeses || !dataInicio) {
-    container.innerHTML = `<div style="padding:1rem;font-size:.82rem;color:var(--text-muted)">\u2139\ufe0f Nenhum item de cronograma disponível. Reimporte o cronograma para habilitar as curvas por serviço.</div>`;
+    if (painel) painel.style.display = 'none';
     return;
   }
+  if (painel) painel.style.display = '';
+  if (badge)  badge.textContent = `${itensCrono.length} serviços`;
 
   let html = '';
   itensCrono.forEach((itemCrono, idx) => {
     const canvasId = `${prefix}_servico_canvas_${idx}`;
     const wrapId   = `${prefix}_servico_wrap_${idx}`;
-    const isOpen   = idx === 0; // primeiro card aberto por padrão
+    const isOpen   = idx === 0;
     const dados    = buildCurvaServico(dataInicio, itemCrono, itensExecucao, totalMeses);
     if (!dados) return;
     html += _servicoCardHTML(dados, canvasId, wrapId, isOpen);
   });
 
   if (!html) {
-    container.innerHTML = `<div style="padding:1rem;font-size:.82rem;color:var(--text-muted)">Nenhum serviço encontrado.</div>`;
+    if (painel) painel.style.display = 'none';
     return;
   }
 
   container.innerHTML = html;
 
-  // Renderiza os gráficos com requestAnimationFrame para não bloquear o DOM
   function renderNext(idx) {
     if (idx >= itensCrono.length) return;
     const itemCrono = itensCrono[idx];
@@ -536,9 +523,10 @@ export function renderCronogramaBox() {
   const totalMeses = temCrono ? o.cronograma.length : 0;
   const dataFimStr = (temCrono && o.dataInicio) ? fmtDate(calcDataFim(o.dataInicio, totalMeses)) : null;
   if (temCrono) {
+    const nServicos = Array.isArray(o.cronogramaItens) ? o.cronogramaItens.length : 0;
     box.innerHTML =
-      `<div style="font-size:.8rem;color:var(--text-muted)">\ud83d\udcca <strong style="color:var(--text)">${totalMeses} meses</strong> importados</div>
-       ${dataFimStr ? `<div style="font-size:.75rem;color:var(--text-muted)">\ud83c\udfc1 T\u00e9rmino previsto: <strong>${dataFimStr}</strong></div>` : ''}
+      `<div style="font-size:.8rem;color:var(--text-muted)">\ud83d\udcca <strong style="color:var(--text)">${totalMeses} meses</strong> importados${nServicos ? ` · <strong style="color:var(--text)">${nServicos} serviços</strong>` : ''}</div>
+       ${dataFimStr ? `<div style="font-size:.75rem;color:var(--text-muted)">\ud83c\udfc1 Término previsto: <strong>${dataFimStr}</strong></div>` : ''}
        <button id="removeCronogramaBtn" class="btn btn-danger" style="width:100%;margin-top:.5rem;font-size:.8rem">\ud83d\uddd1 Remover</button>`;
   } else {
     box.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem">Nenhum cronograma importado.</p>';
@@ -546,7 +534,7 @@ export function renderCronogramaBox() {
   const removeBtn = $('removeCronogramaBtn');
   if (removeBtn) removeBtn.onclick = async () => {
     if (!confirm('Remover o cronograma desta obra?')) return;
-    delete o.cronograma; delete o.dataEmissao;
+    delete o.cronograma; delete o.dataEmissao; delete o.cronogramaItens;
     await saveObra(o); renderCronogramaBox(); updateDashboard();
     showToast('\u2705 Cronograma removido.');
   };
@@ -655,7 +643,7 @@ export function renderAditivosCurvas() {
     panel.innerHTML = `
       <div style="display:flex;align-items:baseline;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap">
         <h3 style="font-size:.95rem;font-weight:700;margin:0">Curva S \u2014 ${esc(ad.nome || 'Aditivo')}</h3>
-        ${dataFimStr ? `<span style="font-size:.75rem;color:var(--text-muted)">\ud83c\udfc1 T\u00e9rmino: <strong>${dataFimStr}</strong></span>` : ''}
+        ${dataFimStr ? `<span style="font-size:.75rem;color:var(--text-muted)">\ud83c\udfc1 Término: <strong>${dataFimStr}</strong></span>` : ''}
       </div>
       <div class="chart-scroll-wrap" id="${wrapId}"><div class="chart-container"><canvas id="${canvasId}"></canvas></div></div>`;
     container.appendChild(panel);
@@ -679,320 +667,62 @@ export function updateDashboard() {
   const LS = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
   const VS = 'font-size:.95rem;font-weight:700;margin-top:.2rem';
   if ($('stats')) $('stats').innerHTML =
-    `<div class="stat-card"><span class="stat-label" style="${LS}">Esta Medi\u00e7\u00e3o</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>
+    `<div class="stat-card"><span class="stat-label" style="${LS}">Esta Medição</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>
      <div class="stat-card"><span class="stat-label" style="${LS}">Valor CT / Aditivo</span><span class="stat-value" style="${VS}">${money(vc)}</span></div>
      <div class="stat-card"><span class="stat-label" style="${LS}">Acumulado Total</span><span class="stat-value" style="${VS};color:var(--success)">${money(ac)}</span></div>
      <div class="stat-card"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>`;
   if ($('countAll'))  $('countAll').textContent  = money(vc);
   if ($('countDone')) $('countDone').textContent = money(ac);
   if ($('countPct'))  $('countPct').textContent  = pct(p);
-  if ($('mainProjName'))       $('mainProjName').textContent       = o?.nomeProjeto || o?.nome || '-';
-  if ($('mainProjContratada')) $('mainProjContratada').textContent = o?.contratada || '-';
-  if ($('mainProjScope'))      $('mainProjScope').textContent      = o?.medicaoAtual || '-';
 
-  state.chartUser = renderCurvaS1('sCurveChart', 'sCurveScrollWrap', itens, state.chartUser);
-
-  const temCrono  = Array.isArray(o?.cronograma)         && o.cronograma.length         > 0;
-  const temMensal = Array.isArray(o?.cronogramaExecucao) && o.cronogramaExecucao.length > 0;
-  const panelS2   = $('sCurveAditivoPanel');
-
-  if (temCrono && temMensal) {
-    if (panelS2) panelS2.style.display = '';
-    requestAnimationFrame(() => {
-      state.chartUser2 = renderCurvaS2('sCurveAditivoChart', 'sCurveAditivoScrollWrap', o, state.chartUser2);
-    });
-  } else {
-    if (panelS2) panelS2.style.display = 'none';
-    if (state.chartUser2) { try { state.chartUser2.destroy(); } catch(_){} state.chartUser2 = null; }
+  const banner = $('projBanner');
+  if (banner) {
+    const mn = $('mainProjName');       if (mn) mn.textContent = o?.nomeProjeto || o?.nome || '—';
+    const mc = $('mainProjContratada'); if (mc) mc.textContent = o?.contratada || '—';
+    const ms = $('mainProjScope');      if (ms) ms.textContent = o?.medicaoAtual || '—';
   }
 
-  renderAditivosCurvas();
-
-  // ── Curvas S por serviço (colaborador) ──
-  const panelServicos = $('curvasPorServicoPanel');
-  const temItens = Array.isArray(o?.cronogramaItens) && o.cronogramaItens.length > 0;
-  if (panelServicos) panelServicos.style.display = temItens ? '' : 'none';
-  if (temItens) {
-    renderCurvasPorServico('curvasPorServicoContainer', o, 'colab');
-  }
-}
-
-export function renderObrasBox() {
-  const box = $('obrasBox'); if (!box) return;
-  const obrasAtivas = state.obras.filter(o => !o.deletedAt);
-  if (!obrasAtivas.length) {
-    box.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem">Nenhuma obra cadastrada.</p>';
-    renderCronogramaBox(); renderCronogramaMensalBox(); renderAditivosSection();
-    return;
-  }
-  box.innerHTML =
-    `<div class="form-group" style="margin-bottom:.5rem"><label>Obra ativa</label>
-     <select id="obraSelect" class="form-control">
-       ${obrasAtivas.map(o => `<option value="${o.id}" ${o.id === state.selectedObraId ? 'selected' : ''}>${esc(o.nome || 'Obra')}</option>`).join('')}
-     </select></div>
-     <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-       <button class="btn btn-sec" id="replaceObraBtn" style="flex:1">\ud83d\udd04 Atualizar</button>
-       <button class="btn btn-danger" id="deleteObraBtn" style="flex:1">\ud83d\uddd1 Remover</button>
-     </div>`;
-  $('obraSelect').onchange = e => {
-    state.selectedObraId = e.target.value;
-    const o = currentObra(); if (o) { applySelected(o); renderAll(); }
-  };
-  $('replaceObraBtn').onclick = () => importFileFn(true);
-  $('deleteObraBtn').onclick  = async () => {
-    const idToDelete = state.selectedObraId;
-    const obraNome   = currentObra()?.nome || 'esta obra';
-    if (!idToDelete || !confirm(`Remover "${obraNome}"? Esta a\u00e7\u00e3o pode ser desfeita pelo administrador.`)) return;
-    await deleteObra(idToDelete);
-    const restantes = obrasAtivas.filter(o => o.id !== idToDelete);
-    state.selectedObraId = restantes.length ? restantes[0].id : null;
-    if (state.selectedObraId) {
-      const proxima = state.obras.find(x => x.id === state.selectedObraId);
-      if (proxima) applySelected(proxima);
-    } else {
-      state.rows = [];
-      ['projName','projContratada','projScope'].forEach(id => { const el = $(id); if (el) el.value = ''; });
-      limparObraIdDaUrl();
-    }
-    renderAll();
-    showToast(`"${obraNome}" removida.`);
-  };
+  renderTable();
   renderCronogramaBox();
   renderCronogramaMensalBox();
   renderAditivosSection();
-}
 
-export function renderAll() { renderObrasBox(); renderTable(); updateDashboard(); }
-let importFileFn = () => {};
-export function setImportFileFn(fn) { importFileFn = fn; }
+  // Curva S1 — Índice de Itens
+  state._curvaS1 = renderCurvaS1('sCurveChart', 'sCurveScrollWrap', itens, state._curvaS1 || null);
 
-/* ============================================================
-   ADMIN
-   ============================================================ */
-
-export function renderAdminStats() {
-  let tot=0, tvc=0, tac=0;
-  Object.values(state.allUsers).forEach(u => {
-    if (u.role === 'admin') return;
-    (u.obras || []).filter(o => !o.deletedAt).forEach(o => {
-      tot++;
-      const it = Array.isArray(o.itens) ? o.itens : [];
-      tvc += Number(o.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
-      tac += Number(o.resumo?.acumuladoTotal)       || it.reduce((a,i)=>a+Number(i.acumulado||0),0);
-    });
-  });
-  const p  = tvc > 0 ? +(tac/tvc*100).toFixed(2) : 0;
-  const LS = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
-  const VS = 'font-size:.95rem;font-weight:700;margin-top:.2rem';
-  if ($('adminStats')) $('adminStats').innerHTML =
-    `<div class="stat-card"><span class="stat-label" style="${LS}">Total de Obras</span><span class="stat-value" style="${VS}">${tot}</span></div>
-     <div class="stat-card"><span class="stat-label" style="${LS}">Soma dos Contratos</span><span class="stat-value" style="${VS}">${money(tvc)}</span></div>
-     <div class="stat-card"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>
-     <div class="stat-card"><span class="stat-label" style="${LS}">Acumulado Geral</span><span class="stat-value" style="${VS}">${money(tac)}</span></div>`;
-}
-
-export function renderColabList() {
-  const box = $('colabList'); if (!box) return;
-  const colabs = Object.entries(state.allUsers).filter(([,u]) => u.role !== 'admin');
-  if (!colabs.length) { box.innerHTML = '<p style="color:var(--text-muted);font-size:.875rem">Nenhum colaborador.</p>'; return; }
-  box.innerHTML = colabs.map(([uid, u]) =>
-    `<div class="colab-item" style="${u.blocked ? 'opacity:.7' : ''}">
-       <div><strong>${esc(u.nome)}</strong>
-         ${u.blocked ? '<span style="margin-left:.5rem;font-size:.7rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.1rem .4rem;border-radius:999px">\ud83d\udd12 Bloqueado</span>' : ''}
-         <br><small style="color:var(--text-muted)">${esc(u.email)}</small></div>
-       <div style="display:flex;gap:.4rem;flex-wrap:wrap">
-         <button class="btn ${u.blocked ? 'btn-success' : 'btn-warning'}" style="padding:.3rem .65rem;font-size:.72rem" onclick="toggleBloqueio('${uid}',${u.blocked})">${u.blocked ? '\u2705 Desbloquear' : '\ud83d\udd12 Bloquear'}</button>
-         <button class="btn btn-danger" style="padding:.3rem .65rem;font-size:.72rem" onclick="removeColab('${uid}')">Remover</button>
-       </div>
-     </div>`).join('');
-}
-
-function colabSidebarHTML(colabs) {
-  if (!colabs.length) return '<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem">Nenhum colaborador.</p>';
-  if (state.adminSelectedUid && state.allUsers[state.adminSelectedUid]) {
-    const u = state.allUsers[state.adminSelectedUid];
-    const n = (u.obras || []).filter(o => !o.deletedAt).length;
-    return `<button class="btn btn-sec" onclick="adminDeselectColab()" style="width:100%;margin-bottom:.75rem;font-size:.8rem">\u2190 Todos</button>
-       <div class="colab-sidebar-item active">
-         <div style="font-weight:600;font-size:.875rem">${u.blocked ? '\ud83d\udd12 ' : ''}${esc(u.nome)}</div>
-         <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n !== 1 ? 's' : ''}</div>
-       </div>`;
+  // Curva S2 — Contrato planejado x executado real
+  const temCronoContrato = Array.isArray(o?.cronograma) && o.cronograma.length > 0;
+  const temExecContrato  = Array.isArray(o?.cronogramaExecucao) && o.cronogramaExecucao.length > 0;
+  const sCurvePanel = $('sCurveAditivoPanel');
+  if (sCurvePanel) sCurvePanel.style.display = (temCronoContrato || temExecContrato) ? '' : 'none';
+  if (temCronoContrato || temExecContrato) {
+    state._curvaS2 = renderCurvaS2('sCurveAditivoChart', 'sCurveAditivoScrollWrap', o, state._curvaS2 || null);
   }
-  return colabs.map(([uid, u]) => {
-    const n = (u.obras || []).filter(o => !o.deletedAt).length;
-    return `<div class="colab-sidebar-item" style="${u.blocked ? 'opacity:.55' : ''}" onclick="adminSelectColab('${uid}')">
-       <div style="font-weight:600;font-size:.875rem">${u.blocked ? '\ud83d\udd12 ' : ''}${esc(u.nome)}</div>
-       <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n !== 1 ? 's' : ''}</div>
-     </div>`;
-  }).join('');
-}
 
-export function renderAdminSidebar() {
-  const colabs = Object.entries(state.allUsers).filter(([,u]) => u.role !== 'admin');
-  const html   = colabSidebarHTML(colabs);
-  const box    = $('adminColabSidebar');       if (box) box.innerHTML = html;
-  const mob    = $('adminColabSidebarMobile'); if (mob) mob.innerHTML = html;
-}
+  // Curvas S dos Aditivos
+  renderAditivosCurvas();
 
-export function adminObraCardHTML(obra) {
-  if (obra.deletedAt) return '';
-  const it = Array.isArray(obra.itens) ? obra.itens : [];
-  const vc = Number(obra.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
-  const ac = Number(obra.resumo?.acumuladoTotal)       || it.reduce((a,i)=>a+Number(i.acumulado||0),0);
-  const p  = calcPctGeral(obra.resumo, it);
-  const temCrono   = Array.isArray(obra.cronograma)         && obra.cronograma.length         > 0;
-  const temMensal  = Array.isArray(obra.cronogramaExecucao) && obra.cronogramaExecucao.length > 0;
-  const nAditivos  = Array.isArray(obra.aditivos) ? obra.aditivos.length : 0;
-  return `<div class="obra-card" style="cursor:pointer" onclick="adminSelectObra('${obra.id}')">
-    <div class="obra-card-header">
-      <div><div class="obra-card-title">${esc(obra.nome || 'Sem nome')}</div>
-      <div class="obra-card-sub">${it.length} itens | Aba: ${esc(obra.medicaoAtual || '-')}${temCrono ? ' | \ud83d\udcc5 Cronograma' : ''}${temMensal ? ' | \ud83d\udcc8 Mensal' : ''}${nAditivos > 0 ? ` | \ud83d\udccb ${nAditivos} aditivo${nAditivos>1?'s':''}` : ''}</div></div>
-      <div class="obra-card-pct">${pct(p)}</div></div>
-    <div class="obra-progress-bar"><div class="obra-progress-fill" style="width:${Math.min(100,p)}%"></div></div>
-    <div class="obra-card-footer">
-      <span>CT/Aditivo: ${money(vc)}</span><span>Acumulado: ${money(ac)}</span><span>Saldo: ${money(vc-ac)}</span>
-    </div></div>`;
-}
+  // Curvas S por Serviço ← NOVO
+  renderCurvasPorServico('curvasPorServicoContainer', o, 'colab');
 
-export function renderAdminDetail() {
-  const panel = $('adminDetailPanel'); if (!panel) return;
-  if (state.chartAdmin2) { try { state.chartAdmin2.destroy(); } catch(_){} state.chartAdmin2 = null; }
-  if (!state.adminSelectedUid) { panel.innerHTML = '<p style="color:var(--text-muted);padding:1rem">Selecione um colaborador ao lado.</p>'; return; }
-  const u = state.allUsers[state.adminSelectedUid];
-  if (!u) { panel.innerHTML = ''; return; }
-  const obrasList = (u.obras || []).filter(o => !o.deletedAt);
-  let html = `<div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1.5rem">
-    <div style="font-weight:700;font-size:1.1rem">\ud83d\udc64 ${esc(u.nome)}${u.blocked ? ' <span style="font-size:.75rem;background:rgba(239,68,68,.12);color:var(--danger);padding:.2rem .6rem;border-radius:999px">\ud83d\udd12</span>' : ''}</div>
-    <div class="form-group" style="margin:0;min-width:220px">
-      <select id="adminObraSelect" class="form-control" onchange="adminSelectObra(this.value)">
-        <option value="">-- Selecione uma obra --</option>
-        ${obrasList.map(o => `<option value="${o.id}" ${o.id === state.adminSelectedObraId ? 'selected' : ''}>${esc(o.nome || 'Obra')}</option>`).join('')}
-      </select></div></div>`;
-  if (!state.adminSelectedObraId || !obrasList.length) {
-    panel.innerHTML = html + (obrasList.length ? obrasList.map(adminObraCardHTML).join('') : '<p style="color:var(--text-muted)">Sem obras.</p>');
-    return;
+  // Banner de status do cronograma
+  const cronoStatus = $('cronoStatus');
+  if (cronoStatus) {
+    if (temCronoContrato && o?.dataInicio) {
+      const nMeses   = o.cronograma.length;
+      const dataFim  = calcDataFim(o.dataInicio, nMeses);
+      const diasRestantes = dataFim
+        ? Math.ceil((new Date(dataFim + 'T00:00:00') - new Date()) / 86400000)
+        : null;
+      if (diasRestantes !== null) {
+        const cor  = diasRestantes < 0 ? 'var(--danger)' : diasRestantes < 30 ? '#f59e0b' : 'var(--success)';
+        const txt  = diasRestantes < 0
+          ? `⚠️ Prazo vencido há ${Math.abs(diasRestantes)} dias`
+          : diasRestantes === 0
+          ? '🏁 Término hoje'
+          : `🗓️ ${diasRestantes} dias restantes`;
+        cronoStatus.innerHTML = `<span style="color:${cor};font-weight:600">${txt}</span>`;
+      } else { cronoStatus.innerHTML = ''; }
+    } else { cronoStatus.innerHTML = ''; }
   }
-  const obra = obrasList.find(o => o.id === state.adminSelectedObraId);
-  if (!obra) { panel.innerHTML = html + '<p style="color:var(--text-muted)">Obra n\u00e3o encontrada.</p>'; return; }
-  const it      = Array.isArray(obra.itens) ? obra.itens : [];
-  const vc      = Number(obra.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
-  const ac      = Number(obra.resumo?.acumuladoTotal)       || it.reduce((a,i)=>a+Number(i.acumulado||0),0);
-  const estaMed = Number(obra.resumo?.estaMedicao)          || it.reduce((a,i)=>a+Number(i.medicao||0),0);
-  const p       = calcPctGeral(obra.resumo, it);
-  const saldo   = vc - ac;
-  const dataInicioStr = fmtDate(obra.dataInicio);
-  const totalMeses    = Array.isArray(obra.cronograma) ? obra.cronograma.length : 0;
-  const dataFimISO    = calcDataFim(obra.dataInicio, totalMeses);
-  const dataFimStr    = dataFimISO ? fmtDate(dataFimISO) : '-';
-  const temMensal     = Array.isArray(obra.cronogramaExecucao) && obra.cronogramaExecucao.length > 0;
-  const temCrono      = Array.isArray(obra.cronograma)         && obra.cronograma.length         > 0;
-  const LS   = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
-  const VS   = 'font-size:.95rem;font-weight:700;margin-top:.15rem';
-  const VSSM = 'font-size:.82rem;font-weight:700;margin-top:.15rem;word-break:break-word';
-
-  const curvaS2HTML = (temCrono && temMensal)
-    ? `<div class="panel" style="margin-bottom:1.5rem">
-         <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S \u2014 Cronograma F\u00edsico-Financeiro (Contrato)</h3>
-         <div class="chart-scroll-wrap" id="adminCurvaSAditivoWrap"><div class="chart-container"><canvas id="adminCurvaSAditivo"></canvas></div></div>
-       </div>`
-    : '';
-
-  const aditivos = Array.isArray(obra.aditivos) ? obra.aditivos : [];
-  let nContrato = totalMeses;
-  let dataInicioBase = calcDataInicioProximo(obra.dataInicio, nContrato);
-  const aditivosHTML = aditivos.filter(ad =>
-    (Array.isArray(ad.cronograma) && ad.cronograma.length > 0) ||
-    (Array.isArray(ad.cronogramaExecucao) && ad.cronogramaExecucao.length > 0)
-  ).map(ad => {
-    const nP = Array.isArray(ad.cronograma) ? ad.cronograma.length : 0;
-    const canvasId = `adminCurvaS_ad_${ad.id}`;
-    const wrapId   = `adminCurvaS_wrap_${ad.id}`;
-    const di       = dataInicioBase;
-    dataInicioBase = calcDataInicioProximo(dataInicioBase, nP) || dataInicioBase;
-    const dataFimAd = (nP && di) ? fmtDate(calcDataFim(di, nP)) : null;
-    return `<div class="panel" style="margin-bottom:1.5rem">
-      <div style="display:flex;align-items:baseline;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap">
-        <h3 style="font-size:.95rem;font-weight:700;margin:0">Curva S \u2014 ${esc(ad.nome || 'Aditivo')}</h3>
-        ${dataFimAd ? `<span style="font-size:.75rem;color:var(--text-muted)">\ud83c\udfc1 T\u00e9rmino: <strong>${dataFimAd}</strong></span>` : ''}
-      </div>
-      <div class="chart-scroll-wrap" id="${wrapId}"><div class="chart-container"><canvas id="${canvasId}"></canvas></div></div>
-    </div>`;
-  }).join('');
-
-  // ── Curvas S por serviço (admin) ──
-  const temItensAdmin = Array.isArray(obra.cronogramaItens) && obra.cronogramaItens.length > 0;
-  const curvasPorServicoHTML = temItensAdmin
-    ? `<div class="panel" style="margin-bottom:1.5rem">
-         <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">\ud83d\udcca Curvas S por Servi\u00e7o</h3>
-         <div id="adminCurvasPorServicoContainer"></div>
-       </div>`
-    : '';
-
-  html +=
-    `<div class="admin-stats-grid">
-       <div class="stat-card compact"><span class="stat-label" style="${LS}">Contratada</span><span class="stat-value" style="${VSSM}">${esc(obra.contratada||'-')}</span></div>
-       <div class="stat-card compact"><span class="stat-label" style="${LS}">Esta Medi\u00e7\u00e3o</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>
-       <div class="stat-card compact"><span class="stat-label" style="${LS}">\ud83d\udcc5 In\u00edcio</span><span class="stat-value" style="${VS}">${dataInicioStr}</span></div>
-       <div class="stat-card compact"><span class="stat-label" style="${LS}">\ud83c\udfc1 T\u00e9rmino</span><span class="stat-value" style="${VS}">${dataFimStr}</span></div>
-       <div class="stat-card compact"><span class="stat-label" style="${LS}">Valor CT / Aditivo</span><span class="stat-value" style="${VS}">${money(vc)}</span></div>
-       <div class="stat-card compact"><span class="stat-label" style="${LS}">Acumulado Total</span><span class="stat-value" style="${VS};color:var(--success)">${money(ac)}</span></div>
-       <div class="stat-card compact"><span class="stat-label" style="${LS}">Saldo</span><span class="stat-value" style="${VS}">${money(saldo)}</span></div>
-       <div class="stat-card compact"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>
-     </div>
-     <div class="panel" style="margin-bottom:1.5rem">
-       <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S \u2014 \u00cdndice de Itens</h3>
-       <div class="chart-scroll-wrap" id="adminCurvaSwrap"><div class="chart-container"><canvas id="adminCurvaS"></canvas></div></div>
-     </div>
-     ${curvaS2HTML}
-     ${aditivosHTML}
-     ${curvasPorServicoHTML}
-     <div class="panel">
-       <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">\u00cdndice de Itens</h3>
-       <div class="table-container"><table class="admin-table">
-         <thead><tr>
-           <th class="th-sticky" data-label="ITEM"></th>
-           <th class="th-sticky" data-label="DESCRI\u00c7\u00c3O"></th>
-           <th class="th-sticky" style="text-align:right" data-label="VALOR CT"></th>
-           <th class="th-sticky" style="text-align:right" data-label="MED"></th>
-           <th class="th-sticky" style="text-align:right" data-label="ACUMUL"></th>
-           <th class="th-sticky" style="text-align:right" data-label="SALDO"></th>
-           <th class="th-sticky" style="text-align:right" data-label="%"></th>
-         </tr></thead>
-         <tbody>${it.map(r => {
-           const rp  = Number(r.percentualExecutado || 0);
-           const rpc = rp >= 99.95 ? 'color:var(--success);font-weight:700' : 'font-weight:700';
-           return `<tr>
-             <td style="font-size:.82rem">${esc(r.item)}</td>
-             <td class="td-desc" style="font-size:.82rem">${esc(r.descricao)}</td>
-             <td style="text-align:right;font-size:.82rem">${money(r.valorContrato)}</td>
-             <td style="text-align:right;font-size:.82rem">${money(r.medicao)}</td>
-             <td style="text-align:right;font-size:.82rem">${money(r.acumulado)}</td>
-             <td style="text-align:right;font-size:.82rem">${money(r.saldo)}</td>
-             <td style="text-align:right;font-size:.82rem;${rpc}">${rp.toFixed(2)}%</td>
-           </tr>`;
-         }).join('')}</tbody>
-       </table></div>
-     </div>`;
-  panel.innerHTML = html;
-
-  let dataInicioBaseCharts = calcDataInicioProximo(obra.dataInicio, totalMeses);
-  requestAnimationFrame(() => {
-    state.chartAdmin = renderCurvaS1('adminCurvaS', 'adminCurvaSwrap', it, state.chartAdmin);
-    if (temCrono && temMensal) {
-      state.chartAdmin2 = renderCurvaS2('adminCurvaSAditivo', 'adminCurvaSAditivoWrap', obra, state.chartAdmin2);
-    }
-    aditivos.forEach(ad => {
-      const nP = Array.isArray(ad.cronograma) ? ad.cronograma.length : 0;
-      if (!nP && !(Array.isArray(ad.cronogramaExecucao) && ad.cronogramaExecucao.length)) return;
-      const di = dataInicioBaseCharts;
-      dataInicioBaseCharts = calcDataInicioProximo(dataInicioBaseCharts, nP) || dataInicioBaseCharts;
-      renderCurvaS2Aditivo(`adminCurvaS_ad_${ad.id}`, `adminCurvaS_wrap_${ad.id}`, ad, di, null);
-    });
-    // Curvas por serviço — admin
-    if (temItensAdmin) {
-      renderCurvasPorServico('adminCurvasPorServicoContainer', obra, `admin_${state.adminSelectedObraId}`);
-    }
-  });
 }
-
-export function renderAdminViews() { renderAdminStats(); renderAdminSidebar(); renderColabList(); }

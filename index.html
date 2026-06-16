@@ -8,6 +8,7 @@
 <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700,900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/app.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3/dist/chartjs-plugin-annotation.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <script type="module" src="assets/js/app.js"></script>
 </head>
@@ -173,7 +174,6 @@
       </div>
 
       <!-- CURVA S 2 — Contrato: Planejado x Executado Real -->
-      <!-- inicia oculto; render.js exibe quando tiver contrato + mensal importados -->
       <div class="panel" style="margin-bottom:1.25rem;display:none" id="sCurveAditivoPanel">
         <h3 style="margin-bottom:1rem">Curva S &#8212; Cronograma F&#237;sico-Financeiro (Contrato)</h3>
         <div class="chart-scroll-wrap" id="sCurveAditivoScrollWrap">
@@ -183,6 +183,15 @@
 
       <!-- CURVAS S DOS ADITIVOS — geradas dinamicamente pelo render.js -->
       <div id="aditivosCurvasContainer"></div>
+
+      <!-- CURVAS S POR SERVI&#199;O — geradas dinamicamente pelo render.js -->
+      <div class="panel" id="curvasPorServicoPanel" style="margin-bottom:1.25rem;display:none">
+        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap">
+          <h3 style="margin:0;font-size:1rem;font-weight:700">&#128200; Curvas S por Servi&#231;o</h3>
+          <span id="curvasPorServicoBadge" style="font-size:.72rem;font-weight:600;padding:.2rem .6rem;border-radius:999px;background:rgba(99,102,241,.12);color:#6366f1"></span>
+        </div>
+        <div id="curvasPorServicoContainer"></div>
+      </div>
 
       <div class="panel" style="margin-bottom:1.25rem">
         <h3 style="margin-bottom:1rem">&#10133; Nova atividade</h3>
