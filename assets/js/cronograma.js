@@ -6,6 +6,7 @@
  *   - % armazenado como decimal (0.0331) ou inteiro (3.31)
  *   - Colunas % e R$ alternadas por mês
  *   - Linha TOTAL SIMPLES ou fallback por soma dos itens
+ *   - Colunas PESO(%) e VALOR(R$) totais por item (usadas nas curvas S por serviço)
  */
 export function parseCronogramaXLSX(workbook) {
   const sheetName = workbook.SheetNames.find(n =>
@@ -45,8 +46,8 @@ export function parseCronogramaXLSX(workbook) {
   }
 
   // ── 2. Localiza a linha de números dos meses ────────────────────────────────
-  // Critério: linha com >= 3 células numéricas inteiras entre 1 e 36
-  // Se houver empate (duas linhas satisfazem), prefere a que tem mais células numéricas
+  // Critério: linha com >= 3 células numéricas inteiras entre 1 e 60
+  // Se houver empate, prefere a que tem mais células numéricas
   let mesHeaderRowIdx = -1;
   let mesColMap = {}; // índice de ordem (1-based) => colIndex do % daquele mês
 
@@ -54,16 +55,15 @@ export function parseCronogramaXLSX(workbook) {
     const row = raw[ri];
     const numCells = row.filter(c => {
       const n = Number(c);
-      return c !== '' && !isNaN(n) && Number.isInteger(n) && n >= 1 && n <= 36;
+      return c !== '' && !isNaN(n) && Number.isInteger(n) && n >= 1 && n <= 60;
     });
     if (numCells.length >= 3) {
       mesHeaderRowIdx = ri;
       let ordem = 0;
       row.forEach((c, ci) => {
         const n = Number(c);
-        if (c !== '' && !isNaN(n) && Number.isInteger(n) && n >= 1 && n <= 36) {
+        if (c !== '' && !isNaN(n) && Number.isInteger(n) && n >= 1 && n <= 60) {
           ordem++;
-          // guarda pela ORDEM de aparição (1ª col de mês = mês 1 do contrato, etc.)
           mesColMap[ordem] = ci;
         }
       });
@@ -75,10 +75,7 @@ export function parseCronogramaXLSX(workbook) {
   const totalMeses = Object.keys(mesColMap).length;
   const ordens     = Array.from({ length: totalMeses }, (_, i) => i + 1);
 
-  // ── 3. Detecta se a linha seguinte é "% R$" ou já são dados ─────────────────
-  // A linha mesHeader+1 deve ser o sub-cabeçalho "% R$ % R$..."
-  // Confirma verificando se as células nas posições mesColMap[1] e mesColMap[1]+1
-  // contêm texto parecido com "%" e "R$" / "rs" / "valor"
+  // ── 3. Detecta sub-cabeçalho "% R$" e linha de início dos dados ─────────────
   const subRow = raw[mesHeaderRowIdx + 1] || [];
   const firstPctCol = mesColMap[1];
   const subCell0    = String(subRow[firstPctCol] || '').trim().toLowerCase();
@@ -86,19 +83,39 @@ export function parseCronogramaXLSX(workbook) {
   const temSubHeader = subCell0.includes('%') || subCell1.includes('r$') || subCell1.includes('valor');
   const dataStartRow = mesHeaderRowIdx + (temSubHeader ? 2 : 1);
 
-  // ── 4. Identifica coluna ITEM e coluna DESCRIÇÃO ────────────────────────────
-  let itemCol = 0;
-  let descCol = 1;
+  // ── 4. Identifica coluna ITEM, coluna DESCRIÇÃO, coluna PESO e coluna VALOR TOTAL
+  // Procura linha de cabeçalho com "item" antes da linha de meses
+  let itemCol      = 0;
+  let descCol      = 1;
+  let pesoTotalCol = -1;  // coluna PESO(%) total do item
+  let valTotalCol  = -1;  // coluna VALOR(R$) total do item
+
   for (let ri = 0; ri < mesHeaderRowIdx; ri++) {
     const row = raw[ri];
     const idxItem = row.findIndex(c => String(c).toLowerCase().trim() === 'item');
     if (idxItem >= 0) {
       itemCol = idxItem;
       descCol = idxItem + 1;
+      // Procura colunas PESO e VALOR entre descCol e firstPctCol
+      for (let ci = descCol + 1; ci < firstPctCol; ci++) {
+        const label = String(row[ci] || '').toLowerCase().trim()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        if (label.includes('peso') || label === '%' || label.includes('pct')) {
+          pesoTotalCol = ci;
+        } else if (label.includes('valor') || label.includes('r$') || label.includes('rs')) {
+          valTotalCol = ci;
+        }
+      }
       break;
     }
   }
-  // Fallback: garante que descCol não caia dentro das colunas de meses
+
+  // Fallback: se não encontrou cabeçalho explícito, assume posições padrão
+  // (ITEM=0, DESC=1, PESO=2, VALOR=3, Meses a partir de col 4)
+  if (pesoTotalCol < 0 && firstPctCol > 2) pesoTotalCol = firstPctCol - 2;
+  if (valTotalCol  < 0 && firstPctCol > 1) valTotalCol  = firstPctCol - 1;
+
+  // Garante que descCol não caia dentro das colunas de meses
   if (descCol >= firstPctCol) descCol = itemCol + 1;
 
   // ── 5. Lê linha TOTAL SIMPLES ───────────────────────────────────────────────
@@ -106,12 +123,10 @@ export function parseCronogramaXLSX(workbook) {
   for (let ri = dataStartRow; ri < raw.length; ri++) {
     const row   = raw[ri];
     const texto = (String(row[itemCol]) + ' ' + String(row[descCol] || '')).toLowerCase();
-    // Aceita: "total simples", "total", linha onde itemCol contém "total"
     if (/total\s*simples/.test(texto) || (texto.trim().startsWith('total') && texto.length < 30)) {
       totalRow = row;
       break;
     }
-    // Também testa todas as células da linha
     if (row.some(c => /total\s*simples/i.test(String(c)))) {
       totalRow = row;
       break;
@@ -119,11 +134,9 @@ export function parseCronogramaXLSX(workbook) {
   }
 
   // ── 6. Detecta se % está em decimal (0-1) ou inteiro (0-100) ────────────────
-  // Lê os valores de % da linha TOTAL SIMPLES (ou dos itens) e decide
   function isDecimalFormat(row) {
     const vals = ordens.map(o => Number(row[mesColMap[o]])).filter(v => !isNaN(v) && v !== 0);
     if (!vals.length) return false;
-    // Se todos os valores são <= 1, é formato decimal
     return vals.every(v => Math.abs(v) <= 1);
   }
 
@@ -131,7 +144,6 @@ export function parseCronogramaXLSX(workbook) {
   if (totalRow) {
     pctDecimal = isDecimalFormat(totalRow);
   } else {
-    // Testa com as primeiras linhas de item
     for (let ri = dataStartRow; ri < Math.min(dataStartRow + 5, raw.length); ri++) {
       const row = raw[ri];
       const item = Number(row[itemCol]);
@@ -147,7 +159,27 @@ export function parseCronogramaXLSX(workbook) {
     return pctDecimal ? +(n * 100).toFixed(4) : +n.toFixed(4);
   }
 
-  // ── 7. Monta cronograma por mês ─────────────────────────────────────────────
+  // Mesma detecção para o PESO TOTAL do item (coluna pesoTotalCol)
+  // — pode estar em decimal ou em % inteiro independentemente
+  function pesoDecimalFormat(rows) {
+    if (pesoTotalCol < 0) return false;
+    const vals = [];
+    for (let ri = dataStartRow; ri < raw.length && vals.length < 5; ri++) {
+      const row = raw[ri];
+      const item = Number(row[itemCol]);
+      if (isNaN(item) || item <= 0) continue;
+      const v = Number(row[pesoTotalCol]);
+      if (!isNaN(v) && v !== 0) vals.push(v);
+    }
+    return vals.length > 0 && vals.every(v => Math.abs(v) <= 1);
+  }
+  const pesoDec = pesoDecimalFormat(raw);
+  function toPesoTotal(val) {
+    const n = Number(val) || 0;
+    return pesoDec ? +(n * 100).toFixed(4) : +n.toFixed(4);
+  }
+
+  // ── 7. Monta cronograma por mês (TOTAL SIMPLES) ─────────────────────────────
   const porMes = {};
   ordens.forEach(o => { porMes[o] = { planejadoPct: 0, planejadoValor: 0 }; });
 
@@ -180,6 +212,13 @@ export function parseCronogramaXLSX(workbook) {
   }
 
   // ── 8. Lê itens ─────────────────────────────────────────────────────────────
+  // Cada item recebe:
+  //   item        — número do item
+  //   descricao   — descrição do serviço
+  //   pesoTotal   — peso (%) do item no contrato total (col PESO)
+  //   valorTotal  — valor (R$) total do item no contrato (col VALOR)
+  //   meses[]     — array com {mes, pct, valor} para cada mês do cronograma
+  //                 meses sem dados (traço, vazio, #REF!) ficam com pct=0 e valor=0
   const itens = [];
   for (let ri = dataStartRow; ri < raw.length; ri++) {
     const row     = raw[ri];
@@ -188,14 +227,42 @@ export function parseCronogramaXLSX(workbook) {
     if (itemVal === '' || itemVal === null || itemVal === undefined) continue;
     const numItem = Number(itemVal);
     if (isNaN(numItem) || numItem <= 0) continue;
-    itens.push({
-      item:     numItem,
-      descricao: String(row[descCol] || '').trim(),
-      meses: ordens.map(o => ({
+
+    const meses = ordens.map(o => {
+      const pctCol  = mesColMap[o];
+      const valCol  = pctCol + 1;
+      const rawPct  = row[pctCol];
+      const rawVal  = row[valCol];
+
+      // Ignora traço, #REF!, vazio — trata como zero
+      const pctStr  = String(rawPct  ?? '').trim();
+      const valStr  = String(rawVal  ?? '').trim();
+      const pctNum  = (pctStr === '' || pctStr === '-' || pctStr.startsWith('#')) ? 0 : (Number(rawPct)  || 0);
+      const valNum  = (valStr === '' || valStr === '-' || valStr.startsWith('#')) ? 0 : (Number(rawVal)  || 0);
+
+      return {
         mes:   o,
-        pct:   toPct(row[mesColMap[o]]),
-        valor: Number(row[mesColMap[o] + 1]) || 0
-      }))
+        pct:   toPct(pctNum),
+        valor: valNum
+      };
+    });
+
+    // Valor total do item: lê da coluna valTotalCol (ex: col 3)
+    // Se não encontrada ou zero, soma os valores mensais como fallback
+    let valorTotal = valTotalCol >= 0 ? (Number(row[valTotalCol]) || 0) : 0;
+    if (valorTotal === 0) {
+      valorTotal = meses.reduce((a, m) => a + m.valor, 0);
+    }
+
+    // Peso total do item: lê da coluna pesoTotalCol (ex: col 2)
+    const pesoTotal = pesoTotalCol >= 0 ? toPesoTotal(row[pesoTotalCol]) : 0;
+
+    itens.push({
+      item:       numItem,
+      descricao:  String(row[descCol] || '').trim(),
+      pesoTotal,
+      valorTotal,
+      meses
     });
   }
   if (!itens.length) throw new Error('Nenhum item encontrado na planilha de cronograma.');
