@@ -123,33 +123,27 @@ export function renderCurvasPorServico(containerId, obra, prefix) {
   if (painel) painel.style.display = '';
   if (badge) badge.textContent = `${itensCrono.length} servi\u00e7os${itensExecMensal.length > 0 ? ' \u2022 Real m\u00eas a m\u00eas' : ''}${historicoExecucao.length > 0 ? ' \u2022 \u{1F4DA} hist\u00f3rico' : ''}`;
 
-  // ─ pré-calcula todos os dados para saber o status antes de montar o HTML ─
-  const todosOsDados = itensCrono.map((itemCrono, idx) => {
-    const dados = buildCurvaServico(dataInicio, itemCrono, itensExecucao, totalMeses, dataEmissaoRef, execMensalMap[String(itemCrono.item).trim()] || null);
-    return { dados, idx, itemCrono };
-  }).filter(d => d.dados !== null);
-
   let html = '';
-  todosOsDados.forEach(({ dados, idx }) => {
-    const temAnomalias = Array.isArray(dados.anomalias) && dados.anomalias.length > 0;
-    // abre automaticamente: primeiro card, adiantado, atrasado ou com anomalias
-    const isOpen = idx === 0 || dados.status === 'adiantado' || dados.status === 'atrasado' || temAnomalias;
-    html += _servicoCardHTML(dados, `${prefix}_servico_canvas_${idx}`, `${prefix}_servico_wrap_${idx}`, isOpen);
+  itensCrono.forEach((itemCrono, idx) => {
+    const dados = buildCurvaServico(dataInicio, itemCrono, itensExecucao, totalMeses, dataEmissaoRef, execMensalMap[String(itemCrono.item).trim()] || null);
+    if (!dados) return;
+    // todos os cards fechados por padrão — curva só aparece ao clicar
+    html += _servicoCardHTML(dados, `${prefix}_servico_canvas_${idx}`, `${prefix}_servico_wrap_${idx}`, false);
   });
-
   if (!html) { if (painel) painel.style.display = 'none'; return; }
   container.innerHTML = html;
 
-  function renderNext(i) {
-    if (i >= todosOsDados.length) return;
-    const { dados, idx, itemCrono } = todosOsDados[i];
+  function renderNext(idx) {
+    if (idx >= itensCrono.length) return;
+    const itemCrono = itensCrono[idx];
+    const dados = buildCurvaServico(dataInicio, itemCrono, itensExecucao, totalMeses, dataEmissaoRef, execMensalMap[String(itemCrono.item).trim()] || null);
     const cId = `${prefix}_servico_canvas_${idx}`;
     const wId = `${prefix}_servico_wrap_${idx}`;
-    if ($(cId)) {
+    if (dados && $(cId)) {
       const dadosAnterior = _buildDadosAnterior(dataInicio, itemCrono, itensExecucao, totalMeses, historicoExecucao);
       state[chartsKey][idx] = renderCurvaServico(cId, wId, dados, state[chartsKey][idx] || null, dadosAnterior);
     }
-    requestAnimationFrame(() => renderNext(i + 1));
+    requestAnimationFrame(() => renderNext(idx + 1));
   }
   requestAnimationFrame(() => renderNext(0));
 }
