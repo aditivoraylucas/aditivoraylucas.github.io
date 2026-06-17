@@ -33,7 +33,6 @@ function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
   const desvio      = +(execAcumPct - planAteAgora).toFixed(2);
   const desvioColor = desvio >= 0 ? '#10b981' : '#ef4444';
   const desvioSinal = desvio >= 0 ? '+' : '';
-  const temDados       = valorContrato > 0 || planAcum.some(v => v > 0);
   const temLinhaReal   = Array.isArray(execAcum) && execAcum.some(v => v !== null && v > 0);
   const temAnomalias   = Array.isArray(anomalias) && anomalias.length > 0;
   const execBadge      = temLinhaReal ? `<span style="font-size:.68rem;background:rgba(16,185,129,.12);color:#10b981;padding:.1rem .4rem;border-radius:4px;margin-left:.3rem">\u{1F4C8} Real m\u00eas a m\u00eas</span>` : '';
@@ -54,7 +53,6 @@ function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
     </button>
     ${temAnomalias ? _anomaliasBadgesHTML(anomalias) : ''}
     <div style="display:${isOpen ? '' : 'none'}">
-      ${temDados ? `
       <div style="display:flex;gap:1rem;flex-wrap:wrap;padding:.5rem 1rem .25rem;border-top:1px solid var(--border,#e2e8f0)">
         <div style="font-size:.75rem;color:var(--text-muted)"><span style="font-weight:600;color:var(--text)">Planejado at\u00e9 hoje (%):</span> ${planAteAgora.toFixed(1)}%</div>
         <div style="font-size:.75rem;color:var(--text-muted)"><span style="font-weight:600;color:var(--text)">Planejado at\u00e9 hoje (R$):</span> ${money(planValorAteAgora)}</div>
@@ -65,7 +63,7 @@ function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
       </div>
       <div class="chart-scroll-wrap" id="${wrapId}" style="padding:.5rem 1rem 1rem">
         <div class="chart-container" style="height:200px"><canvas id="${canvasId}"></canvas></div>
-      </div>` : `<div style="padding:.75rem 1rem;font-size:.8rem;color:var(--text-muted)">Sem dados de cronograma para este servi\u00e7o.</div>`}
+      </div>
     </div>
   </div>`;
 }
@@ -127,7 +125,6 @@ export function renderCurvasPorServico(containerId, obra, prefix) {
   itensCrono.forEach((itemCrono, idx) => {
     const dados = buildCurvaServico(dataInicio, itemCrono, itensExecucao, totalMeses, dataEmissaoRef, execMensalMap[String(itemCrono.item).trim()] || null);
     if (!dados) return;
-    // todos os cards fechados por padrão — curva só aparece ao clicar
     html += _servicoCardHTML(dados, `${prefix}_servico_canvas_${idx}`, `${prefix}_servico_wrap_${idx}`, false);
   });
   if (!html) { if (painel) painel.style.display = 'none'; return; }
