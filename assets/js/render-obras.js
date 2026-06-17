@@ -10,7 +10,7 @@ export function migrarAditivosSemId(obra) {
   obra.aditivos.forEach(a => { if (!a.id) a.id = 'aditivo_' + Date.now() + '_' + Math.random().toString(36).slice(2,7); });
 }
 
-/* ══ renderObrasBox — seletor + Atualizar + Remover ══ */
+/* ══ renderObrasBox ── seletor + Atualizar + Remover ══ */
 export function renderObrasBox() {
   const wrap = $('seletorObrasWrap'); if (!wrap) return;
   const obras = Array.isArray(state.obras) ? state.obras : [];
@@ -97,49 +97,36 @@ export function renderAditivosSection(obra, prefix) {
   let html = '';
   aditivos.forEach((ad, i) => {
     const adId     = ad.id || ('aditivo_idx_' + i);
-    const temCrono = Array.isArray(ad.cronograma) && ad.cronograma.length > 0;
-    const emissao  = ad.dataEmissao;
-    const emissaoTxt = emissao ? `<span style="font-size:.7rem;color:var(--text-muted);margin-left:.4rem">Emiss\u00e3o: ${String(emissao.mes).padStart(2,'0')}/${emissao.ano}</span>` : '';
+    const nPrev    = Array.isArray(ad.cronograma)        ? ad.cronograma.length        : 0;
+    const nMensal  = Array.isArray(ad.cronogramaExecucao) ? ad.cronogramaExecucao.length : 0;
 
     html += `
     <div class="aditivo-card" style="border:1px solid var(--border,#e2e8f0);border-radius:10px;margin-bottom:.75rem;overflow:hidden">
-      <div style="display:flex;align-items:center;gap:.6rem;padding:.65rem 1rem;background:var(--surface2,#f8fafc)">
-        <input type="text" value="${esc(ad.nome)}" data-aditivo-id="${esc(adId)}"
-          style="flex:1;border:none;background:transparent;font-size:.85rem;font-weight:600;color:var(--text);outline:none;cursor:text"
-          onchange="window._renomearAditivo && window._renomearAditivo('${esc(adId)}', this.value)" />
-        ${emissaoTxt}
-        <button onclick="window._importCronogramaPrevistoAditivo && window._importCronogramaPrevistoAditivo('${esc(adId)}')"
-          style="font-size:.72rem;padding:.25rem .6rem;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);cursor:pointer">
-          &#128197; Previsto
-        </button>
-        <button onclick="window._importCronogramaMensalAditivo && window._importCronogramaMensalAditivo('${esc(adId)}')"
-          style="font-size:.72rem;padding:.25rem .6rem;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);cursor:pointer">
-          &#128200; Mensal
-        </button>
-        <button onclick="window._removerAditivo && window._removerAditivo('${esc(adId)}')"
-          style="font-size:.72rem;padding:.25rem .6rem;border-radius:6px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.06);color:#ef4444;cursor:pointer">
-          &#128465;
+      <div style="padding:.65rem 1rem;background:var(--surface2,#f8fafc)">
+        <input type="text" value="${esc(ad.nome)}" data-aditivo-nome="${esc(adId)}"
+          style="width:100%;border:none;background:transparent;font-size:.88rem;font-weight:700;color:var(--text);outline:none;cursor:text;margin-bottom:.5rem" />
+        <div style="font-size:.78rem;color:var(--text-muted);margin-bottom:.15rem">
+          &#128197; Previsto: <strong>${nPrev ? nPrev + ' meses' : 'não importado'}</strong>
+        </div>
+        <div style="font-size:.78rem;color:var(--text-muted);margin-bottom:.5rem">
+          &#128200; Mensal: <strong>${nMensal ? nMensal + ' meses' : 'não importado'}</strong>
+        </div>
+        <div style="display:flex;gap:.4rem;margin-bottom:.35rem">
+          <button data-aditivo-action="previsto" data-aditivo-id="${esc(adId)}"
+            class="btn btn-sec" style="flex:1;font-size:.75rem;padding:.35rem .4rem">
+            &#128197; Previsto
+          </button>
+          <button data-aditivo-action="mensal" data-aditivo-id="${esc(adId)}"
+            class="btn btn-sec" style="flex:1;font-size:.75rem;padding:.35rem .4rem">
+            &#128200; Mensal
+          </button>
+        </div>
+        <button data-aditivo-action="remover" data-aditivo-id="${esc(adId)}"
+          class="btn btn-danger" style="width:100%;font-size:.75rem;padding:.35rem .5rem">
+          &#128465; Remover aditivo
         </button>
       </div>
-      ${temCrono
-        ? `<div class="chart-scroll-wrap" id="chartWrapAditivo_${adId}" style="padding:.5rem 1rem 1rem">
-             <div class="chart-container" style="height:200px"><canvas id="chartAditivo_${adId}"></canvas></div>
-           </div>`
-        : `<div style="padding:.65rem 1rem;font-size:.8rem;color:var(--text-muted)">Sem cronograma importado.</div>`}
     </div>`;
   });
   sec.innerHTML = html;
-
-  const chartsKey = `_aditivoCharts_${prefix}`;
-  if (state[chartsKey]) Object.values(state[chartsKey]).forEach(c => { try { c.destroy(); } catch(_){} });
-  state[chartsKey] = {};
-  aditivos.forEach(ad => {
-    if (!Array.isArray(ad.cronograma) || !ad.cronograma.length) return;
-    const adId = ad.id;
-    state[chartsKey][adId] = renderCurvaS2Aditivo(
-      `chartAditivo_${adId}`, `chartWrapAditivo_${adId}`,
-      ad, obra.dataInicio || null,
-      state[chartsKey][adId] || null
-    );
-  });
 }
