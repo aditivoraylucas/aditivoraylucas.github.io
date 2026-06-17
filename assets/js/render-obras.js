@@ -17,16 +17,12 @@ export function migrarAditivosSemId(obra) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   renderSeletorObras  —  dropdown para trocar a obra ativa
+   renderSeletorObras  —  seletor + botões Atualizar / Remover
    ══════════════════════════════════════════════════════════════ */
 export function renderSeletorObras() {
-  const wrap = $('seletorObrasWrap'); if (!wrap) return;
+  const wrap  = $('seletorObrasWrap'); if (!wrap) return;
   const obras = Array.isArray(state.obras) ? state.obras : [];
-
-  if (obras.length <= 1) {
-    wrap.innerHTML = '';
-    return;
-  }
+  if (!obras.length) { wrap.innerHTML = ''; return; }
 
   const opts = obras.map(o =>
     `<option value="${esc(o.id)}" ${o.id === state.selectedObraId ? 'selected' : ''}>
@@ -36,28 +32,51 @@ export function renderSeletorObras() {
 
   wrap.innerHTML = `
     <div style="margin-bottom:.75rem">
-      <label style="font-size:.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.3rem">
+      <label style="font-size:.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.35rem">
         \u{1F4C2} Selecionar Obra
       </label>
       <select id="obraSeletorSelect"
-        style="width:100%;padding:.5rem .75rem;border-radius:8px;border:1px solid var(--border,#e2e8f0);background:var(--surface,#fff);color:var(--text,#0f172a);font-size:.85rem;font-weight:600;cursor:pointer;outline:none">
+        style="width:100%;padding:.5rem .75rem;border-radius:8px;border:1px solid var(--border,#e2e8f0);background:var(--surface,#fff);color:var(--text,#0f172a);font-size:.85rem;font-weight:600;cursor:pointer;outline:none;margin-bottom:.45rem">
         ${opts}
       </select>
+      <div style="display:flex;gap:.4rem">
+        <button id="btnAtualizarObra"
+          style="flex:1;font-size:.75rem;padding:.35rem .5rem;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:.3rem">
+          \u{1F501} Atualizar
+        </button>
+        <button id="btnRemoverObra"
+          style="flex:1;font-size:.75rem;padding:.35rem .5rem;border-radius:7px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.06);color:#ef4444;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:.3rem">
+          \u{1F5D1}\uFE0F Remover
+        </button>
+      </div>
     </div>`;
 
   const sel = $('obraSeletorSelect');
   if (sel) sel.onchange = () => {
     window._selecionarObra && window._selecionarObra(sel.value);
   };
+
+  const btnAtualizar = $('btnAtualizarObra');
+  if (btnAtualizar) btnAtualizar.onclick = () => {
+    window._atualizarObra && window._atualizarObra();
+  };
+
+  const btnRemover = $('btnRemoverObra');
+  if (btnRemover) btnRemover.onclick = () => {
+    window._removerObraAtiva && window._removerObraAtiva();
+  };
 }
 
-/* ══ renderObrasBox ══ */
+/* ══ renderObrasBox — card de detalhes que fica no painel PRINCIPAL (banner) ══ */
 export function renderObrasBox(_obra) {
   const obra = _obra ?? currentObra();
-  const box  = $('obrasBox'); if (!box) return;
 
-  // Atualiza o seletor sempre que o box renderiza
+  // Atualiza o seletor na lateral
   renderSeletorObras();
+
+  // O obrasBox agora só existe no painel principal — se não houver no DOM, encerra
+  const box = $('obrasBox');
+  if (!box) return;
 
   if (!obra) { box.innerHTML = '<p style="color:var(--text-muted)">Nenhuma obra selecionada.</p>'; return; }
 
