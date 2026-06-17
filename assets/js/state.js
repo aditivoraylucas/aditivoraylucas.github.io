@@ -72,13 +72,12 @@ export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
   const result = [];
 
   for(let m = 1; m <= totalMeses; m++){
-    // CORRIGIDO: (m-1) para que m=1 gere o próprio mês de início
+    // (m-1) => m=1 gera o próprio mês de início
     const base0   = (iniMes - 1) + (m - 1);
     const slotAno = iniAno + Math.floor(base0 / 12);
     const slotMes = (base0 % 12) + 1;
     const label   = new Date(slotAno, slotMes - 1, 1)
                       .toLocaleDateString('pt-BR', { month:'short', year:'2-digit' });
-
     const entry = cronograma[m - 1];
     result.push({
       mes: m,
@@ -91,10 +90,10 @@ export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
   return result;
 }
 
-/* ── Curva S por Serviço ──────────────────────────────────────────────────────────────
+/* ── Curva S por Serviço ───────────────────────────────────────────────────────
  * Índice 0 de todos os arrays = "Mês 0" (ponto de origem zerado).
  * mesesDecorridos = diff + 1 para incluir o próprio mês de emissão.
- * Labels: m=1 → mês de início da obra (corrigido com base0 = (iniMes-1)+(m-1))
+ * Labels: m=1 → mês de início da obra (base0 = (iniMes-1)+(m-1))
  */
 export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, totalMeses, dataEmissaoObra, itemCronogramaExecucao) {
   if (!dataInicio || !itemCronograma) return null;
@@ -141,13 +140,11 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
   let mesAtualIdx   = 0;
 
   for (let m = 1; m <= totalMeses; m++) {
-    // CORRIGIDO: base0 = (iniMes-1)+(m-1) → m=1 gera o mês de início da obra
     const base0 = (iniMes - 1) + (m - 1);
     const sAno  = iniAno + Math.floor(base0 / 12);
     const sMes  = (base0 % 12) + 1;
     labels.push(new Date(sAno, sMes - 1, 1).toLocaleDateString('pt-BR', { month:'short', year:'2-digit' }));
 
-    // Planejado
     const planSlot = planMap[m] || { pct: 0, valor: 0 };
     const mp = +Number(planSlot.pct   || 0).toFixed(4);
     const mv = +Number(planSlot.valor || 0).toFixed(2);
@@ -158,7 +155,6 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     planValorMensal.push(mv);
     planValorAcum.push(+acumPlanValor.toFixed(2));
 
-    // Executado
     if (temExecucaoMensal) {
       if (m <= mesesDecorridos) {
         const execSlot = execMap[m] || { pct: 0, valor: 0 };
@@ -219,6 +215,16 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     }
   }
 
+  // Detecta anomalias de execução fora do cronograma original
+  const anomalias = detectarAnomaliaServico({
+    planMensal,
+    execMensal,
+    execAcumPctFinal,
+    planAteAgora,
+    mesesDecorridos,
+    totalMeses
+  });
+
   return {
     descricao:       itemCronograma.descricao || `Serviço ${itemCronograma.item}`,
     item:            itemCronograma.item,
@@ -236,7 +242,90 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     valorContrato,
     pesoTotal,
     status,
+    anomalias,
     mesAtualIdx,
     mesesDecorridos
   };
+}
+
+/* ── detectarAnomaliaServico ────────────────────────────────────────────────────
+ *
+ * Recebe os arrays já montados pelo buildCurvaServico e retorna um array de
+ * alertas. Cada alerta tem:
+ *   { tipo, mensagem, severidade }  — severidade: 'aviso' | 'alerta'
+ *
+ * Regras:
+ *   1. INICIADO_ANTES_DO_PREVISTO
+ *      O primeiro mês com execução real (execMensal[m] > 0) é anterior
+ *      ao primeiro mês com planejado > 0.
+ *
+ *   2. EXECUTADO_FORA_DO_CRONOGRAMA
+ *      Há execução real (execMensal[m] > 0) em mês cujo planejado é 0
+ *      E que está após o início previsto do serviço (evita falso-positivo
+ *      antes da obra começar).
+ *
+ *   3. MUITO_ADIANTADO
+ *      execAcumPct supera planAteAgora em mais de THRESHOLD_ADIANTADO (15pp).
+ *
+ * Nota: índice 0 dos arrays é o Mês 0 (origem), então os meses reais
+ * começam no índice 1. A comparação planMensal[m] x execMensal[m] é
+ * correta pois ambos compartilham o mesmo índice.
+ */
+const THRESHOLD_ADIANTADO = 15; // pontos percentuais
+
+export function detectarAnomaliaServico({ planMensal, execMensal, execAcumPctFinal, planAteAgora, mesesDecorridos, totalMeses }) {
+  const anomalias = [];
+  if (!Array.isArray(planMensal) || !Array.isArray(execMensal)) return anomalias;
+
+  // Primeiro mês com planejado > 0 (índice no array, 1-based por causa do Mês 0)
+  let primeiroPlanIdx = -1;
+  for (let i = 1; i < planMensal.length; i++) {
+    if ((planMensal[i] || 0) > 0) { primeiroPlanIdx = i; break; }
+  }
+
+  // Primeiro mês com execução real > 0
+  let primeiroExecIdx = -1;
+  for (let i = 1; i < execMensal.length; i++) {
+    if ((execMensal[i] || 0) > 0) { primeiroExecIdx = i; break; }
+  }
+
+  // Regra 1: iniciado antes do previsto
+  if (primeiroExecIdx !== -1 && primeiroPlanIdx !== -1 && primeiroExecIdx < primeiroPlanIdx) {
+    const mesesDeAntecipacao = primeiroPlanIdx - primeiroExecIdx;
+    anomalias.push({
+      tipo: 'INICIADO_ANTES_DO_PREVISTO',
+      mensagem: `Serviço iniciado ${mesesDeAntecipacao} mês(es) antes do cronograma original.`,
+      severidade: 'alerta'
+    });
+  }
+
+  // Regra 2: execução em mês não previsto (após o início do serviço)
+  const inicioRef = primeiroPlanIdx > 0 ? primeiroPlanIdx : 1;
+  const fimVerificacao = Math.min(execMensal.length - 1, mesesDecorridos);
+  for (let i = inicioRef; i <= fimVerificacao; i++) {
+    const ep = execMensal[i] || 0;
+    const pp = planMensal[i] || 0;
+    if (ep > 0 && pp === 0) {
+      anomalias.push({
+        tipo: 'EXECUTADO_FORA_DO_CRONOGRAMA',
+        mensagem: `Execução no mês ${i} não estava prevista no cronograma original.`,
+        severidade: 'alerta'
+      });
+      break; // reporta só o primeiro mês fora, evita spam
+    }
+  }
+
+  // Regra 3: muito adiantado
+  if (planAteAgora > 0 && execAcumPctFinal > 0) {
+    const desvio = execAcumPctFinal - planAteAgora;
+    if (desvio > THRESHOLD_ADIANTADO) {
+      anomalias.push({
+        tipo: 'MUITO_ADIANTADO',
+        mensagem: `Execução acumulada ${desvio.toFixed(1)}pp acima do planejado (limite: ${THRESHOLD_ADIANTADO}pp).`,
+        severidade: 'aviso'
+      });
+    }
+  }
+
+  return anomalias;
 }
