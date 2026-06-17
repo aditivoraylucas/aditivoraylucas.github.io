@@ -167,19 +167,27 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart) {
 
   const temLinhaReal = Array.isArray(execAcum) && execAcum.some(v => v !== null && v > 0);
   let execData;
+  let pontoIdx; // índice onde plota o ponto único (sem linha real)
   if (temLinhaReal) {
     execData = execAcum.slice();
   } else {
     execData = new Array(n).fill(null);
-    if (mesesDecorridos > 0 && mesAtualIdx >= 0 && execAcumPct > 0) execData[mesAtualIdx] = execAcumPct;
+    // usa mesesDecorridos (limitado ao tamanho do array) como posição do ponto
+    pontoIdx = Math.min(mesesDecorridos, n - 1);
+    if (pontoIdx > 0 && execAcumPct > 0) execData[pontoIdx] = execAcumPct;
   }
+
+  // índice da linha "Hoje": para linha real usa mesAtualIdx, senão usa pontoIdx
+  const hojeIdx = temLinhaReal
+    ? (mesesDecorridos > 0 && mesAtualIdx >= 0 ? mesAtualIdx : null)
+    : (pontoIdx > 0 ? pontoIdx : null);
 
   const execDataset = temLinhaReal
     ? { label: 'Executado Real (%)', data: execData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.08)', borderWidth: 2.5, pointRadius: mobile ? 2 : 3, pointBackgroundColor: '#10b981', tension: 0.35, fill: false, spanGaps: false }
-    : { label: 'Executado Real (%)', data: execData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.9)', borderWidth: 0, pointRadius: mobile ? 5 : 7, pointBackgroundColor: '#10b981', pointBorderColor: '#fff', pointBorderWidth: 2, showLine: false, spanGaps: false };
+    : { label: 'Executado Acum. (%)', data: execData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.9)', borderWidth: 0, pointRadius: mobile ? 5 : 7, pointBackgroundColor: '#10b981', pointBorderColor: '#fff', pointBorderWidth: 2, showLine: false, spanGaps: false };
 
-  const hojeAnnotation = mesesDecorridos > 0 && mesAtualIdx >= 0 ? {
-    type: 'line', scaleID: 'x', value: mesAtualIdx,
+  const hojeAnnotation = hojeIdx !== null ? {
+    type: 'line', scaleID: 'x', value: hojeIdx,
     borderColor: 'rgba(239,68,68,0.6)', borderWidth: 1.5, borderDash: [4, 4],
     label: { display: true, content: 'Hoje', position: 'start', backgroundColor: '#ef4444', color: '#fff', font: { size: 9 }, padding: { x: 4, y: 2 }, borderRadius: 3 }
   } : null;
