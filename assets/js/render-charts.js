@@ -151,7 +151,7 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
 /* ============================================================
    CURVA S POR SERVIÇO — gráfico individual
    ============================================================ */
-export function renderCurvaServico(canvasId, wrapId, dados, prevChart) {
+export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnterior) {
   const canvas = $(canvasId); if (!canvas) return prevChart;
   if (prevChart) { try { prevChart.destroy(); } catch(_){} }
   const dark   = document.documentElement.dataset.theme === 'dark';
@@ -167,17 +167,15 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart) {
 
   const temLinhaReal = Array.isArray(execAcum) && execAcum.some(v => v !== null && v > 0);
   let execData;
-  let pontoIdx; // índice onde plota o ponto único (sem linha real)
+  let pontoIdx;
   if (temLinhaReal) {
     execData = execAcum.slice();
   } else {
     execData = new Array(n).fill(null);
-    // usa mesesDecorridos (limitado ao tamanho do array) como posição do ponto
     pontoIdx = Math.min(mesesDecorridos, n - 1);
     if (pontoIdx > 0 && execAcumPct > 0) execData[pontoIdx] = execAcumPct;
   }
 
-  // índice da linha "Hoje": para linha real usa mesAtualIdx, senão usa pontoIdx
   const hojeIdx = temLinhaReal
     ? (mesesDecorridos > 0 && mesAtualIdx >= 0 ? mesAtualIdx : null)
     : (pontoIdx > 0 ? pontoIdx : null);
@@ -185,6 +183,37 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart) {
   const execDataset = temLinhaReal
     ? { label: 'Executado Real (%)', data: execData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.08)', borderWidth: 2.5, pointRadius: mobile ? 2 : 3, pointBackgroundColor: '#10b981', tension: 0.35, fill: false, spanGaps: false }
     : { label: 'Executado Acum. (%)', data: execData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.9)', borderWidth: 0, pointRadius: mobile ? 5 : 7, pointBackgroundColor: '#10b981', pointBorderColor: '#fff', pointBorderWidth: 2, showLine: false, spanGaps: false };
+
+  // ── Monta datasets base ──
+  const datasets = [
+    { label: 'Planejado (%)', data: planAcum, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.08)', borderWidth: 2, pointRadius: mobile ? 1.5 : 2.5, pointBackgroundColor: '#f59e0b', tension: 0.35, fill: false },
+    execDataset
+  ];
+
+  // ── Curva da versão anterior (pontilhada cinza) ──
+  if (dadosAnterior) {
+    const execAcumAnt = Array.isArray(dadosAnterior.execAcum) ? dadosAnterior.execAcum : [];
+    const antData     = new Array(n).fill(null);
+    for (let i = 0; i < execAcumAnt.length && i < n; i++) {
+      antData[i] = execAcumAnt[i] !== null ? execAcumAnt[i] : null;
+    }
+    const temAntDados = antData.some(v => v !== null && v > 0);
+    if (temAntDados) {
+      const emissaoAnt = dadosAnterior.emissaoLabel || 'Vers\u00e3o anterior';
+      datasets.splice(1, 0, {
+        label: `Exec. anterior (${emissaoAnt})`,
+        data: antData,
+        borderColor: dark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.45)',
+        backgroundColor: 'transparent',
+        borderWidth: 1.5,
+        borderDash: [5, 4],
+        pointRadius: 0,
+        tension: 0.35,
+        fill: false,
+        spanGaps: false
+      });
+    }
+  }
 
   const hojeAnnotation = hojeIdx !== null ? {
     type: 'line', scaleID: 'x', value: hojeIdx,
@@ -194,13 +223,7 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart) {
 
   return new Chart(canvas.getContext('2d'), {
     type: 'line',
-    data: {
-      labels,
-      datasets: [
-        { label: 'Planejado (%)', data: planAcum, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.08)', borderWidth: 2, pointRadius: mobile ? 1.5 : 2.5, pointBackgroundColor: '#f59e0b', tension: 0.35, fill: false },
-        execDataset
-      ]
-    },
+    data: { labels, datasets },
     options: {
       responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
       scales: {
@@ -214,4 +237,27 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart) {
       }
     }
   });
+}
+
+/* ============================================================
+   INDICADOR DE ÚLTIMA ATUALIZAÇÃO MENSAL
+   ============================================================ */
+export function renderIndicadorAtualizacao(containerId, obra) {
+  const el = $(containerId); if (!el) return;
+  const emissao   = obra?.dataEmissaoExecucao;
+  const historico = Array.isArray(obra?.historicoExecucao) ? obra.historicoExecucao : [];
+  if (!emissao) { el.innerHTML = ''; return; }
+
+  const mesLabel = new Date(emissao.ano, emissao.mes - 1, 1)
+    .toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+
+  const histLabel = historico.length > 0
+    ? `<span style="font-size:.7rem;color:var(--text-muted,#64748b);margin-left:.5rem">\u{1F4DA} ${historico.length} vers\u00e3o(\u00f5es) anteriores salvas</span>`
+    : '';
+
+  el.innerHTML = `
+    <div style="display:inline-flex;align-items:center;gap:.4rem;padding:.3rem .75rem;border-radius:999px;
+      background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);font-size:.75rem;font-weight:600;color:#10b981">
+      \u{1F501} Atualizado: ${mesLabel}
+    </div>${histLabel}`;
 }

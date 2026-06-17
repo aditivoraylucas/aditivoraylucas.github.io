@@ -41,6 +41,7 @@ export function importFile(replace=false){
         if(ex?.dataEmissaoAditivo)      obra.dataEmissaoAditivo      = ex.dataEmissaoAditivo;
         if(ex?.cronogramaItens)         obra.cronogramaItens         = ex.cronogramaItens;
         if(ex?.cronogramaItensExecucao) obra.cronogramaItensExecucao = ex.cronogramaItensExecucao;
+        if(ex?.historicoExecucao)       obra.historicoExecucao       = ex.historicoExecucao;
       }
       await saveObra(obra);
       state.selectedObraId=obraId;
@@ -89,13 +90,41 @@ export function importCronogramaMensal(){
       const buf=await file.arrayBuffer();
       const wb=XLSX.read(buf,{type:'array'});
       const { cronograma, totalMeses, itens, dataEmissao } = parseCronogramaXLSX(wb);
+
+      // ── Validação: novo cronograma não pode ter menos meses que o anterior ──
+      const totalAnterior = Array.isArray(o.cronogramaExecucao) ? o.cronogramaExecucao.length : 0;
+      if(totalAnterior > 0 && totalMeses < totalAnterior){
+        const ok = confirm(
+          `\u26A0\uFE0F O novo cronograma tem ${totalMeses} meses, mas o anterior tinha ${totalAnterior} meses.\n` +
+          `Isso pode indicar que o arquivo errado foi selecionado.\n\nDeseja continuar mesmo assim?`
+        );
+        if(!ok) return;
+      }
+
+      // ── Histórico: arquiva versão atual antes de sobrescrever ──
+      if(Array.isArray(o.cronogramaItensExecucao) && o.cronogramaItensExecucao.length > 0){
+        if(!Array.isArray(o.historicoExecucao)) o.historicoExecucao = [];
+        // Limita a 6 versões para não inflar o documento
+        if(o.historicoExecucao.length >= 6) o.historicoExecucao.shift();
+        o.historicoExecucao.push({
+          dataImportacao:          new Date().toISOString(),
+          dataEmissao:             o.dataEmissaoExecucao || null,
+          cronogramaExecucao:      o.cronogramaExecucao,
+          cronogramaItensExecucao: o.cronogramaItensExecucao
+        });
+      }
+
+      // ── Salva nova versão ──
       o.cronogramaExecucao = cronograma.map(m => ({ mes: m.mes, executadoPct: m.planejadoPct, executadoValor: m.planejadoValor }));
       if(Array.isArray(itens)&&itens.length>0) o.cronogramaItensExecucao = itens;
       if(dataEmissao) o.dataEmissaoExecucao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
+
       await saveObra(o);
       const emissaoTxt = dataEmissao ? ` | Emiss\u00e3o: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
       const itensTxt   = Array.isArray(itens)&&itens.length>0 ? ` | ${itens.length} servi\u00e7os` : '';
-      showToast(`\u2705 Cronograma de execu\u00e7\u00e3o importado: ${totalMeses} meses${emissaoTxt}${itensTxt}.`);
+      const histTxt    = Array.isArray(o.historicoExecucao)&&o.historicoExecucao.length>0
+        ? ` | ${o.historicoExecucao.length} vers\u00e3o(\u00f5es) no hist\u00f3rico` : '';
+      showToast(`\u2705 Cronograma de execu\u00e7\u00e3o importado: ${totalMeses} meses${emissaoTxt}${itensTxt}${histTxt}.`);
       renderCronogramaMensalBox(); updateDashboard();
     } catch(err){ showToast('\u274C '+err.message,true); console.error(err); }
   };
