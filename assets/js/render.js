@@ -109,6 +109,112 @@ export function renderAditivosCurvas(){
   });
 }
 
+/* ── Curvas S por Servico: monta fontes e seletor ── */
+function _buildFontesServico(o) {
+  const fontes = [];
+  const aditivos = Array.isArray(o?.aditivos) ? o.aditivos : [];
+  const nContrato = Array.isArray(o?.cronograma) ? o.cronograma.length : 0;
+
+  // Fonte 0: contrato inicial
+  const itensCronoContrato = Array.isArray(o?.cronogramaItens) ? o.cronogramaItens : [];
+  if (itensCronoContrato.length && nContrato && o?.dataInicio) {
+    fontes.push({
+      label: '\u{1F4CB} Contrato inicial',
+      itensCrono:        itensCronoContrato,
+      itensExecMensal:   Array.isArray(o?.cronogramaItensExecucao) ? o.cronogramaItensExecucao : [],
+      itensExecucao:     Array.isArray(o?.itens) ? o.itens : [],
+      totalMeses:        nContrato,
+      dataInicio:        o.dataInicio,
+      dataEmissaoRef:    o?.dataEmissaoExecucao || o?.dataEmissao || null,
+      historicoExecucao: Array.isArray(o?.historicoExecucao) ? o.historicoExecucao : []
+    });
+  }
+
+  // Fontes 1..N: aditivos com cronogramaItens
+  let dataInicioBase = calcDataInicioProximo(o?.dataInicio, nContrato);
+  aditivos.forEach((ad, adIdx) => {
+    const nPrev = Array.isArray(aditivos[adIdx - 1]?.cronograma) ? aditivos[adIdx - 1].cronograma.length : 0;
+    const dataInicioAd = dataInicioBase;
+    dataInicioBase = calcDataInicioProximo(dataInicioBase, Array.isArray(ad.cronograma) ? ad.cronograma.length : 0) || dataInicioBase;
+
+    const itensCronoAd = Array.isArray(ad?.cronogramaItens) ? ad.cronogramaItens : [];
+    const totalMesesAd = Array.isArray(ad?.cronograma) ? ad.cronograma.length : 0;
+    if (!itensCronoAd.length || !totalMesesAd || !dataInicioAd) return;
+
+    fontes.push({
+      label: `\u{1F4C4} ${esc(ad.nome || `Aditivo ${adIdx + 1}`)}`,
+      itensCrono:        itensCronoAd,
+      itensExecMensal:   Array.isArray(ad?.cronogramaItensExecucao) ? ad.cronogramaItensExecucao : [],
+      itensExecucao:     Array.isArray(o?.itens) ? o.itens : [],
+      totalMeses:        totalMesesAd,
+      dataInicio:        dataInicioAd,
+      dataEmissaoRef:    ad?.dataEmissaoExecucao || ad?.dataEmissao || null,
+      historicoExecucao: Array.isArray(ad?.historicoExecucao) ? ad.historicoExecucao : []
+    });
+  });
+
+  return fontes;
+}
+
+export function renderCurvasPorServicoPanel(o, prefix) {
+  const painel = $('curvasPorServicoPanel');
+  const badge  = $('curvasPorServicoBadge');
+  const container = $('curvasPorServicoContainer');
+  if (!painel || !container) return;
+
+  const fontes = _buildFontesServico(o);
+  if (!fontes.length) { painel.style.display = 'none'; return; }
+  painel.style.display = '';
+
+  const totalServicos = fontes[0].itensCrono.length;
+  const temMensal = fontes.some(f => f.itensExecMensal.length > 0);
+  if (badge) badge.textContent =
+    `${totalServicos} servi\u00e7os` +
+    (temMensal ? ' \u2022 Real m\u00eas a m\u00eas' : '') +
+    (fontes.length > 1 ? ` \u2022 ${fontes.length - 1} aditivo(s)` : '');
+
+  // seletor de fonte (so renderiza se houver mais de 1 fonte)
+  let seletorEl = $(`${prefix}_fonte_seletor`);
+  if (!seletorEl) {
+    seletorEl = document.createElement('div');
+    seletorEl.id = `${prefix}_fonte_seletor`;
+    seletorEl.style.cssText = 'display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem';
+    container.parentElement.insertBefore(seletorEl, container);
+  }
+
+  if (fontes.length > 1) {
+    seletorEl.style.display = 'flex';
+    seletorEl.innerHTML = fontes.map((f, i) => {
+      const ativo = i === (state[`${prefix}_fonteAtiva`] ?? 0);
+      return `<button
+        data-fonte-idx="${i}"
+        style="padding:.35rem .85rem;border-radius:999px;border:1px solid ${ativo ? 'var(--primary,#6366f1)' : 'var(--border,#e2e8f0)'};font-size:.75rem;font-weight:600;cursor:pointer;background:${ativo ? 'var(--primary,#6366f1)' : 'transparent'};color:${ativo ? '#fff' : 'var(--text-muted,#64748b)'};transition:all .15s"
+        onclick="window._trocarFonteServico && window._trocarFonteServico(${i})"
+      >${f.label}</button>`;
+    }).join('');
+  } else {
+    seletorEl.style.display = 'none';
+  }
+
+  // expoe funcao de troca para o onclick inline
+  window._trocarFonteServico = (idx) => {
+    state[`${prefix}_fonteAtiva`] = idx;
+    // atualiza estilo dos botoes
+    const sel = $(`${prefix}_fonte_seletor`);
+    if (sel) sel.querySelectorAll('[data-fonte-idx]').forEach(btn => {
+      const ativo = Number(btn.dataset.fonteIdx) === idx;
+      btn.style.background    = ativo ? 'var(--primary,#6366f1)' : 'transparent';
+      btn.style.color         = ativo ? '#fff' : 'var(--text-muted,#64748b)';
+      btn.style.borderColor   = ativo ? 'var(--primary,#6366f1)' : 'var(--border,#e2e8f0)';
+    });
+    renderCurvasPorServico('curvasPorServicoContainer', fontes[idx], `${prefix}_f${idx}`);
+  };
+
+  // renderiza a fonte ativa (padrao: 0)
+  const idxAtivo = state[`${prefix}_fonteAtiva`] ?? 0;
+  renderCurvasPorServico('curvasPorServicoContainer', fontes[idxAtivo], `${prefix}_f${idxAtivo}`);
+}
+
 export function updateDashboard(){
   const o=currentObra();
   const itens=Array.isArray(o?.itens)&&o.itens.length>0?o.itens:state.rows;
@@ -138,7 +244,7 @@ export function updateDashboard(){
     if(state.chartUser2){ try{ state.chartUser2.destroy(); }catch(_){} state.chartUser2=null; }
   }
   renderAditivosCurvas();
-  renderCurvasPorServico('curvasPorServicoContainer',o,'colab');
+  renderCurvasPorServicoPanel(o, 'colab');
   const cronoStatus=$('cronoStatus');
   if(cronoStatus){
     if(temCrono&&o?.dataInicio){

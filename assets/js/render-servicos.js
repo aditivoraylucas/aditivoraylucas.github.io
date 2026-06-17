@@ -33,11 +33,11 @@ function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
   const desvio      = +(execAcumPct - planAteAgora).toFixed(2);
   const desvioColor = desvio >= 0 ? '#10b981' : '#ef4444';
   const desvioSinal = desvio >= 0 ? '+' : '';
-  const temLinhaReal   = Array.isArray(execAcum) && execAcum.some(v => v !== null && v > 0);
-  const temAnomalias   = Array.isArray(anomalias) && anomalias.length > 0;
-  const execBadge      = temLinhaReal ? `<span style="font-size:.68rem;background:rgba(16,185,129,.12);color:#10b981;padding:.1rem .4rem;border-radius:4px;margin-left:.3rem">\u{1F4C8} Real m\u00eas a m\u00eas</span>` : '';
-  const anomaliaBadge  = temAnomalias ? `<span title="${anomalias.length} alerta(s) de cronograma" style="font-size:.82rem;cursor:default">\ud83d\udea8</span>` : '';
-  const bordaCard      = temAnomalias ? 'rgba(239,68,68,.45)' : 'var(--border,#e2e8f0)';
+  const temLinhaReal  = Array.isArray(execAcum) && execAcum.some(v => v !== null && v > 0);
+  const temAnomalias  = Array.isArray(anomalias) && anomalias.length > 0;
+  const execBadge     = temLinhaReal ? `<span style="font-size:.68rem;background:rgba(16,185,129,.12);color:#10b981;padding:.1rem .4rem;border-radius:4px;margin-left:.3rem">\u{1F4C8} Real m\u00eas a m\u00eas</span>` : '';
+  const anomaliaBadge = temAnomalias ? `<span title="${anomalias.length} alerta(s) de cronograma" style="font-size:.82rem;cursor:default">\ud83d\udea8</span>` : '';
+  const bordaCard     = temAnomalias ? 'rgba(239,68,68,.45)' : 'var(--border,#e2e8f0)';
 
   return `
   <div class="servico-card" style="border:1px solid ${bordaCard};border-radius:10px;margin-bottom:.75rem;overflow:hidden;background:var(--surface,#fff)">
@@ -90,26 +90,11 @@ function _buildDadosAnterior(dataInicio, itemCrono, itensExecucao, totalMeses, h
   return { execAcum: dados.execAcum, emissaoLabel };
 }
 
-/* calcula dataInicio de um aditivo pelo mesmo criterio de renderAditivosCurvas */
-function _calcDataInicioAditivo(obra, aditivoIdx) {
-  function calcProximo(dataInicio, totalMeses) {
-    if (!dataInicio || !totalMeses) return dataInicio || null;
-    const [ano, mes] = dataInicio.split('-').map(Number);
-    const base0 = (mes - 1) + totalMeses;
-    return `${ano + Math.floor(base0 / 12)}-${String((base0 % 12) + 1).padStart(2, '0')}-01`;
-  }
-  const aditivos = Array.isArray(obra?.aditivos) ? obra.aditivos : [];
-  const nContrato = Array.isArray(obra?.cronograma) ? obra.cronograma.length : 0;
-  let dataBase = calcProximo(obra?.dataInicio, nContrato);
-  for (let i = 0; i < aditivoIdx; i++) {
-    const nPrev = Array.isArray(aditivos[i]?.cronograma) ? aditivos[i].cronograma.length : 0;
-    dataBase = calcProximo(dataBase, nPrev) || dataBase;
-  }
-  return dataBase;
-}
-
-/* renderiza os cards de servico dentro de um containerId a partir de uma fonte normalizada */
-function _renderCardsServico(containerId, fonte, prefix) {
+/**
+ * Renderiza os cards de servico dentro de containerId a partir de uma fonte normalizada.
+ * fonte = { itensCrono, itensExecMensal, itensExecucao, totalMeses, dataInicio, dataEmissaoRef, historicoExecucao }
+ */
+export function renderCurvasPorServico(containerId, fonte, prefix) {
   const container = $(containerId); if (!container) return;
   const chartsKey = `_servicoCharts_${prefix}`;
   if (state[chartsKey]) Object.values(state[chartsKey]).forEach(c => { try { c.destroy(); } catch(_){} });
@@ -117,29 +102,29 @@ function _renderCardsServico(containerId, fonte, prefix) {
   container.innerHTML = '';
 
   const { itensCrono, itensExecMensal, itensExecucao, totalMeses, dataInicio, dataEmissaoRef, historicoExecucao } = fonte;
-  const execMensalMap = {};
-  itensExecMensal.forEach(it => { execMensalMap[String(it.item).trim()] = it; });
-
   if (!itensCrono.length || !totalMeses || !dataInicio) {
-    container.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem 0">Nenhum cronograma de servi\u00e7os dispon\u00edvel para esta fonte.</p>';
+    container.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem 0">Nenhum cronograma de servi\u00e7os dispon\u00edvel.</p>';
     return;
   }
+
+  const execMensalMap = {};
+  (itensExecMensal || []).forEach(it => { execMensalMap[String(it.item).trim()] = it; });
 
   let html = '';
   itensCrono.forEach((itemCrono, idx) => {
     const dados = buildCurvaServico(dataInicio, itemCrono, itensExecucao, totalMeses, dataEmissaoRef, execMensalMap[String(itemCrono.item).trim()] || null);
     if (!dados) return;
-    html += _servicoCardHTML(dados, `${prefix}_servico_canvas_${idx}`, `${prefix}_servico_wrap_${idx}`, false);
+    html += _servicoCardHTML(dados, `${prefix}_sc_${idx}`, `${prefix}_sw_${idx}`, false);
   });
-  if (!html) { container.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem 0">Sem dados de servi\u00e7os para esta fonte.</p>'; return; }
+  if (!html) { container.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem 0">Sem dados de servi\u00e7os.</p>'; return; }
   container.innerHTML = html;
 
   function renderNext(idx) {
     if (idx >= itensCrono.length) return;
     const itemCrono = itensCrono[idx];
     const dados = buildCurvaServico(dataInicio, itemCrono, itensExecucao, totalMeses, dataEmissaoRef, execMensalMap[String(itemCrono.item).trim()] || null);
-    const cId = `${prefix}_servico_canvas_${idx}`;
-    const wId = `${prefix}_servico_wrap_${idx}`;
+    const cId = `${prefix}_sc_${idx}`;
+    const wId = `${prefix}_sw_${idx}`;
     if (dados && $(cId)) {
       const dadosAnterior = _buildDadosAnterior(dataInicio, itemCrono, itensExecucao, totalMeses, historicoExecucao);
       state[chartsKey][idx] = renderCurvaServico(cId, wId, dados, state[chartsKey][idx] || null, dadosAnterior);
@@ -147,93 +132,4 @@ function _renderCardsServico(containerId, fonte, prefix) {
     requestAnimationFrame(() => renderNext(idx + 1));
   }
   requestAnimationFrame(() => renderNext(0));
-}
-
-export function renderCurvasPorServico(containerId, obra, prefix) {
-  const painel = $('curvasPorServicoPanel');
-  const badge  = $('curvasPorServicoBadge');
-
-  // monta lista de fontes: contrato + aditivos com cronogramaItens
-  const fontes = [];
-
-  // fonte 0: contrato inicial
-  const itensCronoContrato = Array.isArray(obra?.cronogramaItens) ? obra.cronogramaItens : [];
-  const totalMesesContrato = Array.isArray(obra?.cronograma) ? obra.cronograma.length : 0;
-  if (itensCronoContrato.length && totalMesesContrato && obra?.dataInicio) {
-    fontes.push({
-      label: '\u{1F4CB} Contrato inicial',
-      itensCrono:       itensCronoContrato,
-      itensExecMensal:  Array.isArray(obra?.cronogramaItensExecucao) ? obra.cronogramaItensExecucao : [],
-      itensExecucao:    Array.isArray(obra?.itens) ? obra.itens : [],
-      totalMeses:       totalMesesContrato,
-      dataInicio:       obra.dataInicio,
-      dataEmissaoRef:   obra?.dataEmissaoExecucao || obra?.dataEmissao || null,
-      historicoExecucao: Array.isArray(obra?.historicoExecucao) ? obra.historicoExecucao : []
-    });
-  }
-
-  // fontes 1..N: aditivos com cronogramaItens
-  const aditivos = Array.isArray(obra?.aditivos) ? obra.aditivos : [];
-  aditivos.forEach((ad, adIdx) => {
-    const itensCronoAd = Array.isArray(ad?.cronogramaItens) ? ad.cronogramaItens : [];
-    const totalMesesAd = Array.isArray(ad?.cronograma) ? ad.cronograma.length : 0;
-    if (!itensCronoAd.length || !totalMesesAd) return;
-    const dataInicioAd = _calcDataInicioAditivo(obra, adIdx);
-    if (!dataInicioAd) return;
-    fontes.push({
-      label: `\u{1F4C4} ${esc(ad.nome || `Aditivo ${adIdx + 1}`)}`,
-      itensCrono:       itensCronoAd,
-      itensExecMensal:  Array.isArray(ad?.cronogramaItensExecucao) ? ad.cronogramaItensExecucao : [],
-      itensExecucao:    Array.isArray(obra?.itens) ? obra.itens : [],
-      totalMeses:       totalMesesAd,
-      dataInicio:       dataInicioAd,
-      dataEmissaoRef:   ad?.dataEmissaoExecucao || ad?.dataEmissao || null,
-      historicoExecucao: Array.isArray(ad?.historicoExecucao) ? ad.historicoExecucao : []
-    });
-  });
-
-  if (!fontes.length) { if (painel) painel.style.display = 'none'; return; }
-  if (painel) painel.style.display = '';
-
-  // atualiza badge
-  const totalServicos = fontes[0]?.itensCrono?.length || 0;
-  const temMensal = fontes.some(f => f.itensExecMensal.length > 0);
-  if (badge) badge.textContent = `${totalServicos} servi\u00e7os${temMensal ? ' \u2022 Real m\u00eas a m\u00eas' : ''}${fontes.length > 1 ? ` \u2022 ${fontes.length - 1} aditivo(s)` : ''}`;
-
-  const container = $(containerId); if (!container) return;
-
-  // monta seletor de fonte (so aparece se houver mais de 1 fonte)
-  const seletorId = `${prefix}_fonte_seletor`;
-  const cardsId   = `${prefix}_cards_area`;
-
-  let seletorHTML = '';
-  if (fontes.length > 1) {
-    seletorHTML = `
-    <div id="${seletorId}" style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem">
-      ${fontes.map((f, i) => `
-        <button
-          data-fonte-idx="${i}"
-          onclick="(function(btn){
-            var parent=btn.parentElement;
-            parent.querySelectorAll('[data-fonte-idx]').forEach(function(b){b.style.background='';b.style.color='var(--text-muted,#64748b)';b.style.borderColor='var(--border,#e2e8f0)';});
-            btn.style.background='var(--primary,#6366f1)';btn.style.color='#fff';btn.style.borderColor='var(--primary,#6366f1)';
-            window._renderServicosFonte && window._renderServicosFonte(${i});
-          })(this)"
-          style="padding:.35rem .85rem;border-radius:999px;border:1px solid ${i === 0 ? 'var(--primary,#6366f1)' : 'var(--border,#e2e8f0)'};font-size:.75rem;font-weight:600;cursor:pointer;background:${i === 0 ? 'var(--primary,#6366f1)' : ''};color:${i === 0 ? '#fff' : 'var(--text-muted,#64748b)'};transition:all .15s"
-        >${f.label}</button>
-      `).join('')}
-    </div>`;
-  }
-
-  container.innerHTML = `${seletorHTML}<div id="${cardsId}"></div>`;
-
-  // expoe funcao global para o onclick inline
-  window._renderServicosFonte = (idx) => {
-    const fonte = fontes[idx];
-    if (!fonte) return;
-    _renderCardsServico(cardsId, fonte, `${prefix}_f${idx}`);
-  };
-
-  // renderiza a primeira fonte por padrao
-  window._renderServicosFonte(0);
 }
