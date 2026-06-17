@@ -91,7 +91,6 @@ export function importCronogramaMensal(){
       const wb=XLSX.read(buf,{type:'array'});
       const { cronograma, totalMeses, itens, dataEmissao } = parseCronogramaXLSX(wb);
 
-      // ── Validação: novo cronograma não pode ter menos meses que o anterior ──
       const totalAnterior = Array.isArray(o.cronogramaExecucao) ? o.cronogramaExecucao.length : 0;
       if(totalAnterior > 0 && totalMeses < totalAnterior){
         const ok = confirm(
@@ -101,10 +100,8 @@ export function importCronogramaMensal(){
         if(!ok) return;
       }
 
-      // ── Histórico: arquiva versão atual antes de sobrescrever ──
       if(Array.isArray(o.cronogramaItensExecucao) && o.cronogramaItensExecucao.length > 0){
         if(!Array.isArray(o.historicoExecucao)) o.historicoExecucao = [];
-        // Limita a 6 versões para não inflar o documento
         if(o.historicoExecucao.length >= 6) o.historicoExecucao.shift();
         o.historicoExecucao.push({
           dataImportacao:          new Date().toISOString(),
@@ -114,7 +111,6 @@ export function importCronogramaMensal(){
         });
       }
 
-      // ── Salva nova versão ──
       o.cronogramaExecucao = cronograma.map(m => ({ mes: m.mes, executadoPct: m.planejadoPct, executadoValor: m.planejadoValor }));
       if(Array.isArray(itens)&&itens.length>0) o.cronogramaItensExecucao = itens;
       if(dataEmissao) o.dataEmissaoExecucao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
@@ -143,14 +139,16 @@ export function importCronogramaPrevistoAditivo(aditivoId){
     try{
       const buf=await file.arrayBuffer();
       const wb=XLSX.read(buf,{type:'array'});
-      const { cronograma, totalMeses, dataEmissao } = parseCronogramaXLSX(wb);
+      const { cronograma, totalMeses, itens, dataEmissao } = parseCronogramaXLSX(wb);
       const ad=(o.aditivos||[]).find(a=>a.id===aditivoId);
       if(!ad) throw new Error('Aditivo n\u00e3o encontrado.');
       ad.cronograma = cronograma;
+      if(Array.isArray(itens)&&itens.length>0) ad.cronogramaItens = itens;
       if(dataEmissao) ad.dataEmissao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
       await saveObra(o);
       const emissaoTxt = dataEmissao ? ` | Emiss\u00e3o: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
-      showToast(`\u2705 Previsto importado: ${totalMeses} meses${emissaoTxt}.`);
+      const itensTxt   = Array.isArray(itens)&&itens.length>0 ? ` | ${itens.length} servi\u00e7os` : '';
+      showToast(`\u2705 Previsto importado: ${totalMeses} meses${emissaoTxt}${itensTxt}.`);
       renderAditivosSection(); updateDashboard();
     } catch(err){ showToast('\u274C '+err.message,true); console.error(err); }
   };
@@ -169,12 +167,16 @@ export function importCronogramaMensalAditivo(aditivoId){
     try{
       const buf=await file.arrayBuffer();
       const wb=XLSX.read(buf,{type:'array'});
-      const { cronograma, totalMeses } = parseCronogramaXLSX(wb);
+      const { cronograma, totalMeses, itens, dataEmissao } = parseCronogramaXLSX(wb);
       const ad=(o.aditivos||[]).find(a=>a.id===aditivoId);
       if(!ad) throw new Error('Aditivo n\u00e3o encontrado.');
       ad.cronogramaExecucao = cronograma.map(m => ({ mes: m.mes, executadoPct: m.planejadoPct, executadoValor: m.planejadoValor }));
+      if(Array.isArray(itens)&&itens.length>0) ad.cronogramaItensExecucao = itens;
+      if(dataEmissao) ad.dataEmissaoExecucao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
       await saveObra(o);
-      showToast(`\u2705 Mensal do aditivo importado: ${totalMeses} meses.`);
+      const emissaoTxt = dataEmissao ? ` | Emiss\u00e3o: ${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` : '';
+      const itensTxt   = Array.isArray(itens)&&itens.length>0 ? ` | ${itens.length} servi\u00e7os` : '';
+      showToast(`\u2705 Mensal do aditivo importado: ${totalMeses} meses${emissaoTxt}${itensTxt}.`);
       renderAditivosSection(); updateDashboard();
     } catch(err){ showToast('\u274C '+err.message,true); console.error(err); }
   };
