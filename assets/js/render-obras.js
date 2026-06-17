@@ -16,10 +16,49 @@ export function migrarAditivosSemId(obra) {
   });
 }
 
+/* ══════════════════════════════════════════════════════════════
+   renderSeletorObras  —  dropdown para trocar a obra ativa
+   ══════════════════════════════════════════════════════════════ */
+export function renderSeletorObras() {
+  const wrap = $('seletorObrasWrap'); if (!wrap) return;
+  const obras = Array.isArray(state.obras) ? state.obras : [];
+
+  if (obras.length <= 1) {
+    wrap.innerHTML = '';
+    return;
+  }
+
+  const opts = obras.map(o =>
+    `<option value="${esc(o.id)}" ${o.id === state.selectedObraId ? 'selected' : ''}>
+      ${esc(o.nomeProjeto || o.nome || o.id)}
+    </option>`
+  ).join('');
+
+  wrap.innerHTML = `
+    <div style="margin-bottom:.75rem">
+      <label style="font-size:.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.3rem">
+        \u{1F4C2} Selecionar Obra
+      </label>
+      <select id="obraSeletorSelect"
+        style="width:100%;padding:.5rem .75rem;border-radius:8px;border:1px solid var(--border,#e2e8f0);background:var(--surface,#fff);color:var(--text,#0f172a);font-size:.85rem;font-weight:600;cursor:pointer;outline:none">
+        ${opts}
+      </select>
+    </div>`;
+
+  const sel = $('obraSeletorSelect');
+  if (sel) sel.onchange = () => {
+    window._selecionarObra && window._selecionarObra(sel.value);
+  };
+}
+
 /* ══ renderObrasBox ══ */
 export function renderObrasBox(_obra) {
   const obra = _obra ?? currentObra();
   const box  = $('obrasBox'); if (!box) return;
+
+  // Atualiza o seletor sempre que o box renderiza
+  renderSeletorObras();
+
   if (!obra) { box.innerHTML = '<p style="color:var(--text-muted)">Nenhuma obra selecionada.</p>'; return; }
 
   const itens    = Array.isArray(obra.itens)    ? obra.itens    : [];

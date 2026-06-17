@@ -37,6 +37,15 @@ export function setupColabForm(){
 }
 
 export function bindEvents(){
+  // ── Seletor de obras ──
+  window._selecionarObra = (obraId) => {
+    const obra = state.obras?.find(o => o.id === obraId);
+    if (!obra) return;
+    state.selectedObraId = obraId;
+    applySelected(obra);
+    renderAll();
+  };
+
   window.adminSelectColab = uid => {
     state.adminSelectedUid=uid; state.adminSelectedObraId=null;
     renderAdminSidebar(); renderAdminDetail();
