@@ -70,6 +70,36 @@ function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
   </div>`;
 }
 
+/* ── Monta dadosAnterior a partir do histórico mais recente ── */
+function _buildDadosAnterior(dataInicio, itemCrono, itensExecucao, totalMeses, historicoExecucao) {
+  if (!Array.isArray(historicoExecucao) || !historicoExecucao.length) return null;
+  const versaoAnterior = historicoExecucao[historicoExecucao.length - 1];
+  if (!versaoAnterior) return null;
+
+  const execMensalMap = {};
+  if (Array.isArray(versaoAnterior.cronogramaItensExecucao)) {
+    versaoAnterior.cronogramaItensExecucao.forEach(it => {
+      execMensalMap[String(it.item).trim()] = it;
+    });
+  }
+
+  const dados = buildCurvaServico(
+    dataInicio, itemCrono, itensExecucao, totalMeses,
+    versaoAnterior.dataEmissao || null,
+    execMensalMap[String(itemCrono.item).trim()] || null
+  );
+  if (!dados) return null;
+
+  // monta label da emissão anterior
+  let emissaoLabel = 'versão anterior';
+  if (versaoAnterior.dataEmissao?.mes && versaoAnterior.dataEmissao?.ano) {
+    emissaoLabel = new Date(versaoAnterior.dataEmissao.ano, versaoAnterior.dataEmissao.mes - 1, 1)
+      .toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+  }
+
+  return { execAcum: dados.execAcum, emissaoLabel };
+}
+
 export function renderCurvasPorServico(containerId, obra, prefix) {
   const container = $(containerId); if (!container) return;
   const chartsKey = `_servicoCharts_${prefix}`;
@@ -83,6 +113,7 @@ export function renderCurvasPorServico(containerId, obra, prefix) {
   const totalMeses      = Array.isArray(obra?.cronograma)              ? obra.cronograma.length       : 0;
   const dataInicio      = obra?.dataInicio || null;
   const dataEmissaoRef  = obra?.dataEmissaoExecucao || obra?.dataEmissao || null;
+  const historicoExecucao = Array.isArray(obra?.historicoExecucao) ? obra.historicoExecucao : [];
 
   const execMensalMap = {};
   itensExecMensal.forEach(it => { execMensalMap[String(it.item).trim()] = it; });
@@ -91,7 +122,7 @@ export function renderCurvasPorServico(containerId, obra, prefix) {
   const badge  = $('curvasPorServicoBadge');
   if (!itensCrono.length || !totalMeses || !dataInicio) { if (painel) painel.style.display = 'none'; return; }
   if (painel) painel.style.display = '';
-  if (badge) badge.textContent = `${itensCrono.length} servi\u00e7os${itensExecMensal.length > 0 ? ' \u2022 Real m\u00eas a m\u00eas' : ''}`;
+  if (badge) badge.textContent = `${itensCrono.length} servi\u00e7os${itensExecMensal.length > 0 ? ' \u2022 Real m\u00eas a m\u00eas' : ''}${historicoExecucao.length > 0 ? ' \u2022 \u{1F4DA} hist\u00f3rico' : ''}`;
 
   let html = '';
   itensCrono.forEach((itemCrono, idx) => {
@@ -104,10 +135,15 @@ export function renderCurvasPorServico(containerId, obra, prefix) {
 
   function renderNext(idx) {
     if (idx >= itensCrono.length) return;
-    const dados = buildCurvaServico(dataInicio, itensCrono[idx], itensExecucao, totalMeses, dataEmissaoRef, execMensalMap[String(itensCrono[idx].item).trim()] || null);
+    const itemCrono = itensCrono[idx];
+    const dados = buildCurvaServico(dataInicio, itemCrono, itensExecucao, totalMeses, dataEmissaoRef, execMensalMap[String(itemCrono.item).trim()] || null);
     const cId = `${prefix}_servico_canvas_${idx}`;
     const wId = `${prefix}_servico_wrap_${idx}`;
-    if (dados && $(cId)) state[chartsKey][idx] = renderCurvaServico(cId, wId, dados, state[chartsKey][idx] || null);
+    if (dados && $(cId)) {
+      // busca dados da versão anterior para curva pontilhada
+      const dadosAnterior = _buildDadosAnterior(dataInicio, itemCrono, itensExecucao, totalMeses, historicoExecucao);
+      state[chartsKey][idx] = renderCurvaServico(cId, wId, dados, state[chartsKey][idx] || null, dadosAnterior);
+    }
     requestAnimationFrame(() => renderNext(idx + 1));
   }
   requestAnimationFrame(() => renderNext(0));
