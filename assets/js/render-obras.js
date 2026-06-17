@@ -4,80 +4,15 @@ import { renderCurvaS2, renderCurvaS2Aditivo, renderIndicadorAtualizacao } from 
 let _importFileFn = () => {};
 export function setImportFileFnObras(fn) { _importFileFn = fn; }
 
-function currentObra() {
-  return state.obras?.find(o => o.id === state.selectedObraId) ?? null;
-}
-
 /* ── migra aditivos sem id ── */
 export function migrarAditivosSemId(obra) {
   if (!Array.isArray(obra?.aditivos)) return;
-  obra.aditivos.forEach(a => {
-    if (!a.id) a.id = 'aditivo_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-  });
+  obra.aditivos.forEach(a => { if (!a.id) a.id = 'aditivo_' + Date.now() + '_' + Math.random().toString(36).slice(2,7); });
 }
 
-/* ══════════════════════════════════════════════════════════════
-   renderSeletorObras  —  seletor + botões Atualizar / Remover
-   ══════════════════════════════════════════════════════════════ */
-export function renderSeletorObras() {
-  const wrap  = $('seletorObrasWrap'); if (!wrap) return;
-  const obras = Array.isArray(state.obras) ? state.obras : [];
-  if (!obras.length) { wrap.innerHTML = ''; return; }
-
-  const opts = obras.map(o =>
-    `<option value="${esc(o.id)}" ${o.id === state.selectedObraId ? 'selected' : ''}>
-      ${esc(o.nomeProjeto || o.nome || o.id)}
-    </option>`
-  ).join('');
-
-  wrap.innerHTML = `
-    <div style="margin-bottom:.75rem">
-      <label style="font-size:.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;display:block;margin-bottom:.35rem">
-        \u{1F4C2} Selecionar Obra
-      </label>
-      <select id="obraSeletorSelect"
-        style="width:100%;padding:.5rem .75rem;border-radius:8px;border:1px solid var(--border,#e2e8f0);background:var(--surface,#fff);color:var(--text,#0f172a);font-size:.85rem;font-weight:600;cursor:pointer;outline:none;margin-bottom:.45rem">
-        ${opts}
-      </select>
-      <div style="display:flex;gap:.4rem">
-        <button id="btnAtualizarObra"
-          style="flex:1;font-size:.75rem;padding:.35rem .5rem;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:.3rem">
-          \u{1F501} Atualizar
-        </button>
-        <button id="btnRemoverObra"
-          style="flex:1;font-size:.75rem;padding:.35rem .5rem;border-radius:7px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.06);color:#ef4444;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:.3rem">
-          \u{1F5D1}\uFE0F Remover
-        </button>
-      </div>
-    </div>`;
-
-  const sel = $('obraSeletorSelect');
-  if (sel) sel.onchange = () => {
-    window._selecionarObra && window._selecionarObra(sel.value);
-  };
-
-  const btnAtualizar = $('btnAtualizarObra');
-  if (btnAtualizar) btnAtualizar.onclick = () => {
-    window._atualizarObra && window._atualizarObra();
-  };
-
-  const btnRemover = $('btnRemoverObra');
-  if (btnRemover) btnRemover.onclick = () => {
-    window._removerObraAtiva && window._removerObraAtiva();
-  };
-}
-
-/* ══ renderObrasBox — card de detalhes que fica no painel PRINCIPAL (banner) ══ */
-export function renderObrasBox(_obra) {
-  const obra = _obra ?? currentObra();
-
-  // Atualiza o seletor na lateral
-  renderSeletorObras();
-
-  // O obrasBox agora só existe no painel principal — se não houver no DOM, encerra
-  const box = $('obrasBox');
-  if (!box) return;
-
+/* ══ renderObrasBox ══ */
+export function renderObrasBox(obra) {
+  const box = $('obrasBox'); if (!box) return;
   if (!obra) { box.innerHTML = '<p style="color:var(--text-muted)">Nenhuma obra selecionada.</p>'; return; }
 
   const itens    = Array.isArray(obra.itens)    ? obra.itens    : [];
@@ -117,18 +52,15 @@ export function renderObrasBox(_obra) {
 }
 
 /* ══ renderCronogramaBox ══ */
-export function renderCronogramaBox(_obra) {
-  const obra = _obra ?? currentObra();
-  const box  = $('cronogramaBox'); if (!box) return;
+export function renderCronogramaBox(obra) {
+  const box = $('cronogramaBox'); if (!box) return;
   if (!obra || !Array.isArray(obra.cronograma) || !obra.cronograma.length) {
     box.innerHTML = '<p style="color:var(--text-muted);font-size:.85rem">Nenhum cronograma importado.</p>';
     return;
   }
   const timeline   = buildCronogramaTimeline(obra.dataInicio, obra.cronograma, obra.dataEmissao);
   const emissao    = obra.dataEmissao;
-  const emissaoTxt = emissao
-    ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:.5rem">Emiss\u00e3o: ${String(emissao.mes).padStart(2,'0')}/${emissao.ano}</span>`
-    : '';
+  const emissaoTxt = emissao ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:.5rem">Emiss\u00e3o: ${String(emissao.mes).padStart(2,'0')}/${emissao.ano}</span>` : '';
 
   box.innerHTML = `
   <div style="margin-bottom:.5rem;display:flex;align-items:center;flex-wrap:wrap;gap:.4rem">
@@ -161,9 +93,8 @@ export function renderCronogramaBox(_obra) {
 }
 
 /* ══ renderCronogramaMensalBox ══ */
-export function renderCronogramaMensalBox(_obra) {
-  const obra = _obra ?? currentObra();
-  const box  = $('cronogramaMensalBox'); if (!box) return;
+export function renderCronogramaMensalBox(obra) {
+  const box = $('cronogramaMensalBox'); if (!box) return;
   if (!obra || !Array.isArray(obra.cronogramaExecucao) || !obra.cronogramaExecucao.length) {
     box.innerHTML = '<p style="color:var(--text-muted);font-size:.85rem">Nenhum cronograma de execu\u00e7\u00e3o importado.</p>';
     const ind = $('indicadorAtualizacaoMensal'); if (ind) ind.innerHTML = '';
@@ -174,9 +105,7 @@ export function renderCronogramaMensalBox(_obra) {
 
   const execucao   = obra.cronogramaExecucao;
   const emissao    = obra.dataEmissaoExecucao;
-  const emissaoTxt = emissao
-    ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:.5rem">Emiss\u00e3o: ${String(emissao.mes).padStart(2,'0')}/${emissao.ano}</span>`
-    : '';
+  const emissaoTxt = emissao ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:.5rem">Emiss\u00e3o: ${String(emissao.mes).padStart(2,'0')}/${emissao.ano}</span>` : '';
 
   box.innerHTML = `
   <div style="margin-bottom:.5rem;display:flex;align-items:center;flex-wrap:wrap;gap:.4rem">
@@ -208,9 +137,8 @@ export function renderCronogramaMensalBox(_obra) {
 }
 
 /* ══ renderAditivosSection ══ */
-export function renderAditivosSection(_obra, prefix) {
-  const obra = _obra ?? currentObra();
-  const sec  = $('aditivosBox'); if (!sec) return;
+export function renderAditivosSection(obra, prefix) {
+  const sec = $('aditivosBox'); if (!sec) return;
   migrarAditivosSemId(obra);
   const aditivos = Array.isArray(obra?.aditivos) ? obra.aditivos : [];
   if (!aditivos.length) { sec.innerHTML = ''; return; }
@@ -220,9 +148,7 @@ export function renderAditivosSection(_obra, prefix) {
     const adId     = ad.id || ('aditivo_idx_' + i);
     const temCrono = Array.isArray(ad.cronograma) && ad.cronograma.length > 0;
     const emissao  = ad.dataEmissao;
-    const emissaoTxt = emissao
-      ? `<span style="font-size:.7rem;color:var(--text-muted);margin-left:.4rem">Emiss\u00e3o: ${String(emissao.mes).padStart(2,'0')}/${emissao.ano}</span>`
-      : '';
+    const emissaoTxt = emissao ? `<span style="font-size:.7rem;color:var(--text-muted);margin-left:.4rem">Emiss\u00e3o: ${String(emissao.mes).padStart(2,'0')}/${emissao.ano}</span>` : '';
 
     html += `
     <div class="aditivo-card" style="border:1px solid var(--border,#e2e8f0);border-radius:10px;margin-bottom:.75rem;overflow:hidden">
@@ -253,15 +179,50 @@ export function renderAditivosSection(_obra, prefix) {
   });
   sec.innerHTML = html;
 
-  const chartsKey = `_aditivoCharts_${prefix || 'default'}`;
+  const chartsKey = `_aditivoCharts_${prefix}`;
   if (state[chartsKey]) Object.values(state[chartsKey]).forEach(c => { try { c.destroy(); } catch(_){} });
   state[chartsKey] = {};
   aditivos.forEach(ad => {
     if (!Array.isArray(ad.cronograma) || !ad.cronograma.length) return;
-    state[chartsKey][ad.id] = renderCurvaS2Aditivo(
-      `chartAditivo_${ad.id}`, `chartWrapAditivo_${ad.id}`,
+    const adId = ad.id;
+    state[chartsKey][adId] = renderCurvaS2Aditivo(
+      `chartAditivo_${adId}`, `chartWrapAditivo_${adId}`,
       ad, obra.dataInicio || null,
-      state[chartsKey][ad.id] || null
+      state[chartsKey][adId] || null
     );
   });
+}
+
+/* ══ renderSeletorObras — APENAS seletor + botoes Atualizar/Remover ══ */
+export function renderSeletorObras() {
+  const wrap = $('seletorObrasWrap'); if (!wrap) return;
+  const obras = Array.isArray(state.obras) ? state.obras : [];
+  if (!obras.length) { wrap.innerHTML = ''; return; }
+
+  const opts = obras.map(o =>
+    `<option value="${esc(o.id)}" ${o.id === state.selectedObraId ? 'selected' : ''}>${esc(o.nomeProjeto || o.nome || o.id)}</option>`
+  ).join('');
+
+  wrap.innerHTML = `
+    <select id="obraSeletorSelect"
+      style="width:100%;padding:.5rem .75rem;border-radius:8px;border:1px solid var(--border,#e2e8f0);background:var(--surface,#fff);color:var(--text,#0f172a);font-size:.85rem;font-weight:600;cursor:pointer;outline:none;margin-bottom:.4rem">
+      ${opts}
+    </select>
+    <div style="display:flex;gap:.4rem;margin-bottom:.4rem">
+      <button id="btnAtualizarObra"
+        style="flex:1;font-size:.75rem;padding:.35rem .5rem;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text-muted);cursor:pointer">
+        \u{1F501} Atualizar
+      </button>
+      <button id="btnRemoverObra"
+        style="flex:1;font-size:.75rem;padding:.35rem .5rem;border-radius:7px;border:1px solid rgba(239,68,68,.3);background:rgba(239,68,68,.06);color:#ef4444;cursor:pointer">
+        \u{1F5D1}\uFE0F Remover
+      </button>
+    </div>`;
+
+  const sel = $('obraSeletorSelect');
+  if (sel) sel.onchange = () => { window._selecionarObra && window._selecionarObra(sel.value); };
+  const btnAt = $('btnAtualizarObra');
+  if (btnAt) btnAt.onclick = () => { window._atualizarObra && window._atualizarObra(); };
+  const btnRm = $('btnRemoverObra');
+  if (btnRm) btnRm.onclick = () => { window._removerObraAtiva && window._removerObraAtiva(); };
 }

@@ -1,7 +1,7 @@
 import { $, state, parseMoney, showToast, money, cleanup } from './state.js';
 import { auth, db } from './firebase.js';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
-import { doc, setDoc, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { doc, setDoc, updateDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import {
   saveObra, deleteObra, scheduleSave, currentObra,
   renderAll, applySelected, setImportFileFn,
@@ -37,35 +37,28 @@ export function setupColabForm(){
 }
 
 export function bindEvents(){
-  // ── Seletor de obras ──
+  // ── seletor de obras ──
   window._selecionarObra = (obraId) => {
-    const obra = state.obras?.find(o => o.id === obraId);
+    const obra = (state.obras || []).find(o => o.id === obraId);
     if (!obra) return;
     state.selectedObraId = obraId;
     applySelected(obra);
     renderAll();
   };
 
-  // ── Atualizar obra (reimporta Excel sobre a obra ativa) ──
-  window._atualizarObra = () => {
-    importFile(true); // replace=true substitui a obra atual
-  };
+  // ── atualizar obra ativa (reimporta Excel) ──
+  window._atualizarObra = () => { importFile(true); };
 
-  // ── Remover obra ativa ──
+  // ── remover obra ativa ──
   window._removerObraAtiva = async () => {
-    const obra = currentObra();
-    if (!obra) return;
+    const obra = currentObra(); if (!obra) return;
     const nome = obra.nomeProjeto || obra.nome || 'esta obra';
     if (!confirm(`Remover "${nome}" permanentemente?`)) return;
     try {
       await deleteObra(obra.id);
-      // seleciona próxima obra disponível
       const restantes = (state.obras || []).filter(o => o.id !== obra.id);
       state.selectedObraId = restantes[0]?.id ?? null;
-      if (state.selectedObraId) {
-        const proxima = restantes[0];
-        applySelected(proxima);
-      }
+      if (state.selectedObraId) applySelected(restantes[0]);
       renderAll();
       showToast('\u2705 Obra removida.');
     } catch(err) { showToast('\u274C ' + err.message, true); }
