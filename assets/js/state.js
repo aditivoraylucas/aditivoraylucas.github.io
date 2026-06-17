@@ -49,9 +49,6 @@ export function cleanup(adminSubs, allUsers){
 }
 
 /* ── Cronograma Físico-Financeiro ── */
-/**
- * buildCronogramaTimeline(dataInicio, cronograma, dataEmissao?)
- */
 export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
   if(!dataInicio || !Array.isArray(cronograma) || !cronograma.length) return [];
 
@@ -75,11 +72,12 @@ export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
   const result = [];
 
   for(let m = 1; m <= totalMeses; m++){
-    const totalMesBase0 = (iniMes - 1) + m;
-    const slotAno  = iniAno + Math.floor(totalMesBase0 / 12);
-    const slotMes  = (totalMesBase0 % 12) + 1;
-    const slotDate = new Date(slotAno, slotMes - 1, 1);
-    const label    = slotDate.toLocaleDateString('pt-BR', { month:'short', year:'2-digit' });
+    // CORRIGIDO: (m-1) para que m=1 gere o próprio mês de início
+    const base0   = (iniMes - 1) + (m - 1);
+    const slotAno = iniAno + Math.floor(base0 / 12);
+    const slotMes = (base0 % 12) + 1;
+    const label   = new Date(slotAno, slotMes - 1, 1)
+                      .toLocaleDateString('pt-BR', { month:'short', year:'2-digit' });
 
     const entry = cronograma[m - 1];
     result.push({
@@ -93,19 +91,10 @@ export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
   return result;
 }
 
-/* ── Curva S por Serviço ─────────────────────────────────────────────────────────────────
- *
- * buildCurvaServico(
- *   dataInicio,
- *   itemCronograma,
- *   itensExecucao,
- *   totalMeses,
- *   dataEmissaoObra?,
- *   itemCronogramaExecucao?
- * )
- *
- * Retorna arrays com índice 0 = "Mês 0" (ponto de origem zerado).
- * mesesDecorridos inclui o mês de emissão (+ 1) para não cortar o último mês.
+/* ── Curva S por Serviço ──────────────────────────────────────────────────────────────
+ * Índice 0 de todos os arrays = "Mês 0" (ponto de origem zerado).
+ * mesesDecorridos = diff + 1 para incluir o próprio mês de emissão.
+ * Labels: m=1 → mês de início da obra (corrigido com base0 = (iniMes-1)+(m-1))
  */
 export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, totalMeses, dataEmissaoObra, itemCronogramaExecucao) {
   if (!dataInicio || !itemCronograma) return null;
@@ -122,21 +111,19 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     refAno = now.getFullYear();
   }
 
-  // +1 para incluir o próprio mês de emissão (evita cortar o último mês executado)
+  // +1 para incluir o próprio mês de emissão
   const mesesDecorridos = Math.max(0, (refAno - iniAno) * 12 + (refMes - iniMes) + 1);
 
-  // Mapeia meses do planejado
   const mesesItem = Array.isArray(itemCronograma.meses) ? itemCronograma.meses : [];
   const planMap   = {};
   mesesItem.forEach(m => { planMap[m.mes] = m; });
 
-  // Mapeia meses do executado real (cronogramaItensExecucao)
   const mesesExec = Array.isArray(itemCronogramaExecucao?.meses) ? itemCronogramaExecucao.meses : [];
   const execMap   = {};
   mesesExec.forEach(m => { execMap[m.mes] = m; });
   const temExecucaoMensal = mesesExec.length > 0;
 
-  // ── Ponto de origem: Mês 0 (todos os valores = 0) ──────────────────────────
+  // Ponto de origem: Mês 0
   const labels          = ['Mês 0'];
   const planMensal      = [0];
   const planAcum        = [0];
@@ -154,7 +141,8 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
   let mesAtualIdx   = 0;
 
   for (let m = 1; m <= totalMeses; m++) {
-    const base0 = (iniMes - 1) + m;
+    // CORRIGIDO: base0 = (iniMes-1)+(m-1) → m=1 gera o mês de início da obra
+    const base0 = (iniMes - 1) + (m - 1);
     const sAno  = iniAno + Math.floor(base0 / 12);
     const sMes  = (base0 % 12) + 1;
     labels.push(new Date(sAno, sMes - 1, 1).toLocaleDateString('pt-BR', { month:'short', year:'2-digit' }));
@@ -182,7 +170,7 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
         execAcum.push(+Math.min(acumExecPct, 100).toFixed(2));
         execValorMensal.push(ev);
         execValorAcum.push(+acumExecValor.toFixed(2));
-        mesAtualIdx = m; // índice no array (Mês 0 está em 0, então mês 1 fica em índice 1)
+        mesAtualIdx = m;
       } else {
         execMensal.push(null);
         execAcum.push(null);
@@ -197,7 +185,6 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     }
   }
 
-  // execAcumPct/Valor: prioridade série mensal; fallback planilha de medição
   let execAcumPctFinal   = acumExecPct;
   let execAcumValorFinal = acumExecValor;
   if (!temExecucaoMensal) {
