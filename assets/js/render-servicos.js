@@ -39,11 +39,13 @@ function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
   const anomaliaBadge  = temAnomalias ? `<span title="${anomalias.length} alerta(s) de cronograma" style="font-size:.82rem;cursor:default">\ud83d\udea8</span>` : '';
   const bordaCard      = temAnomalias ? 'rgba(239,68,68,.45)' : 'var(--border,#e2e8f0)';
 
+  // onclick usa [data-body] para garantir que abre o div correto,
+  // independente de haver ou nao o div de anomalias entre o botao e o corpo
   return `
   <div class="servico-card" style="border:1px solid ${bordaCard};border-radius:10px;margin-bottom:.75rem;overflow:hidden;background:var(--surface,#fff)">
     <button class="servico-card-header" aria-expanded="${isOpen}"
       style="width:100%;display:flex;align-items:center;gap:.75rem;padding:.75rem 1rem;background:none;border:none;cursor:pointer;text-align:left;transition:background .15s"
-      onclick="this.setAttribute('aria-expanded',this.getAttribute('aria-expanded')==='true'?'false':'true');this.nextElementSibling.style.display=this.getAttribute('aria-expanded')==='true'?'':'none';"
+      onclick="(function(btn){var exp=btn.getAttribute('aria-expanded')==='true';btn.setAttribute('aria-expanded',exp?'false':'true');var body=btn.parentElement.querySelector('[data-body]');if(body)body.style.display=exp?'none':'';})(this)"
     >
       <span style="font-size:.7rem;font-weight:700;color:var(--text-muted,#64748b);min-width:1.8rem">${esc(String(item))}</span>
       <span style="flex:1;font-size:.82rem;font-weight:600;color:var(--text,#0f172a)">${esc(descricao)}${execBadge}</span>
@@ -52,7 +54,7 @@ function _servicoCardHTML(dados, canvasId, wrapId, isOpen) {
       <span style="font-size:.9rem;transition:transform .2s;display:inline-block">${isOpen ? '\u25B2' : '\u25BC'}</span>
     </button>
     ${temAnomalias ? _anomaliasBadgesHTML(anomalias) : ''}
-    <div style="display:${isOpen ? '' : 'none'}">
+    <div data-body style="display:${isOpen ? '' : 'none'}">
       <div style="display:flex;gap:1rem;flex-wrap:wrap;padding:.5rem 1rem .25rem;border-top:1px solid var(--border,#e2e8f0)">
         <div style="font-size:.75rem;color:var(--text-muted)"><span style="font-weight:600;color:var(--text)">Planejado at\u00e9 hoje (%):</span> ${planAteAgora.toFixed(1)}%</div>
         <div style="font-size:.75rem;color:var(--text-muted)"><span style="font-weight:600;color:var(--text)">Planejado at\u00e9 hoje (R$):</span> ${money(planValorAteAgora)}</div>
