@@ -86,11 +86,11 @@
 
     <aside class="app-aside">
 
-      <!-- SELETOR DE OBRAS + AÇÕES -->
+      <!-- OBRAS -->
       <div class="panel" style="padding:1rem">
         <div class="section-title" style="margin-bottom:.75rem">&#128193; Obras</div>
-        <div id="seletorObrasWrap"></div>
-        <button id="addObraBtn" class="btn btn-primary" style="width:100%;margin-top:.25rem">&#65039; Nova Obra</button>
+        <div id="obrasBox"></div>
+        <button id="addObraBtn" class="btn btn-primary" style="width:100%;margin-top:.75rem">&#65039; Nova Obra</button>
       </div>
 
       <!-- CRONOGRAMA DO CONTRATO -->
@@ -100,7 +100,7 @@
         <button id="loadCronograma" class="btn btn-primary" style="width:100%;margin-top:.75rem">&#128197; Importar Cronograma</button>
       </div>
 
-      <!-- CRONOGRAMA MENSAL -->
+      <!-- CRONOGRAMA MENSAL (EXECUCAO REAL DO CONTRATO) -->
       <div class="panel" style="padding:1rem">
         <div class="section-title" style="margin-bottom:.75rem">&#128200; Cronograma Mensal</div>
         <div id="indicadorAtualizacaoMensal" style="margin-bottom:.5rem"></div>
@@ -152,12 +152,6 @@
         </div>
       </div>
 
-      <!-- CARD DE DETALHES DA OBRA (mantido no painel principal) -->
-      <div class="panel" style="margin-bottom:1.25rem">
-        <div class="section-title" style="margin-bottom:.75rem">&#127959;&#65039; Obra</div>
-        <div id="obrasBox"></div>
-      </div>
-
       <!-- DATA DE INICIO DA OBRA -->
       <div class="panel" style="margin-bottom:1.25rem">
         <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
@@ -171,7 +165,7 @@
 
       <div class="stats-grid" id="stats"></div>
 
-      <!-- CURVA S 1 -->
+      <!-- CURVA S 1 — Indice de Itens (barras) -->
       <div class="panel" style="margin-bottom:1.25rem">
         <h3 style="margin-bottom:1rem" id="sCurveTitle">Curva S &#8212; &#205;ndice de Itens</h3>
         <div class="chart-scroll-wrap" id="sCurveScrollWrap">
@@ -179,7 +173,7 @@
         </div>
       </div>
 
-      <!-- CURVA S 2 -->
+      <!-- CURVA S 2 — Contrato: Planejado x Executado Real -->
       <div class="panel" style="margin-bottom:1.25rem;display:none" id="sCurveAditivoPanel">
         <h3 style="margin-bottom:1rem">Curva S &#8212; Cronograma F&#237;sico-Financeiro (Contrato)</h3>
         <div class="chart-scroll-wrap" id="sCurveAditivoScrollWrap">
@@ -187,8 +181,10 @@
         </div>
       </div>
 
+      <!-- CURVAS S DOS ADITIVOS — geradas dinamicamente pelo render.js -->
       <div id="aditivosCurvasContainer"></div>
 
+      <!-- CURVAS S POR SERVICO — geradas dinamicamente pelo render.js -->
       <div class="panel" id="curvasPorServicoPanel" style="margin-bottom:1.25rem;display:none">
         <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap">
           <h3 style="margin:0;font-size:1rem;font-weight:700">&#128200; Curvas S por Servi&#231;o</h3>
@@ -275,13 +271,16 @@
 
     <main class="app-main">
       <div class="stats-grid" id="adminStats" style="margin-bottom:1.5rem"></div>
+
       <div class="admin-colab-mobile-panel">
         <div class="section-title" style="margin-bottom:.5rem">&#128101; Colaboradores</div>
         <div id="adminColabSidebarMobile"></div>
       </div>
+
       <div id="adminDetailPanel">
         <p style="color:var(--text-muted);padding:1rem">Selecione um colaborador ao lado.</p>
       </div>
+
       <div id="adminColabPanel" style="display:none;margin-top:1.5rem">
         <div class="panel">
           <h3 style="margin-bottom:1.25rem">Cadastrar novo colaborador</h3>
