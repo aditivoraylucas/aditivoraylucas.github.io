@@ -1,21 +1,22 @@
 import { $, state, esc, money, buildCronogramaTimeline } from './state.js';
 import { renderCurvaS2, renderCurvaS2Aditivo, renderIndicadorAtualizacao } from './render-charts.js';
 
+let _importFileFn = () => {};
+export function setImportFileFnObras(fn) { _importFileFn = fn; }
+
 /* ── migra aditivos sem id ── */
 export function migrarAditivosSemId(obra) {
   if (!Array.isArray(obra?.aditivos)) return;
   obra.aditivos.forEach(a => { if (!a.id) a.id = 'aditivo_' + Date.now() + '_' + Math.random().toString(36).slice(2,7); });
 }
 
-/* ══════════════════════════════════════════════════════════════
-   renderObrasBox
-   ══════════════════════════════════════════════════════════════ */
+/* ══ renderObrasBox ══ */
 export function renderObrasBox(obra) {
   const box = $('obrasBox'); if (!box) return;
   if (!obra) { box.innerHTML = '<p style="color:var(--text-muted)">Nenhuma obra selecionada.</p>'; return; }
 
-  const itens   = Array.isArray(obra.itens)   ? obra.itens   : [];
-  const resumo  = obra.resumo  || {};
+  const itens    = Array.isArray(obra.itens)    ? obra.itens    : [];
+  const resumo   = obra.resumo   || {};
   const aditivos = Array.isArray(obra.aditivos) ? obra.aditivos : [];
 
   const totalContrato  = itens.reduce((s, i) => s + (Number(i.valorContrato)  || 0), 0);
@@ -27,11 +28,10 @@ export function renderObrasBox(obra) {
   const acuR = Number(resumo.acumuladoTotal)       || totalAcumulado;
   const pctR = vca > 0 ? (acuR / vca * 100).toFixed(2) : pctGeral;
 
-  const contratada  = esc(obra.contratada  || '—');
-  const nomeProjeto = esc(obra.nomeProjeto || obra.nome || '—');
-  const medicaoAtual = esc(obra.medicaoAtual || '—');
+  const contratada   = esc(obra.contratada   || '\u2014');
+  const nomeProjeto  = esc(obra.nomeProjeto  || obra.nome || '\u2014');
+  const medicaoAtual = esc(obra.medicaoAtual || '\u2014');
 
-  // Aditivos resumo
   let aditivosHtml = '';
   if (aditivos.length) {
     aditivosHtml = `<div style="margin-top:.5rem;font-size:.78rem;color:var(--text-muted)">
@@ -51,17 +51,15 @@ export function renderObrasBox(obra) {
   </div>${aditivosHtml}`;
 }
 
-/* ══════════════════════════════════════════════════════════════
-   renderCronogramaBox
-   ══════════════════════════════════════════════════════════════ */
+/* ══ renderCronogramaBox ══ */
 export function renderCronogramaBox(obra) {
   const box = $('cronogramaBox'); if (!box) return;
   if (!obra || !Array.isArray(obra.cronograma) || !obra.cronograma.length) {
     box.innerHTML = '<p style="color:var(--text-muted);font-size:.85rem">Nenhum cronograma importado.</p>';
     return;
   }
-  const timeline = buildCronogramaTimeline(obra.dataInicio, obra.cronograma, obra.dataEmissao);
-  const emissao  = obra.dataEmissao;
+  const timeline   = buildCronogramaTimeline(obra.dataInicio, obra.cronograma, obra.dataEmissao);
+  const emissao    = obra.dataEmissao;
   const emissaoTxt = emissao ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:.5rem">Emiss\u00e3o: ${String(emissao.mes).padStart(2,'0')}/${emissao.ano}</span>` : '';
 
   box.innerHTML = `
@@ -94,14 +92,11 @@ export function renderCronogramaBox(obra) {
   </table></div>`;
 }
 
-/* ══════════════════════════════════════════════════════════════
-   renderCronogramaMensalBox
-   ══════════════════════════════════════════════════════════════ */
+/* ══ renderCronogramaMensalBox ══ */
 export function renderCronogramaMensalBox(obra) {
   const box = $('cronogramaMensalBox'); if (!box) return;
   if (!obra || !Array.isArray(obra.cronogramaExecucao) || !obra.cronogramaExecucao.length) {
     box.innerHTML = '<p style="color:var(--text-muted);font-size:.85rem">Nenhum cronograma de execu\u00e7\u00e3o importado.</p>';
-    // limpa indicador
     const ind = $('indicadorAtualizacaoMensal'); if (ind) ind.innerHTML = '';
     return;
   }
@@ -109,8 +104,8 @@ export function renderCronogramaMensalBox(obra) {
   // ── Indicador de última atualização ──
   renderIndicadorAtualizacao('indicadorAtualizacaoMensal', obra);
 
-  const execucao = obra.cronogramaExecucao;
-  const emissao  = obra.dataEmissaoExecucao;
+  const execucao   = obra.cronogramaExecucao;
+  const emissao    = obra.dataEmissaoExecucao;
   const emissaoTxt = emissao ? `<span style="font-size:.72rem;color:var(--text-muted);margin-left:.5rem">Emiss\u00e3o: ${String(emissao.mes).padStart(2,'0')}/${emissao.ano}</span>` : '';
 
   box.innerHTML = `
@@ -142,21 +137,17 @@ export function renderCronogramaMensalBox(obra) {
   </table></div>`;
 }
 
-/* ══════════════════════════════════════════════════════════════
-   renderAditivosSection
-   ══════════════════════════════════════════════════════════════ */
+/* ══ renderAditivosSection ══ */
 export function renderAditivosSection(obra, prefix) {
-  const sec = $('aditivosSection'); if (!sec) return;
+  const sec = $('aditivosBox'); if (!sec) return;
   migrarAditivosSemId(obra);
   const aditivos = Array.isArray(obra?.aditivos) ? obra.aditivos : [];
   if (!aditivos.length) { sec.innerHTML = ''; return; }
 
   let html = '';
   aditivos.forEach((ad, i) => {
-    const adId   = ad.id || ('aditivo_idx_' + i);
+    const adId     = ad.id || ('aditivo_idx_' + i);
     const temCrono = Array.isArray(ad.cronograma) && ad.cronograma.length > 0;
-    const temExec  = Array.isArray(ad.cronogramaExecucao) && ad.cronogramaExecucao.length > 0;
-    const dataIni  = obra.dataInicio || null;
     const emissao  = ad.dataEmissao;
     const emissaoTxt = emissao ? `<span style="font-size:.7rem;color:var(--text-muted);margin-left:.4rem">Emiss\u00e3o: ${String(emissao.mes).padStart(2,'0')}/${emissao.ano}</span>` : '';
 
@@ -180,9 +171,11 @@ export function renderAditivosSection(obra, prefix) {
           \u{1F5D1}\uFE0F
         </button>
       </div>
-      ${temCrono ? `<div class="chart-scroll-wrap" id="chartWrapAditivo_${adId}" style="padding:.5rem 1rem 1rem">
-        <div class="chart-container" style="height:200px"><canvas id="chartAditivo_${adId}"></canvas></div>
-      </div>` : `<div style="padding:.65rem 1rem;font-size:.8rem;color:var(--text-muted)">Sem cronograma importado.</div>`}
+      ${temCrono
+        ? `<div class="chart-scroll-wrap" id="chartWrapAditivo_${adId}" style="padding:.5rem 1rem 1rem">
+             <div class="chart-container" style="height:200px"><canvas id="chartAditivo_${adId}"></canvas></div>
+           </div>`
+        : `<div style="padding:.65rem 1rem;font-size:.8rem;color:var(--text-muted)">Sem cronograma importado.</div>`}
     </div>`;
   });
   sec.innerHTML = html;
@@ -192,12 +185,11 @@ export function renderAditivosSection(obra, prefix) {
   if (state[chartsKey]) Object.values(state[chartsKey]).forEach(c => { try { c.destroy(); } catch(_){} });
   state[chartsKey] = {};
   aditivos.forEach(ad => {
-    const adId = ad.id;
     if (!Array.isArray(ad.cronograma) || !ad.cronograma.length) return;
-    const dataInicioAditivo = obra.dataInicio || null;
+    const adId = ad.id;
     state[chartsKey][adId] = renderCurvaS2Aditivo(
       `chartAditivo_${adId}`, `chartWrapAditivo_${adId}`,
-      ad, dataInicioAditivo,
+      ad, obra.dataInicio || null,
       state[chartsKey][adId] || null
     );
   });
