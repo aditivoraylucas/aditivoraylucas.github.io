@@ -110,10 +110,42 @@ export function parseCronogramaXLSX(workbook) {
     }
   }
 
-  // Fallback: se não encontrou cabeçalho explícito, assume posições padrão
-  // (ITEM=0, DESC=1, PESO=2, VALOR=3, Meses a partir de col 4)
-  if (pesoTotalCol < 0 && firstPctCol > 2) pesoTotalCol = firstPctCol - 2;
-  if (valTotalCol  < 0 && firstPctCol > 1) valTotalCol  = firstPctCol - 1;
+  // ── Fallback SEGURO: só assume pesoTotalCol/valTotalCol se houver colunas
+  // NUMÉRICAS entre descCol e firstPctCol nas linhas de dados reais.
+  // Planilhas como o Boletim de Medição têm UND, QUANT entre DESC e os meses —
+  // essas colunas NÃO devem ser confundidas com PESO/VALOR do item.
+  if (pesoTotalCol < 0 || valTotalCol < 0) {
+    // Verifica se existe ao menos uma célula numérica não-zero nas possíveis colunas
+    // candidatas (entre descCol+1 e firstPctCol-1) nas primeiras linhas de dados
+    const candidatas = [];
+    for (let ci = descCol + 1; ci < firstPctCol; ci++) {
+      candidatas.push(ci);
+    }
+    // Para cada candidata, testa se as primeiras linhas de item têm valor numérico > 0
+    const colsComValor = candidatas.filter(ci => {
+      let achou = false;
+      for (let ri = dataStartRow; ri < Math.min(dataStartRow + 10, raw.length); ri++) {
+        const row = raw[ri];
+        const itemNum = Number(row[itemCol]);
+        if (isNaN(itemNum) || itemNum <= 0) continue;
+        const v = Number(row[ci]);
+        // Só conta se for um valor monetário plausível (> 10) ou percentual (0 < v <= 100)
+        if (!isNaN(v) && v > 10) { achou = true; break; }
+      }
+      return achou;
+    });
+
+    // Só atribui fallback se encontrou colunas com valores plausíveis
+    if (colsComValor.length >= 2) {
+      // Assume: penúltima = peso, última = valor
+      if (pesoTotalCol < 0) pesoTotalCol = colsComValor[colsComValor.length - 2];
+      if (valTotalCol  < 0) valTotalCol  = colsComValor[colsComValor.length - 1];
+    } else if (colsComValor.length === 1) {
+      // Só uma coluna numérica plausível — assume que é VALOR
+      if (valTotalCol < 0) valTotalCol = colsComValor[0];
+    }
+    // Se nenhuma coluna plausível, mantém -1 (valorTotal será calculado pela soma dos meses)
+  }
 
   // Garante que descCol não caia dentro das colunas de meses
   if (descCol >= firstPctCol) descCol = itemCol + 1;
@@ -161,7 +193,7 @@ export function parseCronogramaXLSX(workbook) {
 
   // Mesma detecção para o PESO TOTAL do item (coluna pesoTotalCol)
   // — pode estar em decimal ou em % inteiro independentemente
-  function pesoDecimalFormat(rows) {
+  function pesoDecimalFormat() {
     if (pesoTotalCol < 0) return false;
     const vals = [];
     for (let ri = dataStartRow; ri < raw.length && vals.length < 5; ri++) {
@@ -173,7 +205,7 @@ export function parseCronogramaXLSX(workbook) {
     }
     return vals.length > 0 && vals.every(v => Math.abs(v) <= 1);
   }
-  const pesoDec = pesoDecimalFormat(raw);
+  const pesoDec = pesoDecimalFormat();
   function toPesoTotal(val) {
     const n = Number(val) || 0;
     return pesoDec ? +(n * 100).toFixed(4) : +n.toFixed(4);
@@ -215,8 +247,8 @@ export function parseCronogramaXLSX(workbook) {
   // Cada item recebe:
   //   item        — número do item
   //   descricao   — descrição do serviço
-  //   pesoTotal   — peso (%) do item no contrato total (col PESO)
-  //   valorTotal  — valor (R$) total do item no contrato (col VALOR)
+  //   pesoTotal   — peso (%) do item no contrato total (col PESO, se existir)
+  //   valorTotal  — valor (R$) total do item no contrato (col VALOR, ou soma dos meses)
   //   meses[]     — array com {mes, pct, valor} para cada mês do cronograma
   //                 meses sem dados (traço, vazio, #REF!) ficam com pct=0 e valor=0
   const itens = [];
@@ -247,14 +279,14 @@ export function parseCronogramaXLSX(workbook) {
       };
     });
 
-    // Valor total do item: lê da coluna valTotalCol (ex: col 3)
+    // Valor total do item: lê da coluna valTotalCol se encontrada e plausível
     // Se não encontrada ou zero, soma os valores mensais como fallback
     let valorTotal = valTotalCol >= 0 ? (Number(row[valTotalCol]) || 0) : 0;
     if (valorTotal === 0) {
       valorTotal = meses.reduce((a, m) => a + m.valor, 0);
     }
 
-    // Peso total do item: lê da coluna pesoTotalCol (ex: col 2)
+    // Peso total do item: lê da coluna pesoTotalCol se encontrada
     const pesoTotal = pesoTotalCol >= 0 ? toPesoTotal(row[pesoTotalCol]) : 0;
 
     itens.push({
