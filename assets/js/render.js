@@ -131,23 +131,27 @@ function _buildFontesServico(o) {
   }
 
   // Fontes 1..N: aditivos com cronogramaItens
+  // dataInicioBase avanca em cadeia: contrato -> ad[0] -> ad[1] -> ...
   let dataInicioBase = calcDataInicioProximo(o?.dataInicio, nContrato);
   aditivos.forEach((ad, adIdx) => {
-    const nPrev = Array.isArray(aditivos[adIdx - 1]?.cronograma) ? aditivos[adIdx - 1].cronograma.length : 0;
-    const dataInicioAd = dataInicioBase;
-    dataInicioBase = calcDataInicioProximo(dataInicioBase, Array.isArray(ad.cronograma) ? ad.cronograma.length : 0) || dataInicioBase;
+    const dataInicioAd  = dataInicioBase;
+    const totalMesesAd  = Array.isArray(ad.cronograma) ? ad.cronograma.length : 0;
+    // avanca para o proximo aditivo independente de ter cronogramaItens
+    dataInicioBase = calcDataInicioProximo(dataInicioBase, totalMesesAd) || dataInicioBase;
 
     const itensCronoAd = Array.isArray(ad?.cronogramaItens) ? ad.cronogramaItens : [];
-    const totalMesesAd = Array.isArray(ad?.cronograma) ? ad.cronograma.length : 0;
     if (!itensCronoAd.length || !totalMesesAd || !dataInicioAd) return;
 
     fontes.push({
-      label: `\u{1F4C4} ${esc(ad.nome || `Aditivo ${adIdx + 1}`)}`,
+      label:             `\u{1F4C4} ${esc(ad.nome || `Aditivo ${adIdx + 1}`)}`,
       itensCrono:        itensCronoAd,
+      // execucao mensal do proprio aditivo (previsto x mensal do aditivo)
       itensExecMensal:   Array.isArray(ad?.cronogramaItensExecucao) ? ad.cronogramaItensExecucao : [],
+      // fallback de % acumulado vem dos itens da obra (boletim)
       itensExecucao:     Array.isArray(o?.itens) ? o.itens : [],
       totalMeses:        totalMesesAd,
       dataInicio:        dataInicioAd,
+      // referencia de emissao: data do mensal do aditivo, fallback data do previsto do aditivo
       dataEmissaoRef:    ad?.dataEmissaoExecucao || ad?.dataEmissao || null,
       historicoExecucao: Array.isArray(ad?.historicoExecucao) ? ad.historicoExecucao : []
     });
@@ -173,7 +177,7 @@ export function renderCurvasPorServicoPanel(o, prefix) {
     (temMensal ? ' \u2022 Real m\u00eas a m\u00eas' : '') +
     (fontes.length > 1 ? ` \u2022 ${fontes.length - 1} aditivo(s)` : '');
 
-  // seletor de fonte (so renderiza se houver mais de 1 fonte)
+  // seletor de fonte (so aparece se houver mais de 1 fonte)
   let seletorEl = $(`${prefix}_fonte_seletor`);
   if (!seletorEl) {
     seletorEl = document.createElement('div');
@@ -199,18 +203,17 @@ export function renderCurvasPorServicoPanel(o, prefix) {
   // expoe funcao de troca para o onclick inline
   window._trocarFonteServico = (idx) => {
     state[`${prefix}_fonteAtiva`] = idx;
-    // atualiza estilo dos botoes
     const sel = $(`${prefix}_fonte_seletor`);
     if (sel) sel.querySelectorAll('[data-fonte-idx]').forEach(btn => {
       const ativo = Number(btn.dataset.fonteIdx) === idx;
-      btn.style.background    = ativo ? 'var(--primary,#6366f1)' : 'transparent';
-      btn.style.color         = ativo ? '#fff' : 'var(--text-muted,#64748b)';
-      btn.style.borderColor   = ativo ? 'var(--primary,#6366f1)' : 'var(--border,#e2e8f0)';
+      btn.style.background  = ativo ? 'var(--primary,#6366f1)' : 'transparent';
+      btn.style.color       = ativo ? '#fff' : 'var(--text-muted,#64748b)';
+      btn.style.borderColor = ativo ? 'var(--primary,#6366f1)' : 'var(--border,#e2e8f0)';
     });
     renderCurvasPorServico('curvasPorServicoContainer', fontes[idx], `${prefix}_f${idx}`);
   };
 
-  // renderiza a fonte ativa (padrao: 0)
+  // renderiza fonte ativa (padrao: 0)
   const idxAtivo = state[`${prefix}_fonteAtiva`] ?? 0;
   renderCurvasPorServico('curvasPorServicoContainer', fontes[idxAtivo], `${prefix}_f${idxAtivo}`);
 }
