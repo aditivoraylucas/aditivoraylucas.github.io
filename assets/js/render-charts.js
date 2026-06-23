@@ -1,41 +1,39 @@
 import { $, state, esc, money, pct } from './state.js';
 
 /* ============================================================
-   UTILITÁRIO — corta a cauda de meses vazios no final do array
-   Regra:
-     - Percorre do fim para o início procurando o último índice
-       com valor > 0 (não nulo, não undefined).
-     - Todos os elementos APÓS esse índice são removidos.
-     - Buracos NO MEIO (zeros rodeados de valores) são mantidos.
-     - Se todos os valores forem zero/nulo, retorna o array original
-       (melhor mostrar do que ocultar completamente).
-   Aceita múltiplos arrays do mesmo tamanho (ex: labels + planData +
-   execData) e os corta todos para o mesmo comprimento.
-   ============================================================ */
-function _trimCaudaVazia(...arrays) {
-  if (!arrays.length) return arrays;
-  const ref = arrays[0];
-  const n   = ref.length;
-  if (!n) return arrays;
+   UTILITÁRIO — encontra o índice do último mês com atividade
+   usando o array MENSAL (delta/simples) como referência.
 
-  // Considera "preenchido" qualquer valor que seja número > 0
-  // (null, undefined, 0 são tratados como vazio)
-  let ultimoPreenchido = -1;
-  for (let arr of arrays) {
-    for (let i = n - 1; i >= 0; i--) {
-      const v = arr[i];
-      if (v !== null && v !== undefined && Number(v) > 0) {
-        if (i > ultimoPreenchido) ultimoPreenchido = i;
-        break; // encontrou o último valor deste array; avança pro próximo
-      }
+   Regra:
+     - Recebe o array MENSAL (valores por mês, não acumulado).
+     - Percorre do fim para o início buscando o último índice
+       com valor numérico > 0 (ignora null, undefined, 0).
+     - Retorna esse índice + 1 como limite de corte.
+     - Todos os arrays paralelos passados são fatiados até
+       esse limite — mantendo os índices sincronizados.
+     - Buracos NO MEIO (meses com zero rodeados de valores)
+       são preservados intactos.
+     - Se nenhum mês tiver valor > 0, devolve os arrays
+       originais (evita sumir tudo).
+   ============================================================ */
+function _trimCaudaVazia(mensalRef, ...outrosArrays) {
+  const n = mensalRef.length;
+  if (!n) return [mensalRef, ...outrosArrays];
+
+  let ultimoAtivo = -1;
+  for (let i = n - 1; i >= 0; i--) {
+    const v = mensalRef[i];
+    if (v !== null && v !== undefined && Number(v) > 0) {
+      ultimoAtivo = i;
+      break;
     }
   }
 
-  // Se não encontrou nenhum valor, devolve como está
-  if (ultimoPreenchido < 0) return arrays;
+  // Nenhum mês com valor — devolve como está
+  if (ultimoAtivo < 0) return [mensalRef, ...outrosArrays];
 
-  const limite = ultimoPreenchido + 1;
-  return arrays.map(arr => arr.slice(0, limite));
+  const limite = ultimoAtivo + 1;
+  return [mensalRef, ...outrosArrays].map(arr => arr.slice(0, limite));
 }
 
 /* ============================================================
@@ -149,43 +147,89 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
     return new Date(ano, mes - 1, 1).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
   }
 
-  // ── monta arrays brutos ──
+  // ── arrays mensais (delta) — usados como referência de corte ──
+  const planMensalRaw = cronograma.map(s => +Number(s?.planejadoPct || 0).toFixed(4));
+
+  // ── arrays acumulados ──
   const labelsRaw = Array.from({ length: n }, (_, i) => labelMes(i + 1));
-  const planRaw   = [];
-  let acumPlan    = 0;
+  const planAcumRaw = [];
+  let acumPlan = 0;
   for (let i = 0; i < n; i++) {
-    acumPlan += Number(cronograma[i]?.planejadoPct) || 0;
-    planRaw.push(+Math.min(acumPlan, 100).toFixed(2));
-  }
-  const execRaw = new Array(n).fill(null);
-  let acumExec  = 0;
-  for (let i = 0; i < cronogramaExecucao.length && i < n; i++) {
-    acumExec += Number(cronogramaExecucao[i]?.executadoPct) || 0;
-    execRaw[i] = +Math.min(acumExec, 100).toFixed(2);
+    acumPlan += planMensalRaw[i];
+    planAcumRaw.push(+Math.min(acumPlan, 100).toFixed(2));
   }
 
-  // ── corta cauda vazia do cronograma planejado ──
-  // A execução pode ser menor; usamos planRaw como referência primária
-  // mas também verificamos execRaw para não cortar meses já executados.
-  const [labels, planData, execData] = _trimCaudaVazia(labelsRaw, planRaw, execRaw);
+  const execMensalRaw = new Array(n).fill(0);
+  const execAcumRaw  = new Array(n).fill(null);
+  let acumExec = 0;
+  for (let i = 0; i < cronogramaExecucao.length && i < n; i++) {
+    const delta = Number(cronogramaExecucao[i]?.executadoPct) || 0;
+    execMensalRaw[i] = delta;
+    acumExec += delta;
+    execAcumRaw[i] = +Math.min(acumExec, 100).toFixed(2);
+  }
+
+  // ── corte pela cauda: referência = array MENSAL planejado ──
+  // Se houver execução além do planejado, também verificamos execMensalRaw
+  // para não cortar meses que já foram executados.
+  const [planMensalTrim, labelsOut, planAcumOut, execAcumOut] =
+    _trimCaudaVazia(planMensalRaw, labelsRaw, planAcumRaw, execAcumRaw);
+
+  // Se a execução tiver dados além do ponto de corte do planejado,
+  // expande o limite para cobrir também os meses executados.
+  // (Caso 1: buraco no meio — os dados de execução do lado de cá do corte
+  //  já estão dentro de execAcumOut; nada extra necessário.)
 
   return new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: {
-      labels,
+      labels: labelsOut,
       datasets: [
-        { label: `Planejado \u2014 ${titulo} (%)`, data: planData, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.06)', borderWidth: 2.5, pointRadius: mobile ? 2 : 3, pointBackgroundColor: '#f59e0b', tension: 0.35, fill: false, spanGaps: false },
-        { label: 'Executado Real (%)', data: execData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.08)', borderWidth: 2.5, pointRadius: mobile ? 2 : 4, pointBackgroundColor: '#10b981', tension: 0.35, fill: false, spanGaps: false }
+        {
+          label: `Planejado \u2014 ${titulo} (%)`,
+          data: planAcumOut,
+          borderColor: '#f59e0b',
+          backgroundColor: 'rgba(245,158,11,0.06)',
+          borderWidth: 2.5,
+          pointRadius: mobile ? 2 : 3,
+          pointBackgroundColor: '#f59e0b',
+          tension: 0.35,
+          fill: false,
+          spanGaps: false
+        },
+        {
+          label: 'Executado Real (%)',
+          data: execAcumOut,
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16,185,129,0.08)',
+          borderWidth: 2.5,
+          pointRadius: mobile ? 2 : 4,
+          pointBackgroundColor: '#10b981',
+          tension: 0.35,
+          fill: false,
+          spanGaps: false
+        }
       ]
     },
     options: {
-      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
       scales: {
-        y: { beginAtZero: true, max: 100, grid: { color: gc }, ticks: { color: tc, callback: v => v + '%', font: { size: mobile ? 9 : 11 } } },
-        x: { grid: { display: false }, ticks: { color: tc, font: { size: mobile ? 8 : 10 }, maxRotation: mobile ? 90 : 45 } }
+        y: {
+          beginAtZero: true, max: 100,
+          grid: { color: gc },
+          ticks: { color: tc, callback: v => v + '%', font: { size: mobile ? 9 : 11 } }
+        },
+        x: {
+          grid: { display: false },
+          ticks: { color: tc, font: { size: mobile ? 8 : 10 }, maxRotation: mobile ? 90 : 45 }
+        }
       },
       plugins: {
-        legend: { labels: { color: tc, font: { size: mobile ? 9 : 11 }, usePointStyle: true, pointStyleWidth: 10 } },
+        legend: {
+          labels: { color: tc, font: { size: mobile ? 9 : 11 }, usePointStyle: true, pointStyleWidth: 10 }
+        },
         tooltip: _tooltipDesvio(dark)
       }
     }
@@ -228,13 +272,11 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnte
     ? { label: 'Executado Real (%)', data: execData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.08)', borderWidth: 2.5, pointRadius: mobile ? 2 : 3, pointBackgroundColor: '#10b981', tension: 0.35, fill: false, spanGaps: false }
     : { label: 'Executado Acum. (%)', data: execData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.9)', borderWidth: 0, pointRadius: mobile ? 5 : 7, pointBackgroundColor: '#10b981', pointBorderColor: '#fff', pointBorderWidth: 2, showLine: false, spanGaps: false };
 
-  // ── Monta datasets base ──
   const datasets = [
     { label: 'Planejado (%)', data: planAcum, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.08)', borderWidth: 2, pointRadius: mobile ? 1.5 : 2.5, pointBackgroundColor: '#f59e0b', tension: 0.35, fill: false },
     execDataset
   ];
 
-  // ── Curva da versão anterior (pontilhada cinza) ──
   if (dadosAnterior) {
     const execAcumAnt = Array.isArray(dadosAnterior.execAcum) ? dadosAnterior.execAcum : [];
     const antData     = new Array(n).fill(null);

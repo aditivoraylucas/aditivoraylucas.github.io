@@ -72,7 +72,6 @@ export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
   const result = [];
 
   for(let m = 1; m <= totalMeses; m++){
-    // (m-1) => m=1 gera o próprio mês de início
     const base0   = (iniMes - 1) + (m - 1);
     const slotAno = iniAno + Math.floor(base0 / 12);
     const slotMes = (base0 % 12) + 1;
@@ -90,34 +89,37 @@ export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
   return result;
 }
 
-/* ── UTILITÁRIO — corta a cauda de meses vazios no final dos arrays ──────────
- * Recebe N arrays paralelos (mesmo tamanho) e um array de referência.
- * Encontra o índice do último elemento com valor > 0 em QUALQUER dos arrays.
- * Todos os arrays são fatiados até esse índice (inclusive).
- * Buracos no meio (zeros/nulls rodeados de valores) são mantidos intactos.
- * Se nenhum valor for encontrado, devolve os arrays originais.
- * ----------------------------------------------------------------------------
- * Nota: o índice 0 é o ponto de origem "Mês 0" e deve sempre ser mantido,
- * por isso o limite mínimo após o corte é índice 0 (o array nunca fica vazio).
+/* ── UTILITÁRIO: encontra o último índice ativo via array MENSAL ──────────────
+ *
+ * Regra: percorre do fim para o início o array MENSAL (delta/simples).
+ * O último índice com valor > 0 define o ponto de corte.
+ * Todos os arrays paralelos são fatiados até esse ponto (inclusive).
+ *
+ * IMPORTANTE:
+ *   - O índice 0 é o "Mês 0" (origem zerada) e é SEMPRE preservado.
+ *   - Se nenhum mês tiver valor > 0 no mensal, todos os arrays são
+ *     devolvidos sem corte (evita sumir tudo).
+ *   - Arrays paralelos devem ter o mesmo comprimento que mensalRef.
  */
-function _trimCaudaVaziaArrays(...arrays) {
-  if (!arrays.length) return arrays;
-  const n = arrays[0].length;
-  if (!n) return arrays;
+function _trimCaudaVaziaArrays(mensalRef, ...paralelos) {
+  const n = mensalRef.length;
+  if (!n) return [mensalRef, ...paralelos];
 
-  let ultimoPreenchido = 0; // mínimo: mantém ao menos o ponto de origem
-  for (const arr of arrays) {
-    for (let i = n - 1; i > ultimoPreenchido; i--) {
-      const v = arr[i];
-      if (v !== null && v !== undefined && Number(v) > 0) {
-        ultimoPreenchido = i;
-        break;
-      }
+  // Índice 0 = "Mês 0" — limite mínimo de preservação
+  let ultimoAtivo = 0;
+  for (let i = n - 1; i > 0; i--) {
+    const v = mensalRef[i];
+    if (v !== null && v !== undefined && Number(v) > 0) {
+      ultimoAtivo = i;
+      break;
     }
   }
 
-  const limite = ultimoPreenchido + 1;
-  return arrays.map(arr => arr.slice(0, limite));
+  // Se não encontrou nenhum ativo além do "Mês 0", devolve como está
+  if (ultimoAtivo === 0) return [mensalRef, ...paralelos];
+
+  const limite = ultimoAtivo + 1;
+  return [mensalRef, ...paralelos].map(arr => arr.slice(0, limite));
 }
 
 /* ── Curva S por Serviço ───────────────────────────────────────────────────────
@@ -140,7 +142,6 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     refAno = now.getFullYear();
   }
 
-  // Limitado a totalMeses para não ultrapassar o tamanho do cronograma
   const mesesDecorridos = Math.min(
     totalMeses,
     Math.max(0, (refAno - iniAno) * 12 + (refMes - iniMes) + 1)
@@ -155,7 +156,7 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
   mesesExec.forEach(m => { execMap[m.mes] = m; });
   const temExecucaoMensal = mesesExec.length > 0;
 
-  // Ponto de origem: Mês 0
+  // Ponto de origem: Mês 0 (índice 0 em todos os arrays)
   const labels          = ['Mês 0'];
   const planMensal      = [0];
   const planAcum        = [0];
@@ -214,14 +215,14 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     }
   }
 
-  // ── Corta a cauda vazia do cronograma planejado ──────────────────────────
-  // Detecta o último mês que possui valor planejado > 0 (ou executado > 0).
-  // Todos os arrays são truncados para esse comprimento.
-  // O índice 0 ("Mês 0") é sempre preservado (limite mínimo = 0).
-  // Arrays paralelos são cortados juntos para manter os índices sincronizados.
+  // ── Corte da cauda vazia ───────────────────────────────────────────────────
+  // Referência: planMensal (delta/simples do item).
+  // O índice 0 ("Mês 0") tem valor 0 e é sempre preservado.
+  // Todos os arrays paralelos são cortados juntos para manter
+  // os índices sincronizados.
   const [
-    labelsTrim,
     planMensalTrim,
+    labelsTrim,
     planAcumTrim,
     planValorMensalTrim,
     planValorAcumTrim,
@@ -230,8 +231,8 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     execValorMensalTrim,
     execValorAcumTrim
   ] = _trimCaudaVaziaArrays(
+    planMensal,        // referência de corte — mensal/delta
     labels,
-    planMensal,
     planAcum,
     planValorMensal,
     planValorAcum,
@@ -241,9 +242,10 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     execValorAcum
   );
 
-  // mesAtualIdx pode ter ficado além do novo limite após o corte — clamp
+  // mesAtualIdx pode ter ficado além do novo limite — clamp
   const mesAtualIdxTrim = Math.min(mesAtualIdx, labelsTrim.length - 1);
 
+  // ── Execução acumulada global (para o badge de status) ──
   let execAcumPctFinal   = acumExecPct;
   let execAcumValorFinal = acumExecValor;
   if (!temExecucaoMensal) {
@@ -266,7 +268,7 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
 
   const pesoTotal = +Number(itemCronograma.pesoTotal || 0).toFixed(4);
 
-  // planAteAgora usa os dados originais (antes do corte) para o cálculo de status
+  // planAteAgora usa planAcum ORIGINAL (antes do corte) para status correto
   const planAteAgora = planAcum[mesAtualIdx] || 0;
   let status = 'nao_iniciado';
   if (planAteAgora > 0 || execAcumPctFinal > 0) {
@@ -279,7 +281,7 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     }
   }
 
-  // anomalias também usam os dados originais (planMensal/execMensal completos)
+  // anomalias usam arrays originais (planMensal/execMensal completos antes do corte)
   const anomalias = detectarAnomaliaServico({
     planMensal,
     execMensal,
@@ -312,18 +314,8 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
   };
 }
 
-/* ── detectarAnomaliaServico ────────────────────────────────────────────────────
- *
- * Recebe os arrays já montados pelo buildCurvaServico e retorna um array de
- * alertas. Cada alerta tem:
- *   { tipo, mensagem, severidade }  — severidade: 'aviso' | 'alerta'
- *
- * Regras:
- *   1. INICIADO_ANTES_DO_PREVISTO
- *   2. EXECUTADO_FORA_DO_CRONOGRAMA
- *   3. MUITO_ADIANTADO
- */
-const THRESHOLD_ADIANTADO = 15; // pontos percentuais
+/* ── detectarAnomaliaServico ──────────────────────────────────────────────────── */
+const THRESHOLD_ADIANTADO = 15;
 
 export function detectarAnomaliaServico({ planMensal, execMensal, execAcumPctFinal, planAteAgora, mesesDecorridos, totalMeses }) {
   const anomalias = [];
