@@ -1,55 +1,6 @@
 import { $, state, esc, money, pct } from './state.js';
 
 /* ============================================================
-   UTILITÁRIO — corta a cauda vazia do executado
-
-   Lógica de REPETIÇÃO DO ACUMULADO (mais robusta que > 0):
-     - Percorre do fim para o início.
-     - Enquanto o valor for igual ao anterior (acumulado parou
-       de crescer) E essa repetição se estende até o último
-       elemento → é cauda vazia → vira null.
-     - Para quando encontra um valor que CRESCEU em relação
-       ao seguinte → esse é o último mês real.
-     - Buracos NO MEIO são preservados: a repetição só é
-       considerada "cauda" se persistir até o fim do array.
-     - Planejado NUNCA é passado aqui — exibe todos os meses.
-   ============================================================ */
-function _cortarExecCauda(arr) {
-  if (!Array.isArray(arr) || arr.length === 0) return arr;
-
-  const out = arr.slice();
-  const n   = out.length;
-
-  // Encontra o índice do último valor não-nulo
-  let ultimoReal = -1;
-  for (let i = n - 1; i >= 0; i--) {
-    if (out[i] !== null && out[i] !== undefined) { ultimoReal = i; break; }
-  }
-  if (ultimoReal < 0) return out; // tudo null → devolve como está
-
-  // Percorre da cauda para o início:
-  // Enquanto o valor atual === valor do próximo (acumulado repetindo),
-  // substitui por null — pois o cronograma parou.
-  // Para quando o valor cresce (mês com execução real).
-  let corte = ultimoReal; // índice do último mês a manter
-  for (let i = ultimoReal; i > 0; i--) {
-    const curr = out[i];
-    const prev = out[i - 1];
-    if (curr === prev || (curr !== null && prev !== null && Math.abs(Number(curr) - Number(prev)) < 0.001)) {
-      // acumulado repetiu → candidato a corte
-      corte = i - 1;
-    } else {
-      // acumulado cresceu → este é o limite real
-      break;
-    }
-  }
-
-  // Anula tudo após o índice de corte
-  for (let i = corte + 1; i < n; i++) out[i] = null;
-  return out;
-}
-
-/* ============================================================
    CURVA S1 — Índice de Itens (barras)
    ============================================================ */
 export function renderCurvaS1(canvasId, wrapId, itens, prevChart) {
@@ -139,6 +90,15 @@ function _tooltipDesvio(dark) {
   };
 }
 
+/* ============================================================
+   _renderCurvaS2Generica
+
+   Curva S do CONTRATO e do ADITIVO.
+
+   Âncora do executado: último mês onde cronograma[i].planejadoPct > 0
+   (TOTAL SIMPLES). Tudo após esse ponto é cortado da linha verde.
+   Planejado exibe todos os meses sem corte.
+   ============================================================ */
 function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecucao, dataInicio, titulo }, prevChart) {
   const canvas = $(canvasId); if (!canvas) return prevChart;
   if (prevChart) { try { prevChart.destroy(); } catch(_){} }
@@ -160,7 +120,7 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
     return new Date(ano, mes - 1, 1).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
   }
 
-  // ── PLANEJADO: todos os meses, sem corte algum ───────────────
+  // ── PLANEJADO: todos os meses, sem corte ─────────────────────────────────
   const labels = Array.from({ length: n }, (_, i) => labelMes(i + 1));
   let acumPlan = 0;
   const planAcum = cronograma.map(s => {
@@ -168,10 +128,22 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
     return +Math.min(acumPlan, 100).toFixed(2);
   });
 
-  // ── EXECUTADO: acumula → corta cauda por repetição ──────────
-  // Só preenche o índice se o acumulado cresceu (delta > 0).
-  // Meses com delta = 0 ficam com o mesmo valor acumulado do anterior,
-  // o que a lógica de repetição detecta e anula na cauda.
+  // ── Âncora: último índice onde planejadoPct > 0 (TOTAL SIMPLES) ─────────
+  // simplesPct[i] = planejadoPct do mês i+1 no cronograma
+  const simplesPct = cronograma.map(s => Number(s?.planejadoPct) || 0);
+
+  // Encontra o último mês com planejadoPct > 0
+  let limiteExecIdx = 0;
+  for (let i = simplesPct.length - 1; i >= 0; i--) {
+    if (simplesPct[i] > 0) {
+      limiteExecIdx = i; // índice no array do cronograma (0-based) = índice no gráfico
+      break;
+    }
+  }
+
+  // ── EXECUTADO: acumula → corta pelo limite da âncora ───────────────────
+  // Note: neste gráfico não há ponto de origem (Mês 0),
+  // o array começa diretamente no mês 1 — mesmo comprimento que cronograma.
   const execAcumRaw = new Array(n).fill(null);
   let acumExec = 0;
   const lenExec = Math.min(cronogramaExecucao.length, n);
@@ -180,8 +152,9 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
     acumExec += delta;
     execAcumRaw[i] = +Math.min(acumExec, 100).toFixed(2);
   }
-  // Aplica corte por repetição — só no executado
-  const execAcum = _cortarExecCauda(execAcumRaw);
+
+  // Aplica o corte pela âncora: anula tudo após limiteExecIdx
+  const execAcum = execAcumRaw.map((v, i) => i <= limiteExecIdx ? v : null);
 
   return new Chart(canvas.getContext('2d'), {
     type: 'line',
@@ -190,7 +163,7 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
       datasets: [
         {
           label: `Planejado \u2014 ${titulo} (%)`,
-          data: planAcum,             // planejado completo — todos os meses
+          data: planAcum,      // planejado completo — todos os meses
           borderColor: '#f59e0b',
           backgroundColor: 'rgba(245,158,11,0.06)',
           borderWidth: 2.5,
@@ -202,7 +175,7 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
         },
         {
           label: 'Executado Real (%)',
-          data: execAcum,             // executado com cauda cortada
+          data: execAcum,      // executado cortado pela âncora do SIMPLES
           borderColor: '#10b981',
           backgroundColor: 'rgba(16,185,129,0.08)',
           borderWidth: 2.5,
@@ -241,9 +214,8 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
 
 /* ============================================================
    CURVA S POR SERVIÇO — gráfico individual
-   ATENÇÃO: buildCurvaServico (state.js) já entrega execAcum
-   com a cauda cortada. NÃO aplicar _cortarExecCauda aqui
-   de novo para evitar duplo corte.
+   execAcum já vem cortado de buildCurvaServico (state.js).
+   NÃO aplicar corte aqui de novo.
    ============================================================ */
 export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnterior) {
   const canvas = $(canvasId); if (!canvas) return prevChart;
@@ -259,7 +231,6 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnte
   const n = labels.length;
   if (!n) return prevChart;
 
-  // execAcum já vem cortado de buildCurvaServico — usa direto
   const temLinhaReal = Array.isArray(execAcum) && execAcum.some(v => v !== null && v > 0);
   let execData;
   let pontoIdx;
@@ -280,7 +251,6 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnte
     : { label: 'Executado Acum. (%)', data: execData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.9)', borderWidth: 0, pointRadius: mobile ? 5 : 7, pointBackgroundColor: '#10b981', pointBorderColor: '#fff', pointBorderWidth: 2, showLine: false, spanGaps: false };
 
   const datasets = [
-    // planAcum: planejado completo, sem corte
     { label: 'Planejado (%)', data: planAcum, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.08)', borderWidth: 2, pointRadius: mobile ? 1.5 : 2.5, pointBackgroundColor: '#f59e0b', tension: 0.35, fill: false },
     execDataset
   ];
@@ -294,10 +264,9 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnte
     const temAntDados = antData.some(v => v !== null && v > 0);
     if (temAntDados) {
       const emissaoAnt = dadosAnterior.emissaoLabel || 'Vers\u00e3o anterior';
-      // antData já vem de dados históricos já processados — aplica corte por repetição
       datasets.splice(1, 0, {
         label: `Exec. anterior (${emissaoAnt})`,
-        data: _cortarExecCauda(antData),
+        data: antData, // já foi cortado quando foi salvo no histórico
         borderColor: dark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.45)',
         backgroundColor: 'transparent',
         borderWidth: 1.5,
