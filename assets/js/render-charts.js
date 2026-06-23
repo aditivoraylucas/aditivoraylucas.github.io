@@ -1,39 +1,26 @@
 import { $, state, esc, money, pct } from './state.js';
 
 /* ============================================================
-   UTILITÁRIO — encontra o índice do último mês com atividade
-   usando o array MENSAL (delta/simples) como referência.
+   UTILITÁRIO — corta a cauda vazia do executado
 
    Regra:
-     - Recebe o array MENSAL (valores por mês, não acumulado).
-     - Percorre do fim para o início buscando o último índice
-       com valor numérico > 0 (ignora null, undefined, 0).
-     - Retorna esse índice + 1 como limite de corte.
-     - Todos os arrays paralelos passados são fatiados até
-       esse limite — mantendo os índices sincronizados.
-     - Buracos NO MEIO (meses com zero rodeados de valores)
-       são preservados intactos.
-     - Se nenhum mês tiver valor > 0, devolve os arrays
-       originais (evita sumir tudo).
+     - Percorre o array de execução acumulado do fim para o início.
+     - Substitui por null todos os valores após o último índice
+       com valor numérico > 0.
+     - Buracos NO MEIO (null/zero entre valores reais) são mantidos.
+     - O planejado NÃO é alterado — exibe todos os meses.
    ============================================================ */
-function _trimCaudaVazia(mensalRef, ...outrosArrays) {
-  const n = mensalRef.length;
-  if (!n) return [mensalRef, ...outrosArrays];
-
-  let ultimoAtivo = -1;
-  for (let i = n - 1; i >= 0; i--) {
-    const v = mensalRef[i];
-    if (v !== null && v !== undefined && Number(v) > 0) {
-      ultimoAtivo = i;
-      break;
-    }
+function _cortarExecCauda(execAcum) {
+  if (!Array.isArray(execAcum) || !execAcum.length) return execAcum;
+  // encontra o último índice com valor real > 0
+  let ultimo = -1;
+  for (let i = execAcum.length - 1; i >= 0; i--) {
+    const v = execAcum[i];
+    if (v !== null && v !== undefined && Number(v) > 0) { ultimo = i; break; }
   }
-
-  // Nenhum mês com valor — devolve como está
-  if (ultimoAtivo < 0) return [mensalRef, ...outrosArrays];
-
-  const limite = ultimoAtivo + 1;
-  return [mensalRef, ...outrosArrays].map(arr => arr.slice(0, limite));
+  if (ultimo < 0) return execAcum.map(() => null); // nada executado — tudo null
+  // substitui tudo após o último valor real por null
+  return execAcum.map((v, i) => i <= ultimo ? v : null);
 }
 
 /* ============================================================
@@ -147,47 +134,33 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
     return new Date(ano, mes - 1, 1).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
   }
 
-  // ── arrays mensais (delta) — usados como referência de corte ──
-  const planMensalRaw = cronograma.map(s => +Number(s?.planejadoPct || 0).toFixed(4));
-
-  // ── arrays acumulados ──
-  const labelsRaw = Array.from({ length: n }, (_, i) => labelMes(i + 1));
-  const planAcumRaw = [];
+  // ── PLANEJADO: todos os meses, sem corte ──────────────────────
+  const labels = Array.from({ length: n }, (_, i) => labelMes(i + 1));
   let acumPlan = 0;
-  for (let i = 0; i < n; i++) {
-    acumPlan += planMensalRaw[i];
-    planAcumRaw.push(+Math.min(acumPlan, 100).toFixed(2));
-  }
+  const planAcum = cronograma.map(s => {
+    acumPlan += +Number(s?.planejadoPct || 0).toFixed(4);
+    return +Math.min(acumPlan, 100).toFixed(2);
+  });
 
-  const execMensalRaw = new Array(n).fill(0);
-  const execAcumRaw  = new Array(n).fill(null);
+  // ── EXECUTADO: acumula e corta a cauda vazia ──────────────────
+  const execAcumRaw = new Array(n).fill(null);
   let acumExec = 0;
   for (let i = 0; i < cronogramaExecucao.length && i < n; i++) {
     const delta = Number(cronogramaExecucao[i]?.executadoPct) || 0;
-    execMensalRaw[i] = delta;
     acumExec += delta;
     execAcumRaw[i] = +Math.min(acumExec, 100).toFixed(2);
   }
-
-  // ── corte pela cauda: referência = array MENSAL planejado ──
-  // Se houver execução além do planejado, também verificamos execMensalRaw
-  // para não cortar meses que já foram executados.
-  const [planMensalTrim, labelsOut, planAcumOut, execAcumOut] =
-    _trimCaudaVazia(planMensalRaw, labelsRaw, planAcumRaw, execAcumRaw);
-
-  // Se a execução tiver dados além do ponto de corte do planejado,
-  // expande o limite para cobrir também os meses executados.
-  // (Caso 1: buraco no meio — os dados de execução do lado de cá do corte
-  //  já estão dentro de execAcumOut; nada extra necessário.)
+  // Corta a cauda: meses sem execução após o último executado viram null
+  const execAcum = _cortarExecCauda(execAcumRaw);
 
   return new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: {
-      labels: labelsOut,
+      labels,
       datasets: [
         {
           label: `Planejado \u2014 ${titulo} (%)`,
-          data: planAcumOut,
+          data: planAcum,
           borderColor: '#f59e0b',
           backgroundColor: 'rgba(245,158,11,0.06)',
           borderWidth: 2.5,
@@ -199,7 +172,7 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
         },
         {
           label: 'Executado Real (%)',
-          data: execAcumOut,
+          data: execAcum,
           borderColor: '#10b981',
           backgroundColor: 'rgba(16,185,129,0.08)',
           borderWidth: 2.5,
@@ -257,7 +230,8 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnte
   let execData;
   let pontoIdx;
   if (temLinhaReal) {
-    execData = execAcum.slice();
+    // Aplica o corte de cauda também nas curvas por serviço
+    execData = _cortarExecCauda(execAcum.slice());
   } else {
     execData = new Array(n).fill(null);
     pontoIdx = Math.min(mesesDecorridos, n - 1);
@@ -288,7 +262,7 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnte
       const emissaoAnt = dadosAnterior.emissaoLabel || 'Vers\u00e3o anterior';
       datasets.splice(1, 0, {
         label: `Exec. anterior (${emissaoAnt})`,
-        data: antData,
+        data: _cortarExecCauda(antData),
         borderColor: dark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.45)',
         backgroundColor: 'transparent',
         borderWidth: 1.5,
