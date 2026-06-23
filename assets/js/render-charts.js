@@ -95,14 +95,10 @@ function _tooltipDesvio(dark) {
 
    Curva S do CONTRATO e do ADITIVO.
 
-   Âncora do executado: último mês onde cronograma[i].planejadoPct > 0
-   (TOTAL SIMPLES). Tudo após esse ponto é cortado da linha verde.
-   Planejado exibe todos os meses sem corte.
-
-   FIX: labels usa labelMes(i) com i de 0..n-1 para que
-        o mês 1 do array corresponda ao mês de início da obra,
-        alinhando com buildCurvaServico em state.js que usa
-        base0 = (iniMes-1) + (m-1).
+   PLANEJADO: exibe todos os meses sem corte.
+   EXECUTADO: cauda final vazia cortada pelo ÚLTIMO MÊS onde
+   cronogramaExecucao[i].executadoPct > 0 (execução real).
+   Buracos no meio são preservados; o corte só acontece na cauda.
    ============================================================ */
 function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecucao, dataInicio, titulo }, prevChart) {
   const canvas = $(canvasId); if (!canvas) return prevChart;
@@ -119,7 +115,6 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
   function labelMes(offset) {
     if (!dataInicio) return `M${offset + 1}`;
     const [iniAno, iniMes] = dataInicio.split('-').map(Number);
-    // offset = 0..n-1 → mesmo cálculo que buildCurvaServico: base0 = (iniMes-1) + (m-1)
     const base0 = (iniMes - 1) + offset;
     const ano   = iniAno + Math.floor(base0 / 12);
     const mes   = (base0 % 12) + 1;
@@ -127,7 +122,6 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
   }
 
   // ── PLANEJADO: todos os meses, sem corte ─────────────────────────────────
-  // i de 0 a n-1 → labelMes(i) alinha com state.js
   const labels = Array.from({ length: n }, (_, i) => labelMes(i));
   let acumPlan = 0;
   const planAcum = cronograma.map(s => {
@@ -135,14 +129,7 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
     return +Math.min(acumPlan, 100).toFixed(2);
   });
 
-  // ── Âncora: último índice onde planejadoPct > 0 (TOTAL SIMPLES) ─────────
-  const simplesPct = cronograma.map(s => Number(s?.planejadoPct) || 0);
-  let limiteExecIdx = 0;
-  for (let i = simplesPct.length - 1; i >= 0; i--) {
-    if (simplesPct[i] > 0) { limiteExecIdx = i; break; }
-  }
-
-  // ── EXECUTADO: acumula → corta pelo limite da âncora ───────────────────
+  // ── EXECUTADO: acumula mês a mês ─────────────────────────────────────────
   const execAcumRaw = new Array(n).fill(null);
   let acumExec = 0;
   const lenExec = Math.min(cronogramaExecucao.length, n);
@@ -151,7 +138,21 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
     acumExec += delta;
     execAcumRaw[i] = +Math.min(acumExec, 100).toFixed(2);
   }
-  const execAcum = execAcumRaw.map((v, i) => i <= limiteExecIdx ? v : null);
+
+  // ── Âncora: último índice com execução real (executadoPct > 0) ──────────
+  // Escaneia do fim para o início. Buracos no meio são preservados.
+  // Só a cauda final vazia é cortada.
+  let ultimoExecIdx = -1;
+  for (let i = lenExec - 1; i >= 0; i--) {
+    if ((Number(cronogramaExecucao[i]?.executadoPct) || 0) > 0) {
+      ultimoExecIdx = i;
+      break;
+    }
+  }
+
+  const execAcum = ultimoExecIdx < 0
+    ? new Array(n).fill(null)                                    // nenhum mês executado
+    : execAcumRaw.map((v, i) => i <= ultimoExecIdx ? v : null); // corta após o último real
 
   return new Chart(canvas.getContext('2d'), {
     type: 'line',
