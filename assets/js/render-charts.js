@@ -3,24 +3,50 @@ import { $, state, esc, money, pct } from './state.js';
 /* ============================================================
    UTILITÁRIO — corta a cauda vazia do executado
 
-   Regra:
-     - Percorre o array de execução acumulado do fim para o início.
-     - Substitui por null todos os valores após o último índice
-       com valor numérico > 0.
-     - Buracos NO MEIO (null/zero entre valores reais) são mantidos.
-     - O planejado NÃO é alterado — exibe todos os meses.
+   Lógica de REPETIÇÃO DO ACUMULADO (mais robusta que > 0):
+     - Percorre do fim para o início.
+     - Enquanto o valor for igual ao anterior (acumulado parou
+       de crescer) E essa repetição se estende até o último
+       elemento → é cauda vazia → vira null.
+     - Para quando encontra um valor que CRESCEU em relação
+       ao seguinte → esse é o último mês real.
+     - Buracos NO MEIO são preservados: a repetição só é
+       considerada "cauda" se persistir até o fim do array.
+     - Planejado NUNCA é passado aqui — exibe todos os meses.
    ============================================================ */
-function _cortarExecCauda(execAcum) {
-  if (!Array.isArray(execAcum) || !execAcum.length) return execAcum;
-  // encontra o último índice com valor real > 0
-  let ultimo = -1;
-  for (let i = execAcum.length - 1; i >= 0; i--) {
-    const v = execAcum[i];
-    if (v !== null && v !== undefined && Number(v) > 0) { ultimo = i; break; }
+function _cortarExecCauda(arr) {
+  if (!Array.isArray(arr) || arr.length === 0) return arr;
+
+  const out = arr.slice();
+  const n   = out.length;
+
+  // Encontra o índice do último valor não-nulo
+  let ultimoReal = -1;
+  for (let i = n - 1; i >= 0; i--) {
+    if (out[i] !== null && out[i] !== undefined) { ultimoReal = i; break; }
   }
-  if (ultimo < 0) return execAcum.map(() => null); // nada executado — tudo null
-  // substitui tudo após o último valor real por null
-  return execAcum.map((v, i) => i <= ultimo ? v : null);
+  if (ultimoReal < 0) return out; // tudo null → devolve como está
+
+  // Percorre da cauda para o início:
+  // Enquanto o valor atual === valor do próximo (acumulado repetindo),
+  // substitui por null — pois o cronograma parou.
+  // Para quando o valor cresce (mês com execução real).
+  let corte = ultimoReal; // índice do último mês a manter
+  for (let i = ultimoReal; i > 0; i--) {
+    const curr = out[i];
+    const prev = out[i - 1];
+    if (curr === prev || (curr !== null && prev !== null && Math.abs(Number(curr) - Number(prev)) < 0.001)) {
+      // acumulado repetiu → candidato a corte
+      corte = i - 1;
+    } else {
+      // acumulado cresceu → este é o limite real
+      break;
+    }
+  }
+
+  // Anula tudo após o índice de corte
+  for (let i = corte + 1; i < n; i++) out[i] = null;
+  return out;
 }
 
 /* ============================================================
@@ -134,7 +160,7 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
     return new Date(ano, mes - 1, 1).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
   }
 
-  // ── PLANEJADO: todos os meses, sem corte ──────────────────────
+  // ── PLANEJADO: todos os meses, sem corte algum ───────────────
   const labels = Array.from({ length: n }, (_, i) => labelMes(i + 1));
   let acumPlan = 0;
   const planAcum = cronograma.map(s => {
@@ -142,15 +168,19 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
     return +Math.min(acumPlan, 100).toFixed(2);
   });
 
-  // ── EXECUTADO: acumula e corta a cauda vazia ──────────────────
+  // ── EXECUTADO: acumula → corta cauda por repetição ──────────
+  // Só preenche o índice se o acumulado cresceu (delta > 0).
+  // Meses com delta = 0 ficam com o mesmo valor acumulado do anterior,
+  // o que a lógica de repetição detecta e anula na cauda.
   const execAcumRaw = new Array(n).fill(null);
   let acumExec = 0;
-  for (let i = 0; i < cronogramaExecucao.length && i < n; i++) {
+  const lenExec = Math.min(cronogramaExecucao.length, n);
+  for (let i = 0; i < lenExec; i++) {
     const delta = Number(cronogramaExecucao[i]?.executadoPct) || 0;
     acumExec += delta;
     execAcumRaw[i] = +Math.min(acumExec, 100).toFixed(2);
   }
-  // Corta a cauda: meses sem execução após o último executado viram null
+  // Aplica corte por repetição — só no executado
   const execAcum = _cortarExecCauda(execAcumRaw);
 
   return new Chart(canvas.getContext('2d'), {
@@ -160,7 +190,7 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
       datasets: [
         {
           label: `Planejado \u2014 ${titulo} (%)`,
-          data: planAcum,
+          data: planAcum,             // planejado completo — todos os meses
           borderColor: '#f59e0b',
           backgroundColor: 'rgba(245,158,11,0.06)',
           borderWidth: 2.5,
@@ -172,7 +202,7 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
         },
         {
           label: 'Executado Real (%)',
-          data: execAcum,
+          data: execAcum,             // executado com cauda cortada
           borderColor: '#10b981',
           backgroundColor: 'rgba(16,185,129,0.08)',
           borderWidth: 2.5,
@@ -211,6 +241,9 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
 
 /* ============================================================
    CURVA S POR SERVIÇO — gráfico individual
+   ATENÇÃO: buildCurvaServico (state.js) já entrega execAcum
+   com a cauda cortada. NÃO aplicar _cortarExecCauda aqui
+   de novo para evitar duplo corte.
    ============================================================ */
 export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnterior) {
   const canvas = $(canvasId); if (!canvas) return prevChart;
@@ -226,12 +259,12 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnte
   const n = labels.length;
   if (!n) return prevChart;
 
+  // execAcum já vem cortado de buildCurvaServico — usa direto
   const temLinhaReal = Array.isArray(execAcum) && execAcum.some(v => v !== null && v > 0);
   let execData;
   let pontoIdx;
   if (temLinhaReal) {
-    // Aplica o corte de cauda também nas curvas por serviço
-    execData = _cortarExecCauda(execAcum.slice());
+    execData = execAcum; // já cortado em state.js — sem duplo corte
   } else {
     execData = new Array(n).fill(null);
     pontoIdx = Math.min(mesesDecorridos, n - 1);
@@ -247,6 +280,7 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnte
     : { label: 'Executado Acum. (%)', data: execData, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.9)', borderWidth: 0, pointRadius: mobile ? 5 : 7, pointBackgroundColor: '#10b981', pointBorderColor: '#fff', pointBorderWidth: 2, showLine: false, spanGaps: false };
 
   const datasets = [
+    // planAcum: planejado completo, sem corte
     { label: 'Planejado (%)', data: planAcum, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.08)', borderWidth: 2, pointRadius: mobile ? 1.5 : 2.5, pointBackgroundColor: '#f59e0b', tension: 0.35, fill: false },
     execDataset
   ];
@@ -260,6 +294,7 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnte
     const temAntDados = antData.some(v => v !== null && v > 0);
     if (temAntDados) {
       const emissaoAnt = dadosAnterior.emissaoLabel || 'Vers\u00e3o anterior';
+      // antData já vem de dados históricos já processados — aplica corte por repetição
       datasets.splice(1, 0, {
         label: `Exec. anterior (${emissaoAnt})`,
         data: _cortarExecCauda(antData),
