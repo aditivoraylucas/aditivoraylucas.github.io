@@ -98,6 +98,11 @@ function _tooltipDesvio(dark) {
    Âncora do executado: último mês onde cronograma[i].planejadoPct > 0
    (TOTAL SIMPLES). Tudo após esse ponto é cortado da linha verde.
    Planejado exibe todos os meses sem corte.
+
+   FIX: labels usa labelMes(i) com i de 0..n-1 para que
+        o mês 1 do array corresponda ao mês de início da obra,
+        alinhando com buildCurvaServico em state.js que usa
+        base0 = (iniMes-1) + (m-1).
    ============================================================ */
 function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecucao, dataInicio, titulo }, prevChart) {
   const canvas = $(canvasId); if (!canvas) return prevChart;
@@ -112,8 +117,9 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
   if (!n) return prevChart;
 
   function labelMes(offset) {
-    if (!dataInicio) return `M${offset}`;
+    if (!dataInicio) return `M${offset + 1}`;
     const [iniAno, iniMes] = dataInicio.split('-').map(Number);
+    // offset = 0..n-1 → mesmo cálculo que buildCurvaServico: base0 = (iniMes-1) + (m-1)
     const base0 = (iniMes - 1) + offset;
     const ano   = iniAno + Math.floor(base0 / 12);
     const mes   = (base0 % 12) + 1;
@@ -121,7 +127,8 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
   }
 
   // ── PLANEJADO: todos os meses, sem corte ─────────────────────────────────
-  const labels = Array.from({ length: n }, (_, i) => labelMes(i + 1));
+  // i de 0 a n-1 → labelMes(i) alinha com state.js
+  const labels = Array.from({ length: n }, (_, i) => labelMes(i));
   let acumPlan = 0;
   const planAcum = cronograma.map(s => {
     acumPlan += +Number(s?.planejadoPct || 0).toFixed(4);
@@ -129,21 +136,13 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
   });
 
   // ── Âncora: último índice onde planejadoPct > 0 (TOTAL SIMPLES) ─────────
-  // simplesPct[i] = planejadoPct do mês i+1 no cronograma
   const simplesPct = cronograma.map(s => Number(s?.planejadoPct) || 0);
-
-  // Encontra o último mês com planejadoPct > 0
   let limiteExecIdx = 0;
   for (let i = simplesPct.length - 1; i >= 0; i--) {
-    if (simplesPct[i] > 0) {
-      limiteExecIdx = i; // índice no array do cronograma (0-based) = índice no gráfico
-      break;
-    }
+    if (simplesPct[i] > 0) { limiteExecIdx = i; break; }
   }
 
   // ── EXECUTADO: acumula → corta pelo limite da âncora ───────────────────
-  // Note: neste gráfico não há ponto de origem (Mês 0),
-  // o array começa diretamente no mês 1 — mesmo comprimento que cronograma.
   const execAcumRaw = new Array(n).fill(null);
   let acumExec = 0;
   const lenExec = Math.min(cronogramaExecucao.length, n);
@@ -152,8 +151,6 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
     acumExec += delta;
     execAcumRaw[i] = +Math.min(acumExec, 100).toFixed(2);
   }
-
-  // Aplica o corte pela âncora: anula tudo após limiteExecIdx
   const execAcum = execAcumRaw.map((v, i) => i <= limiteExecIdx ? v : null);
 
   return new Chart(canvas.getContext('2d'), {
@@ -163,7 +160,7 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
       datasets: [
         {
           label: `Planejado \u2014 ${titulo} (%)`,
-          data: planAcum,      // planejado completo — todos os meses
+          data: planAcum,
           borderColor: '#f59e0b',
           backgroundColor: 'rgba(245,158,11,0.06)',
           borderWidth: 2.5,
@@ -175,7 +172,7 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
         },
         {
           label: 'Executado Real (%)',
-          data: execAcum,      // executado cortado pela âncora do SIMPLES
+          data: execAcum,
           borderColor: '#10b981',
           backgroundColor: 'rgba(16,185,129,0.08)',
           borderWidth: 2.5,
@@ -235,7 +232,7 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnte
   let execData;
   let pontoIdx;
   if (temLinhaReal) {
-    execData = execAcum; // já cortado em state.js — sem duplo corte
+    execData = execAcum;
   } else {
     execData = new Array(n).fill(null);
     pontoIdx = Math.min(mesesDecorridos, n - 1);
@@ -266,7 +263,7 @@ export function renderCurvaServico(canvasId, wrapId, dados, prevChart, dadosAnte
       const emissaoAnt = dadosAnterior.emissaoLabel || 'Vers\u00e3o anterior';
       datasets.splice(1, 0, {
         label: `Exec. anterior (${emissaoAnt})`,
-        data: antData, // já foi cortado quando foi salvo no histórico
+        data: antData,
         borderColor: dark ? 'rgba(148,163,184,0.55)' : 'rgba(100,116,139,0.45)',
         backgroundColor: 'transparent',
         borderWidth: 1.5,
