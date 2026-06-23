@@ -90,6 +90,36 @@ export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
   return result;
 }
 
+/* ── UTILITÁRIO — corta a cauda de meses vazios no final dos arrays ──────────
+ * Recebe N arrays paralelos (mesmo tamanho) e um array de referência.
+ * Encontra o índice do último elemento com valor > 0 em QUALQUER dos arrays.
+ * Todos os arrays são fatiados até esse índice (inclusive).
+ * Buracos no meio (zeros/nulls rodeados de valores) são mantidos intactos.
+ * Se nenhum valor for encontrado, devolve os arrays originais.
+ * ----------------------------------------------------------------------------
+ * Nota: o índice 0 é o ponto de origem "Mês 0" e deve sempre ser mantido,
+ * por isso o limite mínimo após o corte é índice 0 (o array nunca fica vazio).
+ */
+function _trimCaudaVaziaArrays(...arrays) {
+  if (!arrays.length) return arrays;
+  const n = arrays[0].length;
+  if (!n) return arrays;
+
+  let ultimoPreenchido = 0; // mínimo: mantém ao menos o ponto de origem
+  for (const arr of arrays) {
+    for (let i = n - 1; i > ultimoPreenchido; i--) {
+      const v = arr[i];
+      if (v !== null && v !== undefined && Number(v) > 0) {
+        ultimoPreenchido = i;
+        break;
+      }
+    }
+  }
+
+  const limite = ultimoPreenchido + 1;
+  return arrays.map(arr => arr.slice(0, limite));
+}
+
 /* ── Curva S por Serviço ───────────────────────────────────────────────────────
  * Índice 0 de todos os arrays = "Mês 0" (ponto de origem zerado).
  * mesesDecorridos limitado a totalMeses para não gerar labels além do cronograma.
@@ -184,6 +214,36 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     }
   }
 
+  // ── Corta a cauda vazia do cronograma planejado ──────────────────────────
+  // Detecta o último mês que possui valor planejado > 0 (ou executado > 0).
+  // Todos os arrays são truncados para esse comprimento.
+  // O índice 0 ("Mês 0") é sempre preservado (limite mínimo = 0).
+  // Arrays paralelos são cortados juntos para manter os índices sincronizados.
+  const [
+    labelsTrim,
+    planMensalTrim,
+    planAcumTrim,
+    planValorMensalTrim,
+    planValorAcumTrim,
+    execMensalTrim,
+    execAcumTrim,
+    execValorMensalTrim,
+    execValorAcumTrim
+  ] = _trimCaudaVaziaArrays(
+    labels,
+    planMensal,
+    planAcum,
+    planValorMensal,
+    planValorAcum,
+    execMensal,
+    execAcum,
+    execValorMensal,
+    execValorAcum
+  );
+
+  // mesAtualIdx pode ter ficado além do novo limite após o corte — clamp
+  const mesAtualIdxTrim = Math.min(mesAtualIdx, labelsTrim.length - 1);
+
   let execAcumPctFinal   = acumExecPct;
   let execAcumValorFinal = acumExecValor;
   if (!temExecucaoMensal) {
@@ -206,6 +266,7 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
 
   const pesoTotal = +Number(itemCronograma.pesoTotal || 0).toFixed(4);
 
+  // planAteAgora usa os dados originais (antes do corte) para o cálculo de status
   const planAteAgora = planAcum[mesAtualIdx] || 0;
   let status = 'nao_iniciado';
   if (planAteAgora > 0 || execAcumPctFinal > 0) {
@@ -218,6 +279,7 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     }
   }
 
+  // anomalias também usam os dados originais (planMensal/execMensal completos)
   const anomalias = detectarAnomaliaServico({
     planMensal,
     execMensal,
@@ -230,22 +292,22 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
   return {
     descricao:       itemCronograma.descricao || `Serviço ${itemCronograma.item}`,
     item:            itemCronograma.item,
-    labels,
-    planMensal,
-    planAcum,
-    planValorMensal,
-    planValorAcum,
-    execMensal,
-    execAcum,
-    execValorMensal,
-    execValorAcum,
-    execAcumPct:   execAcumPctFinal,
-    execAcumValor: execAcumValorFinal,
+    labels:          labelsTrim,
+    planMensal:      planMensalTrim,
+    planAcum:        planAcumTrim,
+    planValorMensal: planValorMensalTrim,
+    planValorAcum:   planValorAcumTrim,
+    execMensal:      execMensalTrim,
+    execAcum:        execAcumTrim,
+    execValorMensal: execValorMensalTrim,
+    execValorAcum:   execValorAcumTrim,
+    execAcumPct:     execAcumPctFinal,
+    execAcumValor:   execAcumValorFinal,
     valorContrato,
     pesoTotal,
     status,
     anomalias,
-    mesAtualIdx,
+    mesAtualIdx:     mesAtualIdxTrim,
     mesesDecorridos
   };
 }

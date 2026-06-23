@@ -1,6 +1,44 @@
 import { $, state, esc, money, pct } from './state.js';
 
 /* ============================================================
+   UTILITÁRIO — corta a cauda de meses vazios no final do array
+   Regra:
+     - Percorre do fim para o início procurando o último índice
+       com valor > 0 (não nulo, não undefined).
+     - Todos os elementos APÓS esse índice são removidos.
+     - Buracos NO MEIO (zeros rodeados de valores) são mantidos.
+     - Se todos os valores forem zero/nulo, retorna o array original
+       (melhor mostrar do que ocultar completamente).
+   Aceita múltiplos arrays do mesmo tamanho (ex: labels + planData +
+   execData) e os corta todos para o mesmo comprimento.
+   ============================================================ */
+function _trimCaudaVazia(...arrays) {
+  if (!arrays.length) return arrays;
+  const ref = arrays[0];
+  const n   = ref.length;
+  if (!n) return arrays;
+
+  // Considera "preenchido" qualquer valor que seja número > 0
+  // (null, undefined, 0 são tratados como vazio)
+  let ultimoPreenchido = -1;
+  for (let arr of arrays) {
+    for (let i = n - 1; i >= 0; i--) {
+      const v = arr[i];
+      if (v !== null && v !== undefined && Number(v) > 0) {
+        if (i > ultimoPreenchido) ultimoPreenchido = i;
+        break; // encontrou o último valor deste array; avança pro próximo
+      }
+    }
+  }
+
+  // Se não encontrou nenhum valor, devolve como está
+  if (ultimoPreenchido < 0) return arrays;
+
+  const limite = ultimoPreenchido + 1;
+  return arrays.map(arr => arr.slice(0, limite));
+}
+
+/* ============================================================
    CURVA S1 — Índice de Itens (barras)
    ============================================================ */
 export function renderCurvaS1(canvasId, wrapId, itens, prevChart) {
@@ -111,19 +149,25 @@ function _renderCurvaS2Generica(canvasId, wrapId, { cronograma, cronogramaExecuc
     return new Date(ano, mes - 1, 1).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
   }
 
-  const labels   = Array.from({ length: n }, (_, i) => labelMes(i + 1));
-  const planData = [];
-  let acumPlan   = 0;
+  // ── monta arrays brutos ──
+  const labelsRaw = Array.from({ length: n }, (_, i) => labelMes(i + 1));
+  const planRaw   = [];
+  let acumPlan    = 0;
   for (let i = 0; i < n; i++) {
     acumPlan += Number(cronograma[i]?.planejadoPct) || 0;
-    planData.push(+Math.min(acumPlan, 100).toFixed(2));
+    planRaw.push(+Math.min(acumPlan, 100).toFixed(2));
   }
-  const execData = new Array(n).fill(null);
-  let acumExec   = 0;
+  const execRaw = new Array(n).fill(null);
+  let acumExec  = 0;
   for (let i = 0; i < cronogramaExecucao.length && i < n; i++) {
     acumExec += Number(cronogramaExecucao[i]?.executadoPct) || 0;
-    execData[i] = +Math.min(acumExec, 100).toFixed(2);
+    execRaw[i] = +Math.min(acumExec, 100).toFixed(2);
   }
+
+  // ── corta cauda vazia do cronograma planejado ──
+  // A execução pode ser menor; usamos planRaw como referência primária
+  // mas também verificamos execRaw para não cortar meses já executados.
+  const [labels, planData, execData] = _trimCaudaVazia(labelsRaw, planRaw, execRaw);
 
   return new Chart(canvas.getContext('2d'), {
     type: 'line',
