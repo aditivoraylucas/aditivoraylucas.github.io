@@ -89,64 +89,12 @@ export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
   return result;
 }
 
-/* ───────────────────────────────────────────────────────────────────────────────
-   UTILITÁRIO: _cortarExecCauda
-
-   Ancora a linha do EXECUTADO no último mês onde a linha SIMPLES
-   (planejadoPct > 0) tem valor. Isso elimina de forma determinista
-   a cauda vazia — mêses em branco no final do cronograma.
-
-   Parâmetros:
-     execAcum   — array de percentuais acumulados do executado (número|null)
-                  Índice 0 = "Mês 0" (origem), índice i = mês i do cronograma.
-     simplesPct — array paralelo ao cronograma com o planejadoPct de cada mês
-                  (linha TOTAL SIMPLES). Quando o valor é > 0, o mês tem
-                  serviço planejado. Índice i corresponde ao mês i+1
-                  (porque execAcum[0] = origem, execAcum[1] = mês 1, etc.).
-
-   Comportamento:
-     1. Encontra o último mês onde simplesPct > 0  ← âncora
-     2. Todos os pontos do execAcum após esse índice viram null
-     3. Buracos NO MEIO (mês com simplesPct=0 entre dois meses com valor)
-        não são afetados — só a cauda é cortada.
-     4. PLANEJADO nunca passa por aqui — exibe todos os meses.
-   ────────────────────────────────────────────────────────────────────────────── */
-function _cortarExecCauda(execAcum, simplesPct) {
-  if (!Array.isArray(execAcum) || execAcum.length === 0) return execAcum;
-
-  const out = execAcum.slice();
-  const n   = out.length; // inclui o ponto de origem (índice 0)
-
-  // simplesPct[i] corresponde ao mês i+1, ou seja execAcum[índice i+1]
-  // Precisamos do último índice em execAcum onde o mês tinha planejadoPct>0
-  let limiteIdx = 0; // mínimo: deixa pelo menos a origem
-
-  if (Array.isArray(simplesPct) && simplesPct.length > 0) {
-    // Percorre de trás para frente: acha o último mês com planejadoPct > 0
-    for (let i = simplesPct.length - 1; i >= 0; i--) {
-      if (Number(simplesPct[i]) > 0) {
-        // simplesPct[i] é o mês i+1 → índice i+1 no execAcum
-        limiteIdx = Math.min(i + 1, n - 1);
-        break;
-      }
-    }
-  } else {
-    // Fallback sem âncora: mantém o último não-nulo
-    for (let i = n - 1; i >= 0; i--) {
-      if (out[i] !== null && out[i] !== undefined) { limiteIdx = i; break; }
-    }
-  }
-
-  // Anula tudo após o limite
-  for (let i = limiteIdx + 1; i < n; i++) out[i] = null;
-  return out;
-}
-
-/* ── Curva S por Serviço ───────────────────────────────────────────────────
+/* ── Curva S por Serviço ───────────────────────────────────────────────────────────────
  * Índice 0 = "Mês 0" (ponto de origem zerado).
- * A âncora do corte é o último mês com pct > 0 na linha do próprio item
- * (meses[].pct), que é o equivalente ao TOTAL SIMPLES para o serviço.
- * O planejado (planAcum) é devolvido completo, sem corte.
+ * PLANEJADO (planAcum) é devolvido completo, sem nenhum corte.
+ * EXECUTADO: a cauda final vazia é cortada com base no último mês
+ * em que houve execução real do próprio item (pct > 0 OU valor > 0).
+ * Buracos no meio (item pausa e retorna depois) são preservados.
  */
 export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, totalMeses, dataEmissaoObra, itemCronogramaExecucao) {
   if (!dataInicio || !itemCronograma) return null;
@@ -171,13 +119,6 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
   const mesesItem = Array.isArray(itemCronograma.meses) ? itemCronograma.meses : [];
   const planMap   = {};
   mesesItem.forEach(m => { planMap[m.mes] = m; });
-
-  // Âncora do item: pct planejado de cada mês deste serviço
-  // simplesPct[i] = planejadoPct do mês i+1 (igual ao TOTAL SIMPLES mas por item)
-  const itemSimplesPct = Array.from({ length: totalMeses }, (_, i) => {
-    const slot = planMap[i + 1];
-    return slot ? (Number(slot.pct) || 0) : 0;
-  });
 
   const mesesExec = Array.isArray(itemCronogramaExecucao?.meses) ? itemCronogramaExecucao.meses : [];
   const execMap   = {};
@@ -238,17 +179,20 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     }
   }
 
-  // ── Corte da cauda: ancora no último mês com pct>0 do próprio item ──────
-  // planAcum NÃO é alterado — exibe todos os meses.
-  const execAcumFinal = _cortarExecCauda(execAcumRaw, itemSimplesPct);
-
-  // Índice do último ponto válido após o corte
+  // ── Corte da cauda do EXECUTADO ───────────────────────────────────────────
+  // Escaneia TODA a linha do item (do último para o primeiro).
+  // Corta apenas após o último mês com execução real (pct > 0 ou valor > 0).
+  // Buracos no meio (item pausa e retorna no mês 17, p.ex.) são preservados.
+  // PLANEJADO não é alterado.
   let ultimoExecIdx = 0;
-  for (let i = execAcumFinal.length - 1; i >= 0; i--) {
-    if (execAcumFinal[i] !== null) { ultimoExecIdx = i; break; }
+  for (let i = execMensalRaw.length - 1; i >= 1; i--) {
+    if ((Number(execMensalRaw[i]) || 0) > 0 || (Number(execValorMensalRaw[i]) || 0) > 0) {
+      ultimoExecIdx = i;
+      break;
+    }
   }
 
-  // Aplica o mesmo limite nos arrays auxiliares
+  const execAcumFinal        = execAcumRaw.map((v, i)        => i <= ultimoExecIdx ? v : null);
   const execMensalFinal      = execMensalRaw.map((v, i)      => i <= ultimoExecIdx ? v : null);
   const execValorAcumFinal   = execValorAcumRaw.map((v, i)   => i <= ultimoExecIdx ? v : null);
   const execValorMensalFinal = execValorMensalRaw.map((v, i) => i <= ultimoExecIdx ? v : null);
@@ -308,7 +252,7 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     planValorMensal,
     planValorAcum,
     execMensal:      execMensalFinal,
-    execAcum:        execAcumFinal,  // EXECUTADO com cauda cortada pela âncora
+    execAcum:        execAcumFinal,  // EXECUTADO com cauda cortada pelo último mês real
     execValorMensal: execValorMensalFinal,
     execValorAcum:   execValorAcumFinal,
     execAcumPct:     execAcumPctFinal,
@@ -322,7 +266,7 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
   };
 }
 
-/* ── detectarAnomaliaServico ───────────────────────────────────────────── */
+/* ── detectarAnomaliaServico ─────────────────────────────────────────────────── */
 const THRESHOLD_ADIANTADO = 15;
 
 export function detectarAnomaliaServico({ planMensal, execMensal, execAcumPctFinal, planAteAgora, mesesDecorridos, totalMeses }) {
