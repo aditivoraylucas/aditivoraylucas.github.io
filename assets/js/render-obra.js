@@ -3,13 +3,19 @@ import { setObraIdNaUrl } from './url-state.js';
 import { currentObra } from './obra-service.js';
 import { renderCurvaS1, renderCurvaS2, renderCurvaS2Aditivo } from './render-charts.js';
 import { renderCurvasPorServico } from './render-servicos.js';
-import { renderObrasBox, setImportFileFnObras } from './render-obras.js';
-import { registerObraContext } from './obra-context.js';
+import { setImportFileFnObras, renderCronogramaBox, renderCronogramaMensalBox, renderAditivosSection } from './render-obras.js';
+import { registerObraContext, renderObrasBox } from './obra-context.js';
 
 /**
- * render-obra.js — renderização da obra ativa: tabela de itens, dashboard e Curvas S.
- * Registra applySelected, renderAll e updateDashboard no obra-context.js
- * para que render-obras.js possa usá-las sem importar este arquivo diretamente.
+ * render-obra.js — renderização da obra ativa: tabela, dashboard e Curvas S.
+ *
+ * Importa render-obras.js apenas para funções que NÃO criam ciclo:
+ *   setImportFileFnObras, renderCronogramaBox, renderCronogramaMensalBox, renderAditivosSection.
+ * renderObrasBox é obtido via obra-context.js (injetado por render-obras.js),
+ *   evitando o ciclo: render-obra -> render-obras -> obra-context -> render-obra.
+ *
+ * Registra applySelected, renderAll e updateDashboard no obra-context
+ *   para que render-obras.js possa usá-las sem importar este arquivo.
  */
 
 // ── Helpers de data ──
@@ -241,5 +247,7 @@ export function renderAll() { renderObrasBox(); renderTable(); updateDashboard()
 // ── setImportFileFn ──
 export function setImportFileFn(fn) { setImportFileFnObras(fn); }
 
-// ── Registra as funções no obra-context para render-obras.js usar sem ciclo ──
+// ── Registra funções no obra-context para render-obras.js usar sem ciclo ──
+// DEVE ser a última linha do módulo — garante que todas as funções acima
+// já foram declaradas antes do registro.
 registerObraContext({ applySelected, renderAll, updateDashboard });
