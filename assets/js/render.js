@@ -1,39 +1,22 @@
 import { $, state, esc, money, pct, calcPctGeral, showToast } from './state.js';
-import { db } from './firebase.js';
 import { registrarEvento } from './auditoria.js';
 import { setObraIdNaUrl, limparObraIdDaUrl } from './url-state.js';
-import { doc, setDoc, updateDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
 import { renderCurvaS1, renderCurvaS2, renderCurvaS2Aditivo } from './render-charts.js';
 import { renderCurvasPorServico } from './render-servicos.js';
 import { renderAdminStats, renderAdminSidebar, renderColabList, renderAdminDetail, renderAdminViews, adminObraCardHTML } from './render-admin.js';
 import { renderObrasBox, renderCronogramaBox, renderCronogramaMensalBox, renderAditivosSection, setImportFileFnObras } from './render-obras.js';
+
+// ── Fase 1: saveObra, deleteObra, scheduleSave, currentObra
+// agora vivem em obra-service.js. Re-exportados aqui para
+// não quebrar nenhum consumidor existente.
+export { saveObra, deleteObra, scheduleSave, currentObra } from './obra-service.js';
+import { currentObra } from './obra-service.js';
 
 export { renderCurvaS1, renderCurvaS2, renderCurvaS2Aditivo };
 export { renderAdminStats, renderAdminSidebar, renderColabList, renderAdminDetail, renderAdminViews, adminObraCardHTML };
 export { renderCurvasPorServico };
 export { renderObrasBox, renderCronogramaBox, renderCronogramaMensalBox, renderAditivosSection };
 
-export async function saveObra(obra){
-  if(!state.user?.uid) return;
-  await setDoc(doc(db,'users',state.user.uid,'obras',obra.id),obra);
-}
-export async function deleteObra(id){
-  if(!state.user?.uid) return;
-  const obraRef=doc(db,'users',state.user.uid,'obras',id);
-  const snapshot=state.obras.find(o=>o.id===id)??null;
-  await updateDoc(obraRef,{deletedAt:serverTimestamp()});
-  await registrarEvento({uid:state.user.uid,entidade:'obras',docId:id,acao:'OBRA_REMOVIDA',snapshotAntes:snapshot});
-}
-export function scheduleSave(){
-  clearTimeout(state.saveTimer);
-  state.saveTimer=setTimeout(async()=>{
-    const o=currentObra();
-    if(o){ o.itens=state.rows; await saveObra(o); }
-  },1200);
-}
-export function currentObra(){
-  return state.obras.find(o=>o.id===state.selectedObraId);
-}
 export function applySelected(o){
   state.rows=Array.isArray(o.itens)?o.itens:[];
   const pn=$('projName');       if(pn) pn.value=o.nomeProjeto||o.nome||'Nova obra';
@@ -109,13 +92,11 @@ export function renderAditivosCurvas(){
   });
 }
 
-/* ── Curvas S por Servico: monta fontes e seletor ── */
 function _buildFontesServico(o) {
   const fontes = [];
   const aditivos = Array.isArray(o?.aditivos) ? o.aditivos : [];
   const nContrato = Array.isArray(o?.cronograma) ? o.cronograma.length : 0;
 
-  // Fonte 0: contrato inicial
   const itensCronoContrato = Array.isArray(o?.cronogramaItens) ? o.cronogramaItens : [];
   if (itensCronoContrato.length && nContrato && o?.dataInicio) {
     fontes.push({
@@ -130,12 +111,10 @@ function _buildFontesServico(o) {
     });
   }
 
-  // Fontes 1..N: aditivos com cronogramaItens
   let dataInicioBase = calcDataInicioProximo(o?.dataInicio, nContrato);
   aditivos.forEach((ad, adIdx) => {
     const dataInicioAd = dataInicioBase;
     const totalMesesAd = Array.isArray(ad.cronograma) ? ad.cronograma.length : 0;
-    // avanca sempre para manter cadeia de datas correta
     dataInicioBase = calcDataInicioProximo(dataInicioBase, totalMesesAd) || dataInicioBase;
 
     const itensCronoAd = Array.isArray(ad?.cronogramaItens) ? ad.cronogramaItens : [];
@@ -173,7 +152,6 @@ export function renderCurvasPorServicoPanel(o, prefix) {
     (temMensal ? ' \u2022 Real m\u00eas a m\u00eas' : '') +
     (fontes.length > 1 ? ` \u2022 ${fontes.length - 1} aditivo(s)` : '');
 
-  // seletor de fonte (so aparece se houver mais de 1 fonte)
   let seletorEl = $(`${prefix}_fonte_seletor`);
   if (!seletorEl) {
     seletorEl = document.createElement('div');
@@ -196,7 +174,6 @@ export function renderCurvasPorServicoPanel(o, prefix) {
     seletorEl.style.display = 'none';
   }
 
-  // expoe funcao de troca para o onclick inline
   window._trocarFonteServico = (idx) => {
     state[`${prefix}_fonteAtiva`] = idx;
     const sel = $(`${prefix}_fonte_seletor`);
@@ -209,7 +186,6 @@ export function renderCurvasPorServicoPanel(o, prefix) {
     renderCurvasPorServico('curvasPorServicoContainer', fontes[idx], `${prefix}_f${idx}`);
   };
 
-  // garante que o indice ativo e valido para o conjunto atual de fontes
   const savedIdx = state[`${prefix}_fonteAtiva`] ?? 0;
   const idxAtivo = savedIdx < fontes.length ? savedIdx : 0;
   state[`${prefix}_fonteAtiva`] = idxAtivo;
