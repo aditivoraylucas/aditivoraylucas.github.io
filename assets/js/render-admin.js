@@ -26,34 +26,107 @@ function calcDataInicioProximo(dataInicio, totalMeses) {
 }
 
 /**
- * Monta a "fonte" para renderCurvasPorServico a partir de uma obra.
- * tipo = 'contrato' | 'mensal'
+ * Cópia EXATA de _buildFontesServico de render-obra.js.
+ * Retorna array de fontes (contrato + aditivos) para renderCurvasPorServico.
  */
-function _buildFonteServico(obra, tipo) {
-  const itensCrono     = tipo === 'mensal'
-    ? (Array.isArray(obra.cronogramaItensExecucao) ? obra.cronogramaItensExecucao : [])
-    : (Array.isArray(obra.cronogramaItens)         ? obra.cronogramaItens         : []);
-  if (!itensCrono.length) return null;
-  const totalMeses     = tipo === 'mensal'
-    ? (Array.isArray(obra.cronogramaExecucao) ? obra.cronogramaExecucao.length : 0)
-    : (Array.isArray(obra.cronograma)         ? obra.cronograma.length         : 0);
-  if (!totalMeses || !obra.dataInicio) return null;
-  const itensExecMensal = tipo === 'mensal'
-    ? (Array.isArray(obra.cronogramaItensExecucao) ? obra.cronogramaItensExecucao : [])
-    : [];
-  const itensExecucao   = Array.isArray(obra.itens) ? obra.itens : [];
-  const dataEmissaoRef  = tipo === 'mensal'
-    ? (obra.dataEmissaoExecucao || obra.dataEmissao || null)
-    : (obra.dataEmissao || null);
-  return {
-    itensCrono,
-    itensExecMensal,
-    itensExecucao,
-    totalMeses,
-    dataInicio:       obra.dataInicio,
-    dataEmissaoRef,
-    historicoExecucao: Array.isArray(obra.historicoExecucao) ? obra.historicoExecucao : []
+function _buildFontesServico(o) {
+  const fontes = [];
+  const aditivos   = Array.isArray(o?.aditivos)       ? o.aditivos       : [];
+  const nContrato  = Array.isArray(o?.cronograma)     ? o.cronograma.length : 0;
+  const itensCronoContrato = Array.isArray(o?.cronogramaItens) ? o.cronogramaItens : [];
+  if (itensCronoContrato.length && nContrato && o?.dataInicio) {
+    fontes.push({
+      label:             '\u{1F4CB} Contrato inicial',
+      itensCrono:        itensCronoContrato,
+      itensExecMensal:   Array.isArray(o?.cronogramaItensExecucao) ? o.cronogramaItensExecucao : [],
+      itensExecucao:     Array.isArray(o?.itens) ? o.itens : [],
+      totalMeses:        nContrato,
+      dataInicio:        o.dataInicio,
+      dataEmissaoRef:    o?.dataEmissaoExecucao || o?.dataEmissao || null,
+      historicoExecucao: Array.isArray(o?.historicoExecucao) ? o.historicoExecucao : []
+    });
+  }
+  let dataInicioBase = calcDataInicioProximo(o?.dataInicio, nContrato);
+  aditivos.forEach((ad, adIdx) => {
+    const dataInicioAd = dataInicioBase;
+    const totalMesesAd = Array.isArray(ad.cronograma) ? ad.cronograma.length : 0;
+    dataInicioBase = calcDataInicioProximo(dataInicioBase, totalMesesAd) || dataInicioBase;
+    const itensCronoAd = Array.isArray(ad?.cronogramaItens) ? ad.cronogramaItens : [];
+    if (!itensCronoAd.length || !totalMesesAd || !dataInicioAd) return;
+    fontes.push({
+      label:             `\u{1F4C4} ${esc(ad.nome || `Aditivo ${adIdx + 1}`)}`,
+      itensCrono:        itensCronoAd,
+      itensExecMensal:   Array.isArray(ad?.cronogramaItensExecucao) ? ad.cronogramaItensExecucao : [],
+      itensExecucao:     Array.isArray(o?.itens) ? o.itens : [],
+      totalMeses:        totalMesesAd,
+      dataInicio:        dataInicioAd,
+      dataEmissaoRef:    ad?.dataEmissaoExecucao || ad?.dataEmissao || null,
+      historicoExecucao: Array.isArray(ad?.historicoExecucao) ? ad.historicoExecucao : []
+    });
+  });
+  return fontes;
+}
+
+/**
+ * Renderiza o painel Curvas S por Serviço no admin.
+ * Cópia EXATA de renderCurvasPorServicoPanel de render-obra.js,
+ * adaptada para os IDs do painel admin.
+ */
+function _renderCurvasPorServicoPanelAdmin(obra, prefix) {
+  const painel    = $('adminCurvasPorServicoPanel');
+  const badge     = $('adminCurvasPorServicoBadge');
+  const container = $('adminCurvasPorServicoContainer');
+  if (!painel || !container) return;
+
+  const fontes = _buildFontesServico(obra);
+  if (!fontes.length) { painel.style.display = 'none'; return; }
+  painel.style.display = '';
+
+  const totalServicos = fontes[0].itensCrono.length;
+  const temMensal     = fontes.some(f => f.itensExecMensal.length > 0);
+  if (badge) badge.textContent =
+    `${totalServicos} servi\u00e7os` +
+    (temMensal     ? ' \u2022 Real m\u00eas a m\u00eas'         : '') +
+    (fontes.length > 1 ? ` \u2022 ${fontes.length - 1} aditivo(s)` : '');
+
+  // Seletor de fonte (Contrato / Aditivos)
+  let seletorEl = $(`${prefix}_fonte_seletor`);
+  if (!seletorEl) {
+    seletorEl = document.createElement('div');
+    seletorEl.id = `${prefix}_fonte_seletor`;
+    seletorEl.style.cssText = 'display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem';
+    container.parentElement.insertBefore(seletorEl, container);
+  }
+  if (fontes.length > 1) {
+    seletorEl.style.display = 'flex';
+    seletorEl.innerHTML = fontes.map((f, i) => {
+      const ativo = i === (state[`${prefix}_fonteAtiva`] ?? 0);
+      return `<button
+        data-fonte-idx="${i}"
+        style="padding:.35rem .85rem;border-radius:999px;border:1px solid ${ativo ? 'var(--primary,#6366f1)' : 'var(--border,#e2e8f0)'};font-size:.75rem;font-weight:600;cursor:pointer;background:${ativo ? 'var(--primary,#6366f1)' : 'transparent'};color:${ativo ? '#fff' : 'var(--text-muted,#64748b)'};transition:all .15s"
+        onclick="window._adminTrocarFonteServico && window._adminTrocarFonteServico(${i})"
+      >${f.label}</button>`;
+    }).join('');
+  } else {
+    seletorEl.style.display = 'none';
+  }
+
+  window._adminTrocarFonteServico = (idx) => {
+    state[`${prefix}_fonteAtiva`] = idx;
+    const sel = $(`${prefix}_fonte_seletor`);
+    if (sel) sel.querySelectorAll('[data-fonte-idx]').forEach(btn => {
+      const ativo = Number(btn.dataset.fonteIdx) === idx;
+      btn.style.background  = ativo ? 'var(--primary,#6366f1)' : 'transparent';
+      btn.style.color       = ativo ? '#fff' : 'var(--text-muted,#64748b)';
+      btn.style.borderColor = ativo ? 'var(--primary,#6366f1)' : 'var(--border,#e2e8f0)';
+    });
+    renderCurvasPorServico('adminCurvasPorServicoContainer', fontes[idx], `${prefix}_f${idx}`);
   };
+
+  const savedIdx = state[`${prefix}_fonteAtiva`] ?? 0;
+  const idxAtivo = savedIdx < fontes.length ? savedIdx : 0;
+  state[`${prefix}_fonteAtiva`] = idxAtivo;
+  renderCurvasPorServico('adminCurvasPorServicoContainer', fontes[idxAtivo], `${prefix}_f${idxAtivo}`);
 }
 
 export function renderAdminStats() {
@@ -173,21 +246,23 @@ export function renderAdminDetail() {
   const temMensal   = Array.isArray(obra.cronogramaExecucao) && obra.cronogramaExecucao.length > 0;
   const temCrono    = Array.isArray(obra.cronograma)         && obra.cronograma.length         > 0;
   const aditivos    = Array.isArray(obra.aditivos) ? obra.aditivos : [];
-  const LS = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
-  const VS = 'font-size:.95rem;font-weight:700;margin-top:.15rem';
+  const LS   = 'font-size:.7rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)';
+  const VS   = 'font-size:.95rem;font-weight:700;margin-top:.15rem';
   const VSSM = 'font-size:.82rem;font-weight:700;margin-top:.15rem;word-break:break-word';
 
-  // ── Curvas S por Serviço ─────────────────────────────────────────────
-  const fonteMensal   = _buildFonteServico(obra, 'mensal');
-  const fonteContrato = _buildFonteServico(obra, 'contrato');
-  const fonteServico  = fonteMensal || fonteContrato;
-  const nServicos     = fonteServico ? fonteServico.itensCrono.length : 0;
+  // Pré-calcula fontes para saber se exibe o painel
+  const fontesServico = _buildFontesServico(obra);
+  const temServico    = fontesServico.length > 0;
+  const nServicos     = temServico ? fontesServico[0].itensCrono.length : 0;
+  const temMensalS    = fontesServico.some(f => f.itensExecMensal.length > 0);
 
-  const curvasPorServicoHTML = fonteServico ? `
-    <div class="panel" style="margin-bottom:1.5rem">
+  const curvasPorServicoHTML = temServico ? `
+    <div class="panel" style="margin-bottom:1.5rem" id="adminCurvasPorServicoPanel">
       <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap">
         <h3 style="margin:0;font-size:.95rem;font-weight:700">&#128200; Curvas S por Servi&#231;o</h3>
-        <span style="font-size:.72rem;font-weight:600;padding:.2rem .6rem;border-radius:999px;background:rgba(99,102,241,.12);color:#6366f1">${nServicos} servi&#231;o${nServicos !== 1 ? 's' : ''}</span>
+        <span id="adminCurvasPorServicoBadge" style="font-size:.72rem;font-weight:600;padding:.2rem .6rem;border-radius:999px;background:rgba(99,102,241,.12);color:#6366f1">
+          ${nServicos} servi&#231;o${nServicos !== 1 ? 's' : ''}${temMensalS ? ' \u2022 Real m\u00eas a m\u00eas' : ''}${fontesServico.length > 1 ? ` \u2022 ${fontesServico.length - 1} aditivo(s)` : ''}
+        </span>
       </div>
       <div id="adminCurvasPorServicoContainer"></div>
     </div>` : '';
@@ -256,8 +331,8 @@ export function renderAdminDetail() {
       dataInicioBaseCharts = calcDataInicioProximo(dataInicioBaseCharts, nP) || dataInicioBaseCharts;
       renderCurvaS2Aditivo(`adminCurvaS_ad_${ad.id}`, `adminCurvaS_wrap_${ad.id}`, ad, di, null);
     });
-    if (fonteServico) {
-      renderCurvasPorServico('adminCurvasPorServicoContainer', fonteServico, fonteMensal ? 'adm_m' : 'adm_c');
+    if (temServico) {
+      _renderCurvasPorServicoPanelAdmin(obra, 'adm');
     }
   });
 }
