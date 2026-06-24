@@ -1,70 +1,39 @@
-import { $, state, parseMoney, showToast, money, cleanup } from './state.js';
-import { auth, db } from './firebase.js';
-import { doc, updateDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-import {
-  saveObra, deleteObra, scheduleSave, currentObra,
-  renderAll, applySelected, setImportFileFn,
-  updateDashboard, renderAdminViews, renderAdminDetail, renderColabList, renderAdminSidebar
-} from './render.js';
-import {
-  importFile, importCronograma, importCronogramaMensal,
-  importCronogramaPrevistoAditivo, importCronogramaMensalAditivo,
-  addNovoAditivo, renomearAditivo, removerAditivo
-} from './events-import.js';
+import { $, state, showToast, cleanup } from './state.js';
+import { auth } from './firebase.js';
+import { renderAll, applySelected, updateDashboard, renderAdminViews, renderAdminDetail, renderColabList, renderAdminSidebar } from './render-obra.js';
+import { renderAdminViews as _renderAdminViews, renderAdminDetail as _renderAdminDetail, renderColabList as _renderColabList, renderAdminSidebar as _renderAdminSidebar } from './render-admin.js';
+import { importFile } from './import-service.js';
+import { setupColabForm, setupLoginForm, setupLogout } from './auth-events.js';
+import { bindObraEvents } from './obra-events.js';
 
-// ── Fase 2: funções de auth agora vivem em auth-events.js.
-// Re-exportadas aqui para não quebrar consumidores existentes.
+/**
+ * events.js — orquestrador de eventos (Fase 6 da refatoração incremental).
+ * Não contém lógica própria: apenas chama bind* dos módulos especializados
+ * e registra os poucos globals de admin que ainda não têm módulo próprio.
+ */
+
 export { setupColabForm } from './auth-events.js';
-import { setupLoginForm, setupLogout, toggleBloqueio, removeColab } from './auth-events.js';
-
-export { importFile };
+export { importFile } from './import-service.js';
 
 export function bindEvents() {
-  // ── Auth (delegado para auth-events.js) ──
+  // ── auth ──
   setupLoginForm();
   setupLogout();
-  window.toggleBloqueio = toggleBloqueio;
-  window.removeColab    = removeColab;
 
-  // ── seletor de obras ──
-  window._selecionarObra = (obraId) => {
-    const obra = (state.obras || []).find(o => o.id === obraId);
-    if (!obra) return;
-    state.selectedObraId = obraId;
-    applySelected(obra);
-    renderAll();
-  };
+  // ── obra (tabela, importação, aditivos, exportação, etc.) ──
+  bindObraEvents();
 
-  // ── atualizar obra ativa (reimporta Excel) ──
-  window._atualizarObra = () => { importFile(true); };
-
-  // ── remover obra ativa ──
-  window._removerObraAtiva = async () => {
-    const obra = currentObra();
-    if (!obra) return;
-    const nome = obra.nomeProjeto || obra.nome || 'esta obra';
-    if (!confirm(`Remover "${nome}" permanentemente?`)) return;
-    try {
-      await deleteObra(obra.id);
-      const restantes = (state.obras || []).filter(o => o.id !== obra.id);
-      state.selectedObraId = restantes[0]?.id ?? null;
-      if (state.selectedObraId) applySelected(restantes[0]);
-      renderAll();
-      showToast('\u2705 Obra removida.');
-    } catch (err) { showToast('\u274C ' + err.message, true); }
-  };
-
-  // ── admin ──
+  // ── admin globals ──
   window.adminSelectColab = uid => {
     state.adminSelectedUid = uid; state.adminSelectedObraId = null;
-    renderAdminSidebar(); renderAdminDetail();
+    _renderAdminSidebar(); _renderAdminDetail();
   };
   window.adminDeselectColab = () => {
     state.adminSelectedUid = null; state.adminSelectedObraId = null;
-    renderAdminSidebar(); renderAdminDetail();
+    _renderAdminSidebar(); _renderAdminDetail();
   };
   window.adminSelectObra = obraId => {
-    state.adminSelectedObraId = obraId || null; renderAdminDetail();
+    state.adminSelectedObraId = obraId || null; _renderAdminDetail();
   };
 
   // ── tema ──
@@ -76,135 +45,15 @@ export function bindEvents() {
     updateDashboard();
   };
 
-  // ── menus ──
+  // ── menus laterais ──
   const menuBtn = $('menuBtn');
   if (menuBtn) menuBtn.onclick = () => {
-    const a = document.querySelector('.app-aside');
-    if (a) a.classList.toggle('aside-open');
+    const a = document.querySelector('.app-aside'); if (a) a.classList.toggle('aside-open');
   };
   const menuBtnAdmin = $('menuBtnAdmin');
   if (menuBtnAdmin) menuBtnAdmin.onclick = () => {
-    const a = $('adminAside');
-    if (a) a.classList.toggle('aside-open');
+    const a = $('adminAside'); if (a) a.classList.toggle('aside-open');
   };
-
-  // ── importação ──
-  const loadFileBtn = $('loadFile');
-  if (loadFileBtn) loadFileBtn.onclick = () => importFile(false);
-  const addObraBtn = $('addObraBtn');
-  if (addObraBtn) addObraBtn.onclick = () => importFile(false);
-  setImportFileFn(replace => importFile(replace));
-
-  const loadCrono  = $('loadCronograma');
-  if (loadCrono)  loadCrono.onclick  = () => importCronograma();
-  const loadMensal = $('loadCronogramaMensal');
-  if (loadMensal) loadMensal.onclick = () => importCronogramaMensal();
-  const btnNovoAditivo = $('btnNovoAditivo');
-  if (btnNovoAditivo) btnNovoAditivo.onclick = () => addNovoAditivo();
-
-  const aditivosBox = $('aditivosBox');
-  if (aditivosBox) {
-    aditivosBox.addEventListener('click', e => {
-      const btn = e.target.closest('[data-aditivo-action]');
-      if (!btn) return;
-      const action = btn.dataset.aditivoAction, id = btn.dataset.aditivoId;
-      if (action === 'previsto') importCronogramaPrevistoAditivo(id);
-      if (action === 'mensal')   importCronogramaMensalAditivo(id);
-      if (action === 'remover')  removerAditivo(id);
-    });
-    aditivosBox.addEventListener('blur', async e => {
-      const inp = e.target.closest('[data-aditivo-nome]');
-      if (!inp) return;
-      await renomearAditivo(inp.dataset.aditivoNome, inp.value);
-    }, true);
-  }
-
-  // ── exportação ──
-  const exportCsv = $('exportCsv');
-  if (exportCsv) exportCsv.onclick = () => {
-    if (!state.rows.length) { showToast('Nenhum dado para exportar.', true); return; }
-    const header = ['Item', 'Descri\u00e7\u00e3o', 'Valor Contrato', 'Medi\u00e7\u00e3o', 'Acumulado', 'Saldo', '% Exec.'];
-    const rows   = state.rows.map(r => [r.item, r.descricao, r.valorContrato, r.medicao, r.acumulado, r.saldo, r.percentualExecutado]);
-    const csv    = [header, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\n');
-    const a = document.createElement('a');
-    a.href = 'data:text/csv;charset=utf-8,\uFEFF' + encodeURIComponent(csv);
-    a.download = 'medicao.csv';
-    a.click();
-  };
-
-  const saveJson = $('saveJson');
-  if (saveJson) saveJson.onclick = () => {
-    const o = currentObra() || {};
-    const blob = new Blob([JSON.stringify({ ...o, itens: state.rows }, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = (o.nome || 'obra') + '.json';
-    a.click();
-  };
-
-  const fillSample = $('fillSample');
-  if (fillSample) fillSample.onclick = async () => {
-    if (!confirm('Limpar todos os itens da obra atual?')) return;
-    state.rows = [];
-    const o = currentObra();
-    if (o) { o.itens = []; await saveObra(o); }
-    renderAll();
-  };
-
-  // ── adicionar item manualmente ──
-  const addRowBtn = $('addRow');
-  if (addRowBtn) addRowBtn.onclick = () => {
-    const vc  = parseMoney($('fValorContrato').value);
-    const med = parseMoney($('fMedicao').value);
-    const acu = parseMoney($('fAcumulado').value);
-    const saldo = vc - acu;
-    const p = vc > 0 ? +(acu / vc * 100).toFixed(2) : 0;
-    state.rows.push({
-      item: $('fItem').value.trim() || String(state.rows.length + 1),
-      descricao: $('fName').value.trim(),
-      valorContrato: vc, medicao: med, acumulado: acu, saldo, percentualExecutado: p
-    });
-    ['fItem', 'fName', 'fValorContrato', 'fMedicao', 'fAcumulado'].forEach(id => {
-      const el = $(id); if (el) el.value = '';
-    });
-    scheduleSave();
-    renderAll();
-  };
-
-  // ── edição inline da tabela ──
-  const tbody = $('tbody');
-  if (tbody) {
-    tbody.addEventListener('blur', e => {
-      const td = e.target.closest('[data-k]'); if (!td) return;
-      const tr = td.closest('[data-i]');       if (!tr) return;
-      const i = +tr.dataset.i, k = td.dataset.k;
-      const raw = td.textContent.trim();
-      const r = state.rows[i]; if (!r) return;
-      if (['valorContrato', 'medicao', 'acumulado', 'saldo', 'percentualExecutado'].includes(k)) {
-        r[k] = parseMoney(raw);
-      } else { r[k] = raw; }
-      if (k === 'valorContrato' || k === 'acumulado' || k === 'medicao') {
-        const vc = Number(r.valorContrato) || 0, ac = Number(r.acumulado) || 0;
-        r.saldo = vc - ac;
-        r.percentualExecutado = vc > 0 ? +(ac / vc * 100).toFixed(2) : 0;
-        renderAll();
-      }
-      scheduleSave();
-    }, true);
-    tbody.addEventListener('click', async e => {
-      const btn = e.target.closest('[data-del]'); if (!btn) return;
-      state.rows.splice(+btn.dataset.del, 1);
-      scheduleSave(); renderAll();
-    });
-  }
-
-  // ── data de início do projeto ──
-  const projDataInicio = $('projDataInicio');
-  if (projDataInicio) projDataInicio.addEventListener('change', async () => {
-    const o = currentObra(); if (!o) return;
-    o.dataInicio = projDataInicio.value;
-    await saveObra(o); updateDashboard();
-  });
 
   // ── painel de colaboradores (admin) ──
   const adminToggle = $('adminToggleColab');
@@ -215,8 +64,7 @@ export function bindEvents() {
 
   // ── botão topo ──
   window.addEventListener('scroll', () => {
-    const btn = $('btnTopo');
-    if (btn) btn.style.display = window.scrollY > 300 ? 'flex' : 'none';
+    const btn = $('btnTopo'); if (btn) btn.style.display = window.scrollY > 300 ? 'flex' : 'none';
   });
 }
 
@@ -226,9 +74,12 @@ export function setupNovaAtividade() {
   const acu = $('fAcumulado');
   const update = () => {
     if (!vc || !med || !acu) return;
-    const v = parseMoney(vc.value), a = parseMoney(acu.value);
+    const { parseMoney, money } = await import('./state.js').then(m => m);
+    // inline para evitar import circular
+    const v = parseFloat(String(vc.value).replace(/[^\d,.-]/g,'').replace(',','.')) || 0;
+    const a = parseFloat(String(acu.value).replace(/[^\d,.-]/g,'').replace(',','.')) || 0;
     const saldoEl = $('fSaldo'), pctEl = $('fPct');
-    if (saldoEl) saldoEl.value = money(v - a);
+    if (saldoEl) saldoEl.value = (v - a).toLocaleString('pt-BR', {minimumFractionDigits:2});
     if (pctEl)   pctEl.value   = (v > 0 ? +(a / v * 100).toFixed(2) : 0) + '%';
   };
   if (vc)  vc.addEventListener('input', update);
