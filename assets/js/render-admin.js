@@ -1,5 +1,6 @@
-import { $, state, esc, money, pct, calcPctGeral } from './state.js';
+import { $, state, esc, money, pct, calcPctGeral, buildFontesServico } from './state.js';
 import { renderCurvaS1, renderCurvaS2, renderCurvaS2Aditivo } from './render-charts.js';
+import { renderCurvasPorServico } from './render-servicos.js';
 
 function fmtDate(str) {
   if (!str) return '-';
@@ -145,6 +146,22 @@ export function renderAdminDetail() {
   const VS = 'font-size:.95rem;font-weight:700;margin-top:.15rem';
   const VSSM = 'font-size:.82rem;font-weight:700;margin-top:.15rem;word-break:break-word';
 
+  // ── Curvas S por Serviço ──────────────────────────────────────────────────
+  const fonteContrato = buildFontesServico(obra, 'contrato');
+  const fonteMensal   = buildFontesServico(obra, 'mensal');
+  const temServicoContrato = fonteContrato && Array.isArray(fonteContrato.itensCrono) && fonteContrato.itensCrono.length > 0;
+  const temServicoMensal   = fonteMensal   && Array.isArray(fonteMensal.itensCrono)   && fonteMensal.itensCrono.length   > 0;
+  const nServicos = temServicoMensal ? fonteMensal.itensCrono.length : (temServicoContrato ? fonteContrato.itensCrono.length : 0);
+
+  const curvasPorServicoHTML = (temServicoContrato || temServicoMensal) ? `
+    <div class="panel" style="margin-bottom:1.5rem" id="adminCurvasPorServicoPanel">
+      <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap">
+        <h3 style="margin:0;font-size:.95rem;font-weight:700">&#128200; Curvas S por Servi&#231;o</h3>
+        <span style="font-size:.72rem;font-weight:600;padding:.2rem .6rem;border-radius:999px;background:rgba(99,102,241,.12);color:#6366f1">${nServicos} servi&#231;o${nServicos !== 1 ? 's' : ''}</span>
+      </div>
+      <div id="adminCurvasPorServicoContainer"></div>
+    </div>` : '';
+
   let dataInicioBase = calcDataInicioProximo(obra.dataInicio, totalMeses);
   const aditivosHTML = aditivos.filter(ad =>
     (Array.isArray(ad.cronograma) && ad.cronograma.length > 0) ||
@@ -180,6 +197,7 @@ export function renderAdminDetail() {
      </div>
      ${temCrono && temMensal ? `<div class="panel" style="margin-bottom:1.5rem"><h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S \u2014 Cronograma F\u00edsico-Financeiro (Contrato)</h3><div class="chart-scroll-wrap" id="adminCurvaSAditivoWrap"><div class="chart-container"><canvas id="adminCurvaSAditivo"></canvas></div></div></div>` : ''}
      ${aditivosHTML}
+     ${curvasPorServicoHTML}
      <div class="panel">
        <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">\u00cdndice de Itens</h3>
        <div class="table-container"><table class="admin-table">
@@ -208,6 +226,12 @@ export function renderAdminDetail() {
       dataInicioBaseCharts = calcDataInicioProximo(dataInicioBaseCharts, nP) || dataInicioBaseCharts;
       renderCurvaS2Aditivo(`adminCurvaS_ad_${ad.id}`, `adminCurvaS_wrap_${ad.id}`, ad, di, null);
     });
+    // ── Renderiza Curvas S por Serviço ────────────────────────────────────
+    if (temServicoMensal) {
+      renderCurvasPorServico('adminCurvasPorServicoContainer', fonteMensal, 'adm_m');
+    } else if (temServicoContrato) {
+      renderCurvasPorServico('adminCurvasPorServicoContainer', fonteContrato, 'adm_c');
+    }
   });
 }
 
