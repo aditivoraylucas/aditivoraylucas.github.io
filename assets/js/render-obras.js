@@ -1,7 +1,7 @@
 import { $, state, esc, showToast } from './state.js';
-import { saveObra, deleteObra, currentObra, applySelected } from './render.js';
+import { saveObra, deleteObra, currentObra } from './obra-service.js';
+import { applySelected, updateDashboard, renderAll } from './render-obra.js';
 import { limparObraIdDaUrl } from './url-state.js';
-import { updateDashboard, renderAll } from './render.js';
 import { renderIndicadorAtualizacao } from './render-charts.js';
 
 function fmtDate(str){
@@ -153,6 +153,5 @@ export function renderObrasBox(){
   renderCronogramaBox(); renderCronogramaMensalBox(); renderAditivosSection();
 }
 
-/* aliases para compatibilidade com imports externos */
 export function renderSeletorObras(){ renderObrasBox(); }
 export function migrarAditivosSemIdExport(obra){ return migrarAditivosSemId(obra); }
