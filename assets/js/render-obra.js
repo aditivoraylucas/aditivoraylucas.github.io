@@ -103,43 +103,51 @@ export function renderAditivosCurvas() {
   });
 }
 
-// ── Curvas S por serviço: seletor de fonte ──
-function _buildFontesServico(o) {
-  const fontes = [];
-  const aditivos = Array.isArray(o?.aditivos) ? o.aditivos : [];
-  const nContrato = Array.isArray(o?.cronograma) ? o.cronograma.length : 0;
-  const itensCronoContrato = Array.isArray(o?.cronogramaItens) ? o.cronogramaItens : [];
-  if (itensCronoContrato.length && nContrato && o?.dataInicio) {
-    fontes.push({
-      label: '\u{1F4CB} Contrato inicial',
-      itensCrono:        itensCronoContrato,
-      itensExecMensal:   Array.isArray(o?.cronogramaItensExecucao) ? o.cronogramaItensExecucao : [],
-      itensExecucao:     Array.isArray(o?.itens) ? o.itens : [],
-      totalMeses:        nContrato,
-      dataInicio:        o.dataInicio,
-      dataEmissaoRef:    o?.dataEmissaoExecucao || o?.dataEmissao || null,
-      historicoExecucao: Array.isArray(o?.historicoExecucao) ? o.historicoExecucao : []
-    });
-  }
+// ── Curvas S por serviço: sempre usa o último aditivo com cronogramaItens ──
+// Se não houver nenhum aditivo com cronogramaItens, usa o contrato inicial.
+export function buildFonteServico(o) {
+  const aditivos   = Array.isArray(o?.aditivos)   ? o.aditivos   : [];
+  const nContrato  = Array.isArray(o?.cronograma)  ? o.cronograma.length : 0;
+
+  // Monta dataInicio de cada aditivo
   let dataInicioBase = calcDataInicioProximo(o?.dataInicio, nContrato);
-  aditivos.forEach((ad, adIdx) => {
+  const aditivosComDI = aditivos.map(ad => {
     const dataInicioAd = dataInicioBase;
     const totalMesesAd = Array.isArray(ad.cronograma) ? ad.cronograma.length : 0;
     dataInicioBase = calcDataInicioProximo(dataInicioBase, totalMesesAd) || dataInicioBase;
-    const itensCronoAd = Array.isArray(ad?.cronogramaItens) ? ad.cronogramaItens : [];
-    if (!itensCronoAd.length || !totalMesesAd || !dataInicioAd) return;
-    fontes.push({
-      label:             `\u{1F4C4} ${esc(ad.nome || `Aditivo ${adIdx + 1}`)}`,
-      itensCrono:        itensCronoAd,
+    return { ad, dataInicioAd, totalMesesAd };
+  });
+
+  // Pega o ÚLTIMO aditivo que tenha cronogramaItens
+  for (let i = aditivosComDI.length - 1; i >= 0; i--) {
+    const { ad, dataInicioAd, totalMesesAd } = aditivosComDI[i];
+    const itensCrono = Array.isArray(ad?.cronogramaItens) ? ad.cronogramaItens : [];
+    if (!itensCrono.length || !totalMesesAd || !dataInicioAd) continue;
+    return {
+      label:             `\u{1F4C4} ${esc(ad.nome || `Aditivo ${i + 1}`)}`,
+      itensCrono,
       itensExecMensal:   Array.isArray(ad?.cronogramaItensExecucao) ? ad.cronogramaItensExecucao : [],
       itensExecucao:     Array.isArray(o?.itens) ? o.itens : [],
       totalMeses:        totalMesesAd,
       dataInicio:        dataInicioAd,
       dataEmissaoRef:    ad?.dataEmissaoExecucao || ad?.dataEmissao || null,
       historicoExecucao: Array.isArray(ad?.historicoExecucao) ? ad.historicoExecucao : []
-    });
-  });
-  return fontes;
+    };
+  }
+
+  // Fallback: contrato inicial
+  const itensCronoContrato = Array.isArray(o?.cronogramaItens) ? o.cronogramaItens : [];
+  if (!itensCronoContrato.length || !nContrato || !o?.dataInicio) return null;
+  return {
+    label:             '\u{1F4CB} Contrato inicial',
+    itensCrono:        itensCronoContrato,
+    itensExecMensal:   Array.isArray(o?.cronogramaItensExecucao) ? o.cronogramaItensExecucao : [],
+    itensExecucao:     Array.isArray(o?.itens) ? o.itens : [],
+    totalMeses:        nContrato,
+    dataInicio:        o.dataInicio,
+    dataEmissaoRef:    o?.dataEmissaoExecucao || o?.dataEmissao || null,
+    historicoExecucao: Array.isArray(o?.historicoExecucao) ? o.historicoExecucao : []
+  };
 }
 
 export function renderCurvasPorServicoPanel(o, prefix) {
@@ -147,50 +155,19 @@ export function renderCurvasPorServicoPanel(o, prefix) {
   const badge     = $('curvasPorServicoBadge');
   const container = $('curvasPorServicoContainer');
   if (!painel || !container) return;
-  const fontes = _buildFontesServico(o);
-  if (!fontes.length) { painel.style.display = 'none'; return; }
+
+  const fonte = buildFonteServico(o);
+  if (!fonte) { painel.style.display = 'none'; return; }
   painel.style.display = '';
-  const totalServicos = fontes[0].itensCrono.length;
-  const temMensal = fontes.some(f => f.itensExecMensal.length > 0);
+
+  const nServicos = fonte.itensCrono.length;
+  const temMensal = fonte.itensExecMensal.length > 0;
   if (badge) badge.textContent =
-    `${totalServicos} servi\u00e7os` +
+    `${nServicos} servi\u00e7o${nServicos !== 1 ? 's' : ''}` +
     (temMensal ? ' \u2022 Real m\u00eas a m\u00eas' : '') +
-    (fontes.length > 1 ? ` \u2022 ${fontes.length - 1} aditivo(s)` : '');
-  let seletorEl = $(`${prefix}_fonte_seletor`);
-  if (!seletorEl) {
-    seletorEl = document.createElement('div');
-    seletorEl.id = `${prefix}_fonte_seletor`;
-    seletorEl.style.cssText = 'display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem';
-    container.parentElement.insertBefore(seletorEl, container);
-  }
-  if (fontes.length > 1) {
-    seletorEl.style.display = 'flex';
-    seletorEl.innerHTML = fontes.map((f, i) => {
-      const ativo = i === (state[`${prefix}_fonteAtiva`] ?? 0);
-      return `<button
-        data-fonte-idx="${i}"
-        style="padding:.35rem .85rem;border-radius:999px;border:1px solid ${ativo ? 'var(--primary,#6366f1)' : 'var(--border,#e2e8f0)'};font-size:.75rem;font-weight:600;cursor:pointer;background:${ativo ? 'var(--primary,#6366f1)' : 'transparent'};color:${ativo ? '#fff' : 'var(--text-muted,#64748b)'};transition:all .15s"
-        onclick="window._trocarFonteServico && window._trocarFonteServico(${i})"
-      >${f.label}</button>`;
-    }).join('');
-  } else {
-    seletorEl.style.display = 'none';
-  }
-  window._trocarFonteServico = (idx) => {
-    state[`${prefix}_fonteAtiva`] = idx;
-    const sel = $(`${prefix}_fonte_seletor`);
-    if (sel) sel.querySelectorAll('[data-fonte-idx]').forEach(btn => {
-      const ativo = Number(btn.dataset.fonteIdx) === idx;
-      btn.style.background  = ativo ? 'var(--primary,#6366f1)' : 'transparent';
-      btn.style.color       = ativo ? '#fff' : 'var(--text-muted,#64748b)';
-      btn.style.borderColor = ativo ? 'var(--primary,#6366f1)' : 'var(--border,#e2e8f0)';
-    });
-    renderCurvasPorServico('curvasPorServicoContainer', fontes[idx], `${prefix}_f${idx}`);
-  };
-  const savedIdx = state[`${prefix}_fonteAtiva`] ?? 0;
-  const idxAtivo = savedIdx < fontes.length ? savedIdx : 0;
-  state[`${prefix}_fonteAtiva`] = idxAtivo;
-  renderCurvasPorServico('curvasPorServicoContainer', fontes[idxAtivo], `${prefix}_f${idxAtivo}`);
+    ` \u2022 ${fonte.label}`;
+
+  renderCurvasPorServico('curvasPorServicoContainer', fonte, `${prefix}_f`);
 }
 
 // ── Dashboard ──
