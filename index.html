@@ -299,5 +299,51 @@
   </div>
 </div>
 
+<!-- MODAL: DATA DE INÍCIO OBRIGATÓRIA -->
+<div id="modalDataInicio" style="
+  display:none;
+  position:fixed;inset:0;z-index:9999;
+  background:rgba(15,23,42,.55);
+  backdrop-filter:blur(4px);
+  align-items:center;justify-content:center;
+">
+  <div style="
+    background:var(--surface,#fff);
+    border-radius:16px;
+    padding:2rem 2rem 1.5rem;
+    max-width:420px;width:calc(100% - 2rem);
+    box-shadow:0 25px 60px rgba(0,0,0,.25);
+    border:1px solid var(--border,#e2e8f0);
+    animation:modalIn .22s cubic-bezier(.34,1.56,.64,1);
+  ">
+    <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem">
+      <span style="font-size:1.75rem">&#128197;</span>
+      <div>
+        <h3 style="margin:0;font-size:1rem;font-weight:800;color:var(--text)">Data de in&#237;cio obrigat&#243;ria</h3>
+        <p style="margin:.2rem 0 0;font-size:.8rem;color:var(--text-muted)">Necess&#225;ria para montar as Curvas S por Servi&#231;o</p>
+      </div>
+    </div>
+    <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:1.25rem;line-height:1.5">
+      O cronograma foi importado com sucesso, mas sem a <strong style="color:var(--text)">data de in&#237;cio da obra</strong> n&#227;o &#233; poss&#237;vel posicionar os m&#234;ses corretamente no gr&#225;fico.
+    </p>
+    <div class="form-group" style="margin-bottom:1.25rem">
+      <label style="font-size:.82rem;font-weight:700">&#128197; Data de in&#237;cio da obra</label>
+      <input id="modalDataInicioInput" type="date" class="form-control" style="margin-top:.35rem"/>
+      <p id="modalDataInicioErro" style="display:none;color:var(--danger);font-size:.75rem;margin-top:.35rem">&#9888;&#65039; Selecione uma data v&#225;lida para continuar.</p>
+    </div>
+    <div style="display:flex;gap:.6rem;justify-content:flex-end">
+      <button id="modalDataInicioSkip" class="btn btn-sec" style="font-size:.82rem">Pular por agora</button>
+      <button id="modalDataInicioConfirm" class="btn btn-primary" style="font-size:.82rem">&#10003; Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<style>
+@keyframes modalIn {
+  from { opacity:0; transform:scale(.92) translateY(12px); }
+  to   { opacity:1; transform:scale(1)   translateY(0); }
+}
+</style>
+
 </body>
 </html>

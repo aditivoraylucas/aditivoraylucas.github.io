@@ -6,10 +6,56 @@ import { parseCronogramaXLSX } from './cronograma.js';
 
 /**
  * import-service.js — importação de planilhas Excel e gestão de aditivos.
- * Extraído de events-import.js na Fase 3 da refatoração incremental.
- * Responsável por: importar obra, cronograma previsto, cronograma mensal,
- *   previsto/mensal de aditivos, criar/renomear/remover aditivos.
  */
+
+/**
+ * Exibe o modal de data de início obrigatória e retorna uma Promise que
+ * resolve com a data escolhida (string YYYY-MM-DD) ou null se pulada.
+ * Só abre se a obra ainda não tiver dataInicio.
+ */
+function pedirDataInicio(obraAtual) {
+  if (obraAtual?.dataInicio) return Promise.resolve(obraAtual.dataInicio);
+
+  return new Promise(resolve => {
+    const modal   = $('modalDataInicio');
+    const input   = $('modalDataInicioInput');
+    const erro    = $('modalDataInicioErro');
+    const btnConf = $('modalDataInicioConfirm');
+    const btnSkip = $('modalDataInicioSkip');
+    if (!modal || !input) { resolve(null); return; }
+
+    // Limpa estado anterior
+    input.value = '';
+    if (erro) erro.style.display = 'none';
+    modal.style.display = 'flex';
+    setTimeout(() => input.focus(), 80);
+
+    function fechar(valor) {
+      modal.style.display = 'none';
+      btnConf.onclick = null;
+      btnSkip.onclick = null;
+      resolve(valor);
+    }
+
+    btnConf.onclick = () => {
+      const v = input.value;
+      if (!v) {
+        if (erro) { erro.style.display = ''; }
+        input.focus();
+        return;
+      }
+      fechar(v);
+    };
+
+    btnSkip.onclick = () => fechar(null);
+
+    // Confirma com Enter
+    input.onkeydown = e => { if (e.key === 'Enter') btnConf.onclick(); };
+
+    // Clique fora fecha como skip
+    modal.onclick = e => { if (e.target === modal) fechar(null); };
+  });
+}
 
 /** Importa arquivo de obra (Excel, JSON, CSV) */
 export function importFile(replace = false) {
@@ -78,7 +124,7 @@ export function importFile(replace = false) {
   input.click();
 }
 
-/** Importa cronograma previsto do contrato (planilha Excel) */
+/** Importa cronograma previsto do contrato */
 export function importCronograma() {
   const o = currentObra();
   if (!o) { showToast('⚠️ Selecione uma obra antes de importar o cronograma.', true); return; }
@@ -95,6 +141,16 @@ export function importCronograma() {
       o.cronograma = cronograma;
       if (Array.isArray(itens) && itens.length > 0) o.cronogramaItens = itens;
       if (dataEmissao) o.dataEmissao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
+
+      // ══ Pede data de início se ainda não estiver definida ══
+      const dataInicio = await pedirDataInicio(o);
+      if (dataInicio) {
+        o.dataInicio = dataInicio;
+        // Sincroniza o campo visual
+        const el = $('projDataInicio');
+        if (el) el.value = dataInicio;
+      }
+
       await saveObra(o);
       const emissaoTxt = dataEmissao ? ` | Emissão: ${String(dataEmissao.mes).padStart(2, '0')}/${dataEmissao.ano}` : '';
       const itensTxt   = Array.isArray(itens) && itens.length > 0 ? ` | ${itens.length} serviços` : '';
@@ -105,7 +161,7 @@ export function importCronograma() {
   input.click();
 }
 
-/** Importa cronograma de execução mensal (planilha Excel) */
+/** Importa cronograma de execução mensal */
 export function importCronogramaMensal() {
   const o = currentObra();
   if (!o) { showToast('⚠️ Selecione uma obra antes de importar o cronograma mensal.', true); return; }
@@ -147,6 +203,14 @@ export function importCronogramaMensal() {
       }));
       if (Array.isArray(itens) && itens.length > 0) o.cronogramaItensExecucao = itens;
       if (dataEmissao) o.dataEmissaoExecucao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
+
+      // ══ Pede data de início se ainda não estiver definida ══
+      const dataInicio = await pedirDataInicio(o);
+      if (dataInicio) {
+        o.dataInicio = dataInicio;
+        const el = $('projDataInicio');
+        if (el) el.value = dataInicio;
+      }
 
       await saveObra(o);
       const emissaoTxt = dataEmissao ? ` | Emissão: ${String(dataEmissao.mes).padStart(2, '0')}/${dataEmissao.ano}` : '';
