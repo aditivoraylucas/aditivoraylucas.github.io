@@ -4,10 +4,12 @@ import { currentObra } from './obra-service.js';
 import { renderCurvaS1, renderCurvaS2, renderCurvaS2Aditivo } from './render-charts.js';
 import { renderCurvasPorServico } from './render-servicos.js';
 import { renderObrasBox, setImportFileFnObras } from './render-obras.js';
+import { registerObraContext } from './obra-context.js';
 
 /**
  * render-obra.js — renderização da obra ativa: tabela de itens, dashboard e Curvas S.
- * Extraído de render.js na Fase 4 da refatoração incremental.
+ * Registra applySelected, renderAll e updateDashboard no obra-context.js
+ * para que render-obras.js possa usá-las sem importar este arquivo diretamente.
  */
 
 // ── Helpers de data ──
@@ -185,7 +187,7 @@ export function renderCurvasPorServicoPanel(o, prefix) {
   renderCurvasPorServico('curvasPorServicoContainer', fontes[idxAtivo], `${prefix}_f${idxAtivo}`);
 }
 
-// ── Dashboard (stats + gráficos + status do cronograma) ──
+// ── Dashboard ──
 export function updateDashboard() {
   const o = currentObra();
   const itens = Array.isArray(o?.itens) && o.itens.length > 0 ? o.itens : state.rows;
@@ -238,3 +240,6 @@ export function renderAll() { renderObrasBox(); renderTable(); updateDashboard()
 
 // ── setImportFileFn ──
 export function setImportFileFn(fn) { setImportFileFnObras(fn); }
+
+// ── Registra as funções no obra-context para render-obras.js usar sem ciclo ──
+registerObraContext({ applySelected, renderAll, updateDashboard });

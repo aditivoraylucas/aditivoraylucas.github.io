@@ -1,8 +1,13 @@
 import { $, state, esc, showToast } from './state.js';
 import { saveObra, deleteObra, currentObra } from './obra-service.js';
-import { applySelected, updateDashboard, renderAll } from './render-obra.js';
+import { applySelected, renderAll, updateDashboard } from './obra-context.js';
 import { limparObraIdDaUrl } from './url-state.js';
 import { renderIndicadorAtualizacao } from './render-charts.js';
+
+/**
+ * render-obras.js — lista de obras, cronograma e aditivos na sidebar.
+ * Importa de obra-context.js (não de render-obra.js) para evitar ciclo circular.
+ */
 
 function fmtDate(str){
   if(!str) return '-';
