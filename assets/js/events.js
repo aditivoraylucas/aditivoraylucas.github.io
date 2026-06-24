@@ -1,15 +1,13 @@
-import { $, state, showToast, cleanup } from './state.js';
-import { auth } from './firebase.js';
-import { renderAll, applySelected, updateDashboard, renderAdminViews, renderAdminDetail, renderColabList, renderAdminSidebar } from './render-obra.js';
-import { renderAdminViews as _renderAdminViews, renderAdminDetail as _renderAdminDetail, renderColabList as _renderColabList, renderAdminSidebar as _renderAdminSidebar } from './render-admin.js';
-import { importFile } from './import-service.js';
+import { $, state, showToast, cleanup, parseMoney, money } from './state.js';
 import { setupColabForm, setupLoginForm, setupLogout } from './auth-events.js';
 import { bindObraEvents } from './obra-events.js';
+import { renderAdminDetail, renderAdminSidebar } from './render-admin.js';
+import { updateDashboard } from './render-obra.js';
+import { importFile } from './import-service.js';
 
 /**
- * events.js — orquestrador de eventos (Fase 6 da refatoração incremental).
- * Não contém lógica própria: apenas chama bind* dos módulos especializados
- * e registra os poucos globals de admin que ainda não têm módulo próprio.
+ * events.js — orquestrador de eventos (Fase 6-7 da refatoração).
+ * Não contém lógica própria: chama bind* dos módulos especializados.
  */
 
 export { setupColabForm } from './auth-events.js';
@@ -26,14 +24,14 @@ export function bindEvents() {
   // ── admin globals ──
   window.adminSelectColab = uid => {
     state.adminSelectedUid = uid; state.adminSelectedObraId = null;
-    _renderAdminSidebar(); _renderAdminDetail();
+    renderAdminSidebar(); renderAdminDetail();
   };
   window.adminDeselectColab = () => {
     state.adminSelectedUid = null; state.adminSelectedObraId = null;
-    _renderAdminSidebar(); _renderAdminDetail();
+    renderAdminSidebar(); renderAdminDetail();
   };
   window.adminSelectObra = obraId => {
-    state.adminSelectedObraId = obraId || null; _renderAdminDetail();
+    state.adminSelectedObraId = obraId || null; renderAdminDetail();
   };
 
   // ── tema ──
@@ -74,12 +72,10 @@ export function setupNovaAtividade() {
   const acu = $('fAcumulado');
   const update = () => {
     if (!vc || !med || !acu) return;
-    const { parseMoney, money } = await import('./state.js').then(m => m);
-    // inline para evitar import circular
-    const v = parseFloat(String(vc.value).replace(/[^\d,.-]/g,'').replace(',','.')) || 0;
-    const a = parseFloat(String(acu.value).replace(/[^\d,.-]/g,'').replace(',','.')) || 0;
+    const v = parseMoney(vc.value);
+    const a = parseMoney(acu.value);
     const saldoEl = $('fSaldo'), pctEl = $('fPct');
-    if (saldoEl) saldoEl.value = (v - a).toLocaleString('pt-BR', {minimumFractionDigits:2});
+    if (saldoEl) saldoEl.value = money(v - a);
     if (pctEl)   pctEl.value   = (v > 0 ? +(a / v * 100).toFixed(2) : 0) + '%';
   };
   if (vc)  vc.addEventListener('input', update);

@@ -1,14 +1,11 @@
 /**
- * events-import.js — FACHADA (Fase 3 da refatoração incremental).
- * Toda a lógica foi movida para import-service.js.
- * Este arquivo re-exporta tudo para não quebrar consumidores existentes.
+ * events-import.js — FACHADA DEPRECATED.
  *
- * Consumidores que importam daqui:
- *   - events.js (bindEvents)
- *   - app.js (se importar diretamente)
+ * Toda a lógica foi movida para import-service.js na Fase 3.
+ * Este arquivo existe apenas para compatibilidade com possíveis imports
+ * externos não mapeados.
  *
- * TODO fase-7: atualizar consumidores para importar direto de import-service.js
- * e remover este arquivo.
+ * TODO: remover após confirmar que nenhum arquivo importa daqui.
  */
 export {
   importFile,

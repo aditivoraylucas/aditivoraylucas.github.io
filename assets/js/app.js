@@ -2,7 +2,8 @@ import { auth, db } from './firebase.js';
 import { state, showView, showToast, cleanup } from './state.js';
 import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { collection, query, where, onSnapshot, doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-import { renderAll, renderAdminViews, applySelected } from './render.js';
+import { renderAll, applySelected } from './render-obra.js';
+import { renderAdminViews } from './render-admin.js';
 import { bindEvents, setupNovaAtividade, setupColabForm } from './events.js';
 import { getObraIdDaUrl, setObraIdNaUrl } from './url-state.js';
 
@@ -41,8 +42,6 @@ onAuthStateChanged(auth, async user => {
           continue;
         }
         if (!state.adminSubs[uid]) {
-          // P-007: busca todas as obras e filtra soft-delete no cliente
-          // (where deletedAt == null falha para docs sem o campo)
           const obrasQ = collection(db, 'users', uid, 'obras');
           state.adminSubs[uid] = onSnapshot(obrasQ, obrasSnap => {
             const obras = obrasSnap.docs
@@ -60,9 +59,6 @@ onAuthStateChanged(auth, async user => {
     return;
   }
 
-  // Colaborador: escuta todas as obras e filtra soft-delete no cliente
-  // P-007: where('deletedAt','==',null) não retorna docs sem o campo;
-  // filtramos !o.deletedAt no .map() para garantir compatibilidade retroativa
   showView('appView');
   const obrasQ = collection(db, 'users', user.uid, 'obras');
   state.unsubUserObras = onSnapshot(obrasQ, snap => {
@@ -70,11 +66,8 @@ onAuthStateChanged(auth, async user => {
       .map(d => ({ id: d.id, ...d.data() }))
       .filter(o => !o.deletedAt);
 
-    // P-006: tenta restaurar obra ativa da URL; senão usa a primeira
-    const obraIdDaUrl = getObraIdDaUrl();
-    const obraRestaurada = obraIdDaUrl
-      ? state.obras.find(o => o.id === obraIdDaUrl)
-      : null;
+    const obraIdDaUrl   = getObraIdDaUrl();
+    const obraRestaurada = obraIdDaUrl ? state.obras.find(o => o.id === obraIdDaUrl) : null;
 
     if (obraRestaurada) {
       state.selectedObraId = obraRestaurada.id;
@@ -84,9 +77,7 @@ onAuthStateChanged(auth, async user => {
 
     if (state.selectedObraId) {
       const obra = state.obras.find(o => o.id === state.selectedObraId);
-      if (obra) {
-        applySelected(obra);
-      }
+      if (obra) applySelected(obra);
     } else {
       setObraIdNaUrl(null);
     }

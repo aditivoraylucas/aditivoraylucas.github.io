@@ -1,48 +1,23 @@
 /**
- * render.js — FACHADA (Fase 4 da refatoração incremental).
- * A lógica de renderização da obra foi movida para render-obra.js.
- * Este arquivo re-exporta tudo para não quebrar consumidores existentes.
+ * render.js — FACHADA DEPRECATED.
  *
- * Consumidores principais: events.js, events-import.js, app.js
+ * Toda a lógica foi distribuída nas Fases 1–6 para:
+ *   - obra-service.js  (saveObra, deleteObra, scheduleSave, currentObra)
+ *   - render-obra.js   (renderAll, renderTable, updateDashboard, applySelected, ...)
+ *   - render-charts.js (renderCurvaS1, renderCurvaS2, renderCurvaS2Aditivo)
+ *   - render-servicos.js (renderCurvasPorServico)
+ *   - render-admin.js  (renderAdminStats, renderAdminSidebar, renderColabList, ...)
+ *   - render-obras.js  (renderObrasBox, renderCronogramaBox, ...)
  *
- * TODO fase-7: atualizar consumidores para importar direto dos novos módulos
- * e remover este arquivo.
+ * Este arquivo existe apenas para compatibilidade com possíveis imports
+ * externos não mapeados. Não adicionar lógica aqui.
+ *
+ * TODO: remover após confirmar que nenhum arquivo importa daqui.
  */
 
-// ── De render-obra.js (Fase 4) ──
-export {
-  applySelected,
-  renderTable,
-  renderAditivosCurvas,
-  renderCurvasPorServicoPanel,
-  updateDashboard,
-  renderAll,
-  setImportFileFn
-} from './render-obra.js';
-
-// ── De obra-service.js (Fase 1) ──
 export { saveObra, deleteObra, scheduleSave, currentObra } from './obra-service.js';
-
-// ── De render-charts.js (inalterado) ──
+export { applySelected, renderTable, renderAditivosCurvas, renderCurvasPorServicoPanel, updateDashboard, renderAll, setImportFileFn } from './render-obra.js';
 export { renderCurvaS1, renderCurvaS2, renderCurvaS2Aditivo } from './render-charts.js';
-
-// ── De render-servicos.js (inalterado) ──
 export { renderCurvasPorServico } from './render-servicos.js';
-
-// ── De render-admin.js (inalterado) ──
-export {
-  renderAdminStats,
-  renderAdminSidebar,
-  renderColabList,
-  renderAdminDetail,
-  renderAdminViews,
-  adminObraCardHTML
-} from './render-admin.js';
-
-// ── De render-obras.js (inalterado) ──
-export {
-  renderObrasBox,
-  renderCronogramaBox,
-  renderCronogramaMensalBox,
-  renderAditivosSection
-} from './render-obras.js';
+export { renderAdminStats, renderAdminSidebar, renderColabList, renderAdminDetail, renderAdminViews, adminObraCardHTML } from './render-admin.js';
+export { renderObrasBox, renderCronogramaBox, renderCronogramaMensalBox, renderAditivosSection } from './render-obras.js';
