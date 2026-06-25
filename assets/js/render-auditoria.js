@@ -6,50 +6,61 @@ import {
 
 /**
  * render-auditoria.js — carrega e renderiza os últimos N eventos de auditoria
- * no painel administrativo. Append-only, somente leitura para esta view.
+ * no painel administrativo.
  */
 
-const POR_PAGINA  = 30;
+const POR_PAGINA = 30;
+
 const ACOES_LABEL = {
-  OBRA_CRIADA:         { icon: '\u{1F195}', label: 'Obra criada',              cor: '#10b981' },
-  OBRA_REMOVIDA:       { icon: '\u{1F5D1}', label: 'Obra removida',            cor: '#ef4444' },
-  ITEM_ADICIONADO:     { icon: '\u2795',    label: 'Item adicionado',          cor: '#6366f1' },
-  ITEM_REMOVIDO:       { icon: '\u2796',    label: 'Item removido',            cor: '#f59e0b' },
-  COLAB_CRIADO:        { icon: '\u{1F464}', label: 'Colaborador criado',       cor: '#10b981' },
-  COLAB_BLOQUEADO:     { icon: '\u{1F512}', label: 'Colaborador bloqueado',    cor: '#ef4444' },
-  COLAB_DESBLOQUEADO:  { icon: '\u2705',    label: 'Colaborador desbloqueado', cor: '#10b981' },
-  COLAB_REMOVIDO:      { icon: '\u{1F6AB}', label: 'Colaborador removido',     cor: '#ef4444' },
+  OBRA_CRIADA:         { icon: '🆕', label: 'Obra criada',              cor: '#10b981' },
+  OBRA_REMOVIDA:       { icon: '🗑', label: 'Obra removida',            cor: '#ef4444' },
+  ITEM_ADICIONADO:     { icon: '➕', label: 'Item adicionado',          cor: '#6366f1' },
+  ITEM_REMOVIDO:       { icon: '➖', label: 'Item removido',            cor: '#f59e0b' },
+  COLAB_CRIADO:        { icon: '👤', label: 'Colaborador criado',       cor: '#10b981' },
+  COLAB_BLOQUEADO:     { icon: '🔒', label: 'Colaborador bloqueado',    cor: '#ef4444' },
+  COLAB_DESBLOQUEADO:  { icon: '✅', label: 'Colaborador desbloqueado', cor: '#10b981' },
+  COLAB_REMOVIDO:      { icon: '🚫', label: 'Colaborador removido',     cor: '#ef4444' },
 };
 
+// Apenas campos simples (string/número/boolean) são exibidos
+const CAMPOS_PERMITIDOS = [
+  'nome', 'nomeProjeto', 'name', 'contratada', 'email',
+  'medicaoAtual', 'dataInicio', 'dataEmissao', 'arquivoNome',
+  'item', 'descricao', 'valorContrato', 'acumulado', 'pct',
+];
+
 function nomeColaborador(uid) {
-  if (!uid) return '\u2014';
-  if (uid === state.user?.uid) return '\u{1F451} Você (admin)';
+  if (!uid) return '—';
+  if (uid === state.user?.uid) return '👑 Você (admin)';
   const u = state.allUsers?.[uid];
   if (u?.nome) return esc(u.nome);
-  return uid.slice(0, 8) + '\u2026';
+  return uid.slice(0, 8) + '…';
 }
 
 function formatarData(ts) {
-  if (!ts) return '\u2014';
+  if (!ts) return '—';
   const d = ts.toDate ? ts.toDate() : new Date(ts);
-  if (isNaN(d)) return '\u2014';
+  if (isNaN(d)) return '—';
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' })
     + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
 function snapshotHTML(snap) {
   if (!snap || typeof snap !== 'object') return '';
-  const pares = Object.entries(snap)
-    .filter(([, v]) => v !== null && v !== undefined)
-    .map(([k, v]) => `<span style="color:var(--text-muted)">${esc(k)}:</span> <strong>${esc(String(v))}</strong>`);
+
+  // Filtra apenas campos da lista com valores primitivos (sem arrays/objetos)
+  const pares = CAMPOS_PERMITIDOS
+    .filter(k => snap[k] !== undefined && snap[k] !== null && typeof snap[k] !== 'object')
+    .map(k => `<span style="color:var(--text-muted)">${esc(k)}:</span> <strong>${esc(String(snap[k]))}</strong>`);
+
   if (!pares.length) return '';
-  return `<div style="font-size:.72rem;margin-top:.25rem;color:var(--text-muted)">${pares.join(' \u00b7 ')}</div>`;
+  return `<div style="font-size:.72rem;margin-top:.25rem;color:var(--text-muted);line-height:1.6">${pares.join(' · ')}</div>`;
 }
 
 export async function renderPainelAuditoria(containerId) {
   const box = document.getElementById(containerId);
   if (!box) return;
-  box.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem">\u23F3 Carregando...</p>';
+  box.innerHTML = '<p style="color:var(--text-muted);font-size:.8rem">⏳ Carregando...</p>';
   try {
     const q = query(
       collection(db, 'auditoria_eventos'),
@@ -63,7 +74,7 @@ export async function renderPainelAuditoria(containerId) {
     }
     const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     box.innerHTML = rows.map(ev => {
-      const cfg = ACOES_LABEL[ev.acao] || { icon: '\u{1F4DD}', label: ev.acao || 'Evento', cor: '#64748b' };
+      const cfg = ACOES_LABEL[ev.acao] || { icon: '📝', label: ev.acao || 'Evento', cor: '#64748b' };
       return `
       <div class="auditoria-row">
         <span class="auditoria-badge" style="--badge-cor:${cfg.cor}">${cfg.icon} ${cfg.label}</span>
@@ -75,7 +86,7 @@ export async function renderPainelAuditoria(containerId) {
       </div>`;
     }).join('');
   } catch (err) {
-    box.innerHTML = `<p style="color:var(--danger);font-size:.8rem">\u274C Erro ao carregar: ${esc(err.message)}</p>`;
+    box.innerHTML = `<p style="color:var(--danger);font-size:.8rem">❌ Erro ao carregar: ${esc(err.message)}</p>`;
     console.error('[Auditoria]', err);
   }
 }
