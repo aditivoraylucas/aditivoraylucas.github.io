@@ -277,10 +277,9 @@
         <div class="section-title" style="margin-bottom:.5rem">&#128101; Colaboradores</div>
         <div id="adminColabSidebarMobile"></div>
       </div>
-      <div id="adminDetailPanel">
-        <p style="color:var(--text-muted);padding:1rem">Selecione um colaborador ao lado.</p>
-      </div>
-      <div id="adminColabPanel" style="display:none;margin-top:1.5rem">
+
+      <!-- PAINEL DE COLABORADORES — vem antes do filtro/detalhe -->
+      <div id="adminColabPanel" style="display:none;margin-bottom:1.25rem">
         <div class="panel">
           <h3 style="margin-bottom:1.25rem">Cadastrar novo colaborador</h3>
           <form id="addColabForm" style="display:flex;flex-direction:column;gap:.875rem;max-width:400px">
@@ -297,8 +296,8 @@
         </div>
       </div>
 
-      <!-- PAINEL DE AUDITORIA -->
-      <div id="adminAuditoriaPanel" style="display:none;margin-top:1.5rem">
+      <!-- PAINEL DE AUDITORIA — vem antes do filtro/detalhe -->
+      <div id="adminAuditoriaPanel" style="display:none;margin-bottom:1.25rem">
         <div class="panel">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.5rem">
             <h3 style="margin:0;font-size:.95rem;font-weight:700">&#128196; Log de Auditoria <span style="font-size:.72rem;font-weight:400;color:var(--text-muted)">(&#250;ltimos 30 eventos)</span></h3>
@@ -306,6 +305,11 @@
           </div>
           <div id="auditoriaContainer"></div>
         </div>
+      </div>
+
+      <!-- DETALHE / FILTRO -->
+      <div id="adminDetailPanel">
+        <p style="color:var(--text-muted);padding:1rem">Selecione um colaborador ao lado.</p>
       </div>
     </main>
   </div>
