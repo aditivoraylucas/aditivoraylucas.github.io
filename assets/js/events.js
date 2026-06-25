@@ -14,7 +14,7 @@ export function bindEvents() {
   setupLoginForm();
   setupLogout();
 
-  // ── obra (tabela, importação, aditivos, exportação, etc.) ──
+  // ── obra ──
   bindObraEvents();
 
   // ── admin globals ──
@@ -35,7 +35,6 @@ export function bindEvents() {
     if (!state.adminFiltros) state.adminFiltros = { busca: '', status: 'todas' };
     state.adminFiltros.busca = valor || '';
     renderAdminSidebar();
-    // foca o input após re-render para não perder o cursor
     requestAnimationFrame(() => {
       const el = document.getElementById('adminBuscaColab');
       if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
@@ -47,7 +46,7 @@ export function bindEvents() {
     renderAdminDetail();
   };
 
-  // ── globals de colaboradores (chamados via onclick no HTML gerado) ──
+  // ── globals de colaboradores ──
   window.toggleBloqueio = (uid, bloqueado) => toggleBloqueio(uid, bloqueado);
   window.removeColab    = (uid)            => removeColab(uid);
 
@@ -74,7 +73,17 @@ export function bindEvents() {
   const adminToggle = $('adminToggleColab');
   if (adminToggle) adminToggle.onclick = () => {
     const p = $('adminColabPanel');
-    if (p) p.style.display = p.style.display === 'none' ? 'block' : 'none';
+    if (!p) return;
+    const abrindo = p.style.display === 'none';
+    p.style.display = abrindo ? 'block' : 'none';
+    if (abrindo) {
+      // fecha auditoria se estiver aberta
+      const aud = $('adminAuditoriaPanel');
+      if (aud) aud.style.display = 'none';
+      // sobe para o topo da área principal
+      const main = document.querySelector('#adminView .app-main');
+      if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   // ── painel de auditoria (admin) ──
@@ -84,7 +93,15 @@ export function bindEvents() {
     if (!p) return;
     const abrindo = p.style.display === 'none';
     p.style.display = abrindo ? 'block' : 'none';
-    if (abrindo) renderPainelAuditoria('auditoriaContainer');
+    if (abrindo) {
+      // fecha colaboradores se estiver aberto
+      const col = $('adminColabPanel');
+      if (col) col.style.display = 'none';
+      renderPainelAuditoria('auditoriaContainer');
+      // sobe para o topo
+      const main = document.querySelector('#adminView .app-main');
+      if (main) main.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
   const auditoriaReload = $('auditoriaReloadBtn');
   if (auditoriaReload) auditoriaReload.onclick = () => renderPainelAuditoria('auditoriaContainer');
