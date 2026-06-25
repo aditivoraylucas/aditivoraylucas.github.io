@@ -9,11 +9,6 @@ import { registrarEvento } from './auditoria.js';
  * import-service.js — importação de planilhas Excel e gestão de aditivos.
  */
 
-/**
- * Exibe o modal de data de início obrigatória e retorna uma Promise que
- * resolve com a data escolhida (string YYYY-MM-DD) ou null se pulada.
- * Só abre se a obra ainda não tiver dataInicio.
- */
 function pedirDataInicio(obraAtual) {
   if (obraAtual?.dataInicio) return Promise.resolve(obraAtual.dataInicio);
 
@@ -25,7 +20,6 @@ function pedirDataInicio(obraAtual) {
     const btnSkip = $('modalDataInicioSkip');
     if (!modal || !input) { resolve(null); return; }
 
-    // Limpa estado anterior
     input.value = '';
     if (erro) erro.style.display = 'none';
     modal.style.display = 'flex';
@@ -40,20 +34,11 @@ function pedirDataInicio(obraAtual) {
 
     btnConf.onclick = () => {
       const v = input.value;
-      if (!v) {
-        if (erro) { erro.style.display = ''; }
-        input.focus();
-        return;
-      }
+      if (!v) { if (erro) { erro.style.display = ''; } input.focus(); return; }
       fechar(v);
     };
-
     btnSkip.onclick = () => fechar(null);
-
-    // Confirma com Enter
     input.onkeydown = e => { if (e.key === 'Enter') btnConf.onclick(); };
-
-    // Clique fora fecha como skip
     modal.onclick = e => { if (e.target === modal) fechar(null); };
   });
 }
@@ -91,8 +76,8 @@ export function importFile(replace = false) {
         obj = await readExcelFile(file);
         rows = normalizeRows(obj.itens);
       }
-      const isNova  = !(replace && state.selectedObraId);
-      const obraId  = isNova ? ('obra_' + Date.now()) : state.selectedObraId;
+      const isNova   = !(replace && state.selectedObraId);
+      const obraId   = isNova ? ('obra_' + Date.now()) : state.selectedObraId;
       const obraNome = baseName(file.name) || obj?.nome || 'Nova obra';
       const obra = {
         id: obraId, nome: obraNome,
@@ -121,20 +106,18 @@ export function importFile(replace = false) {
       await saveObra(obra);
       state.selectedObraId = obraId;
 
-      // ―― Auditoria ――
-      const snap = {
-        nome:         obra.nome,
-        nomeProjeto:  obra.nomeProjeto,
-        contratada:   obra.contratada,
-        arquivoNome:  obra.arquivoNome,
-        medicaoAtual: obra.medicaoAtual,
-      };
       registrarEvento({
         uid:           state.user?.uid,
         entidade:      'obras',
         docId:         obraId,
         acao:          isNova ? 'OBRA_CRIADA' : 'OBRA_ATUALIZADA',
-        snapshotAntes: snap,
+        snapshotAntes: {
+          nome:         obra.nome,
+          nomeProjeto:  obra.nomeProjeto,
+          contratada:   obra.contratada,
+          arquivoNome:  obra.arquivoNome,
+          medicaoAtual: obra.medicaoAtual,
+        },
       }).catch(() => {});
 
       showToast(`✅ ${rows.length} itens importados`);
@@ -161,16 +144,30 @@ export function importCronograma() {
       if (Array.isArray(itens) && itens.length > 0) o.cronogramaItens = itens;
       if (dataEmissao) o.dataEmissao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
 
-      // ══ Pede data de início se ainda não estiver definida ══
       const dataInicio = await pedirDataInicio(o);
       if (dataInicio) {
         o.dataInicio = dataInicio;
-        // Sincroniza o campo visual
         const el = $('projDataInicio');
         if (el) el.value = dataInicio;
       }
 
       await saveObra(o);
+
+      // ―― Auditoria ――
+      registrarEvento({
+        uid:           state.user?.uid,
+        entidade:      'obras',
+        docId:         o.id,
+        acao:          'CRONOGRAMA_PREVISTO',
+        snapshotAntes: {
+          nome:        o.nome,
+          nomeProjeto: o.nomeProjeto,
+          arquivoNome: file.name,
+          totalMeses:  totalMeses,
+          ...(dataEmissao ? { dataEmissao: `${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` } : {}),
+        },
+      }).catch(() => {});
+
       const emissaoTxt = dataEmissao ? ` | Emissão: ${String(dataEmissao.mes).padStart(2, '0')}/${dataEmissao.ano}` : '';
       const itensTxt   = Array.isArray(itens) && itens.length > 0 ? ` | ${itens.length} serviços` : '';
       showToast(`✅ Cronograma do contrato importado: ${totalMeses} meses${emissaoTxt}${itensTxt}.`);
@@ -195,7 +192,6 @@ export function importCronogramaMensal() {
       const wb  = XLSX.read(buf, { type: 'array' });
       const { cronograma, totalMeses, itens, dataEmissao } = parseCronogramaXLSX(wb);
 
-      // Aviso se o novo cronograma tiver menos meses que o anterior
       const totalAnterior = Array.isArray(o.cronogramaExecucao) ? o.cronogramaExecucao.length : 0;
       if (totalAnterior > 0 && totalMeses < totalAnterior) {
         const ok = confirm(
@@ -205,7 +201,6 @@ export function importCronogramaMensal() {
         if (!ok) return;
       }
 
-      // Salva snapshot no histórico antes de sobrescrever
       if (Array.isArray(o.cronogramaItensExecucao) && o.cronogramaItensExecucao.length > 0) {
         if (!Array.isArray(o.historicoExecucao)) o.historicoExecucao = [];
         if (o.historicoExecucao.length >= 6) o.historicoExecucao.shift();
@@ -223,7 +218,6 @@ export function importCronogramaMensal() {
       if (Array.isArray(itens) && itens.length > 0) o.cronogramaItensExecucao = itens;
       if (dataEmissao) o.dataEmissaoExecucao = { mes: dataEmissao.mes, ano: dataEmissao.ano };
 
-      // ══ Pede data de início se ainda não estiver definida ══
       const dataInicio = await pedirDataInicio(o);
       if (dataInicio) {
         o.dataInicio = dataInicio;
@@ -232,6 +226,22 @@ export function importCronogramaMensal() {
       }
 
       await saveObra(o);
+
+      // ―― Auditoria ――
+      registrarEvento({
+        uid:           state.user?.uid,
+        entidade:      'obras',
+        docId:         o.id,
+        acao:          'CRONOGRAMA_EXECUCAO',
+        snapshotAntes: {
+          nome:        o.nome,
+          nomeProjeto: o.nomeProjeto,
+          arquivoNome: file.name,
+          totalMeses:  totalMeses,
+          ...(dataEmissao ? { dataEmissao: `${String(dataEmissao.mes).padStart(2,'0')}/${dataEmissao.ano}` } : {}),
+        },
+      }).catch(() => {});
+
       const emissaoTxt = dataEmissao ? ` | Emissão: ${String(dataEmissao.mes).padStart(2, '0')}/${dataEmissao.ano}` : '';
       const itensTxt   = Array.isArray(itens) && itens.length > 0 ? ` | ${itens.length} serviços` : '';
       const histTxt    = Array.isArray(o.historicoExecucao) && o.historicoExecucao.length > 0
