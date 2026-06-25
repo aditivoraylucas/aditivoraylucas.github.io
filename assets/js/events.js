@@ -6,11 +6,6 @@ import { updateDashboard } from './render-obra.js';
 import { importFile } from './import-service.js';
 import { renderPainelAuditoria } from './render-auditoria.js';
 
-/**
- * events.js — orquestrador de eventos (Fase 6-7 da refatoração).
- * Não contém lógica própria: chama bind* dos módulos especializados.
- */
-
 export { setupColabForm } from './auth-events.js';
 export { importFile } from './import-service.js';
 
@@ -33,6 +28,23 @@ export function bindEvents() {
   };
   window.adminSelectObra = obraId => {
     state.adminSelectedObraId = obraId || null; renderAdminDetail();
+  };
+
+  // ── filtros admin (Fase 3) ──
+  window.adminFiltrarColab = valor => {
+    if (!state.adminFiltros) state.adminFiltros = { busca: '', status: 'todas' };
+    state.adminFiltros.busca = valor || '';
+    renderAdminSidebar();
+    // foca o input após re-render para não perder o cursor
+    requestAnimationFrame(() => {
+      const el = document.getElementById('adminBuscaColab');
+      if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+    });
+  };
+  window.adminFiltrarStatus = status => {
+    if (!state.adminFiltros) state.adminFiltros = { busca: '', status: 'todas' };
+    state.adminFiltros.status = status || 'todas';
+    renderAdminDetail();
   };
 
   // ── globals de colaboradores (chamados via onclick no HTML gerado) ──
