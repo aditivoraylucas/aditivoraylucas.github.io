@@ -6,6 +6,8 @@ import {
   importCronogramaPrevistoAditivo, importCronogramaMensalAditivo,
   addNovoAditivo, renomearAditivo, removerAditivo
 } from './import-service.js';
+import { registrarEvento } from './auditoria.js';
+import { limparObraIdDaUrl } from './url-state.js';
 
 /**
  * obra-events.js — bindings de eventos da obra ativa.
@@ -29,7 +31,9 @@ function bindObraNav() {
     const nome = obra.nomeProjeto || obra.nome || 'esta obra';
     if (!confirm(`Remover "${nome}" permanentemente?`)) return;
     try {
+      const snap = { id: obra.id, nome: obra.nome || obra.nomeProjeto, itens: (obra.itens || []).length };
       await deleteObra(obra.id);
+      registrarEvento({ uid: state.user?.uid, entidade: 'obras', docId: obra.id, acao: 'OBRA_REMOVIDA', snapshotAntes: snap }).catch(() => {});
       const restantes = (state.obras || []).filter(o => o.id !== obra.id);
       state.selectedObraId = restantes[0]?.id ?? null;
       if (state.selectedObraId) applySelected(restantes[0]);
@@ -105,21 +109,22 @@ function bindFillSample() {
 /** Formulário de adição manual de item */
 function bindAddRow() {
   const addRowBtn = $('addRow'); if (!addRowBtn) return;
-  addRowBtn.onclick = () => {
+  addRowBtn.onclick = async () => {
     const vc  = parseMoney($('fValorContrato').value);
     const med = parseMoney($('fMedicao').value);
     const acu = parseMoney($('fAcumulado').value);
     const saldo = vc - acu;
     const p = vc > 0 ? +(acu / vc * 100).toFixed(2) : 0;
-    state.rows.push({
-      item: $('fItem').value.trim() || String(state.rows.length + 1),
-      descricao: $('fName').value.trim(),
-      valorContrato: vc, medicao: med, acumulado: acu, saldo, percentualExecutado: p
-    });
+    const item = $('fItem').value.trim() || String(state.rows.length + 1);
+    const descricao = $('fName').value.trim();
+    state.rows.push({ item, descricao, valorContrato: vc, medicao: med, acumulado: acu, saldo, percentualExecutado: p });
     ['fItem', 'fName', 'fValorContrato', 'fMedicao', 'fAcumulado'].forEach(id => {
       const el = $(id); if (el) el.value = '';
     });
-    scheduleSave(); renderAll();
+    scheduleSave();
+    renderAll();
+    const obra = currentObra();
+    if (obra) registrarEvento({ uid: state.user?.uid, entidade: 'itens', docId: obra.id, acao: 'ITEM_ADICIONADO', snapshotAntes: { item, descricao } }).catch(() => {});
   };
 }
 
@@ -145,8 +150,12 @@ function bindTbody() {
   }, true);
   tbody.addEventListener('click', async e => {
     const btn = e.target.closest('[data-del]'); if (!btn) return;
-    state.rows.splice(+btn.dataset.del, 1);
+    const idx = +btn.dataset.del;
+    const r = state.rows[idx];
+    const obra = currentObra();
+    state.rows.splice(idx, 1);
     scheduleSave(); renderAll();
+    if (r && obra) registrarEvento({ uid: state.user?.uid, entidade: 'itens', docId: obra.id, acao: 'ITEM_REMOVIDO', snapshotAntes: { item: r.item, descricao: r.descricao } }).catch(() => {});
   });
 }
 

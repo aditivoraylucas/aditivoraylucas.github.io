@@ -1,7 +1,8 @@
-import { $, showToast, cleanup } from './state.js';
+import { $, showToast, cleanup, state } from './state.js';
 import { auth, db } from './firebase.js';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import { doc, setDoc, updateDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+import { registrarEvento } from './auditoria.js';
 
 /**
  * auth-events.js — autenticação e gestão de colaboradores.
@@ -30,6 +31,7 @@ export function setupColabForm() {
         nome, email, role: 'colaborador', blocked: false,
         createdAt: new Date().toISOString()
       });
+      registrarEvento({ uid: state.user?.uid, entidade: 'users', docId: cred.user.uid, acao: 'COLAB_CRIADO', snapshotAntes: { nome, email } }).catch(() => {});
       showToast('\u2705 Colaborador cadastrado!');
       form.reset();
     } catch (err) {
@@ -81,6 +83,7 @@ export function setupLogout() {
 export async function toggleBloqueio(uid, bloqueado) {
   try {
     await updateDoc(doc(db, 'users', uid), { blocked: !bloqueado });
+    registrarEvento({ uid: state.user?.uid, entidade: 'users', docId: uid, acao: bloqueado ? 'COLAB_DESBLOQUEADO' : 'COLAB_BLOQUEADO' }).catch(() => {});
     showToast(bloqueado ? '\u2705 Colaborador desbloqueado.' : '\u{1F512} Colaborador bloqueado.');
   } catch (err) {
     showToast('\u274C ' + err.message, true);
@@ -92,6 +95,7 @@ export async function removeColab(uid) {
   if (!confirm('Remover este colaborador permanentemente?')) return;
   try {
     await updateDoc(doc(db, 'users', uid), { disabled: true });
+    registrarEvento({ uid: state.user?.uid, entidade: 'users', docId: uid, acao: 'COLAB_REMOVIDO' }).catch(() => {});
     showToast('\u2705 Colaborador removido.');
   } catch (err) {
     showToast('\u274C ' + err.message, true);
