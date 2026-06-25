@@ -3,6 +3,9 @@ import { renderCurvaS1, renderCurvaS2, renderCurvaS2Aditivo } from './render-cha
 import { renderCurvasPorServico } from './render-servicos.js';
 import { buildFonteServico } from './render-obra.js';
 
+// ── estado dos filtros admin ──────────────────────────────────────────────────
+if (!state.adminFiltros) state.adminFiltros = { busca: '', status: 'todas' };
+
 function fmtDate(str) {
   if (!str) return '-';
   const d = new Date(str + 'T00:00:00');
@@ -26,6 +29,13 @@ function calcDataInicioProximo(dataInicio, totalMeses) {
   return `${novoAno}-${String(novoMes).padStart(2,'0')}-01`;
 }
 
+// ── Detecta se obra está concluída (≥99.95%) ─────────────────────────────────
+function obraConcluida(obra) {
+  const it = Array.isArray(obra.itens) ? obra.itens : [];
+  const p  = calcPctGeral(obra.resumo, it);
+  return p >= 99.95;
+}
+
 export function renderAdminStats() {
   let tot=0, tvc=0, tac=0;
   Object.values(state.allUsers).forEach(u => {
@@ -47,8 +57,8 @@ export function renderAdminStats() {
      <div class="stat-card"><span class="stat-label" style="${LS}">Acumulado Geral</span><span class="stat-value" style="${VS}">${money(tac)}</span></div>`;
 }
 
+// ── Sidebar de colaboradores com busca ───────────────────────────────────────
 function _colabSidebarHTML(colabs) {
-  if (!colabs.length) return '<p style="color:var(--text-muted);font-size:.8rem;padding:.5rem">Nenhum colaborador.</p>';
   if (state.adminSelectedUid && state.allUsers[state.adminSelectedUid]) {
     const u = state.allUsers[state.adminSelectedUid];
     const n = (u.obras || []).filter(o => !o.deletedAt).length;
@@ -58,7 +68,31 @@ function _colabSidebarHTML(colabs) {
          <div style="font-size:.75rem;color:var(--text-muted)">${n} obra${n !== 1 ? 's' : ''}</div>
        </div>`;
   }
-  return colabs.map(([uid, u]) => {
+
+  const busca = (state.adminFiltros.busca || '').toLowerCase().trim();
+  const filtrados = busca
+    ? colabs.filter(([, u]) => (u.nome || '').toLowerCase().includes(busca))
+    : colabs;
+
+  const buscaHTML = `
+    <div style="margin-bottom:.6rem;position:relative">
+      <input
+        id="adminBuscaColab"
+        class="form-control"
+        style="font-size:.8rem;padding:.45rem .75rem .45rem 2rem"
+        placeholder="🔍 Buscar colaborador…"
+        value="${esc(state.adminFiltros.busca || '')}"
+        oninput="adminFiltrarColab(this.value)"
+        autocomplete="off"
+      />
+      ${busca ? `<button onclick="adminFiltrarColab('')" style="position:absolute;right:.5rem;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:.9rem;padding:0">✕</button>` : ''}
+    </div>`;
+
+  if (!filtrados.length) {
+    return buscaHTML + `<p style="color:var(--text-muted);font-size:.8rem;padding:.25rem .5rem">${busca ? 'Nenhum resultado.' : 'Nenhum colaborador.'}</p>`;
+  }
+
+  return buscaHTML + filtrados.map(([uid, u]) => {
     const n = (u.obras || []).filter(o => !o.deletedAt).length;
     return `<div class="colab-sidebar-item" style="${u.blocked ? 'opacity:.55' : ''}" onclick="adminSelectColab('${uid}')">
        <div style="font-weight:600;font-size:.875rem">${u.blocked ? '\u{1F512} ' : ''}${esc(u.nome)}</div>
@@ -110,10 +144,79 @@ export function adminObraCardHTML(obra) {
     </div></div>`;
 }
 
+// ── Visão geral de TODOS os colaboradores (sem seleção) ──────────────────────
+function renderAdminGeral(panel) {
+  const status = state.adminFiltros.status || 'todas';
+  const colabs = Object.entries(state.allUsers).filter(([,u]) => u.role !== 'admin');
+
+  // monta lista plana de todas obras com dono
+  let todasObras = [];
+  colabs.forEach(([, u]) => {
+    (u.obras || []).filter(o => !o.deletedAt).forEach(o => {
+      todasObras.push({ ...o, _donoNome: u.nome || u.email || '?' });
+    });
+  });
+
+  // aplica filtro de status
+  if (status === 'andamento')  todasObras = todasObras.filter(o => !obraConcluida(o));
+  if (status === 'concluidas') todasObras = todasObras.filter(o =>  obraConcluida(o));
+
+  const BTNS = [
+    { v: 'todas',     l: 'Todas' },
+    { v: 'andamento', l: '🔨 Em andamento' },
+    { v: 'concluidas',l: '✅ Concluídas' },
+  ];
+
+  const filtroHTML = `
+    <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:1.25rem">
+      <span style="font-size:.75rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Filtrar:</span>
+      ${BTNS.map(b => `
+        <button
+          class="btn ${status === b.v ? 'btn-primary' : 'btn-sec'}"
+          style="font-size:.78rem;padding:.3rem .75rem"
+          onclick="adminFiltrarStatus('${b.v}')"
+        >${b.l}</button>`).join('')}
+      <span style="margin-left:auto;font-size:.75rem;color:var(--text-muted)">${todasObras.length} obra${todasObras.length !== 1 ? 's' : ''}</span>
+    </div>`;
+
+  if (!colabs.length) {
+    panel.innerHTML = filtroHTML + '<p style="color:var(--text-muted);padding:.5rem">Nenhum colaborador cadastrado.</p>';
+    return;
+  }
+  if (!todasObras.length) {
+    panel.innerHTML = filtroHTML + '<p style="color:var(--text-muted);padding:.5rem">Nenhuma obra encontrada para este filtro.</p>';
+    return;
+  }
+
+  // agrupa obras por colaborador para exibição
+  const porColab = {};
+  todasObras.forEach(o => {
+    const k = o._donoNome;
+    if (!porColab[k]) porColab[k] = [];
+    porColab[k].push(o);
+  });
+
+  const obrasHTML = Object.entries(porColab).map(([nome, obras]) => `
+    <div style="margin-bottom:1.5rem">
+      <div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.6rem;padding-bottom:.35rem;border-bottom:1px solid var(--border)">
+        👤 ${esc(nome)} — ${obras.length} obra${obras.length !== 1 ? 's' : ''}
+      </div>
+      ${obras.map(adminObraCardHTML).join('')}
+    </div>`).join('');
+
+  panel.innerHTML = filtroHTML + obrasHTML;
+}
+
 export function renderAdminDetail() {
   const panel = $('adminDetailPanel'); if (!panel) return;
   if (state.chartAdmin2) { try { state.chartAdmin2.destroy(); } catch(_){} state.chartAdmin2 = null; }
-  if (!state.adminSelectedUid) { panel.innerHTML = '<p style="color:var(--text-muted);padding:1rem">Selecione um colaborador ao lado.</p>'; return; }
+
+  // sem colaborador selecionado → visão geral com filtros
+  if (!state.adminSelectedUid) {
+    renderAdminGeral(panel);
+    return;
+  }
+
   const u = state.allUsers[state.adminSelectedUid];
   if (!u) { panel.innerHTML = ''; return; }
   const obrasList = (u.obras || []).filter(o => !o.deletedAt);
@@ -131,7 +234,7 @@ export function renderAdminDetail() {
     return;
   }
   const obra = obrasList.find(o => o.id === state.adminSelectedObraId);
-  if (!obra) { panel.innerHTML = html + '<p style="color:var(--text-muted)">Obra n\u00e3o encontrada.</p>'; return; }
+  if (!obra) { panel.innerHTML = html + '<p style="color:var(--text-muted)">Obra não encontrada.</p>'; return; }
 
   const it          = Array.isArray(obra.itens) ? obra.itens : [];
   const vc          = Number(obra.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
@@ -155,9 +258,9 @@ export function renderAdminDetail() {
   const curvasPorServicoHTML = temServico ? `
     <div class="panel" style="margin-bottom:1.5rem" id="adminCurvasPorServicoPanel">
       <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap">
-        <h3 style="margin:0;font-size:.95rem;font-weight:700">&#128200; Curvas S por Servi&#231;o</h3>
+        <h3 style="margin:0;font-size:.95rem;font-weight:700">&#128200; Curvas S por Serviço</h3>
         <span id="adminCurvasPorServicoBadge" style="font-size:.72rem;font-weight:600;padding:.2rem .6rem;border-radius:999px;background:rgba(99,102,241,.12);color:#6366f1">
-          ${nServicos} servi&#231;o${nServicos !== 1 ? 's' : ''}${temMensalS ? ' \u2022 Real m\u00eas a m\u00eas' : ''} \u2022 ${fonte.label}
+          ${nServicos} serviço${nServicos !== 1 ? 's' : ''}${temMensalS ? ' \u2022 Real mês a mês' : ''} \u2022 ${fonte.label}
         </span>
       </div>
       <div id="adminCurvasPorServicoContainer"></div>
@@ -175,7 +278,7 @@ export function renderAdminDetail() {
     return `<div class="panel" style="margin-bottom:1.5rem">
       <div style="display:flex;align-items:baseline;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap">
         <h3 style="font-size:.95rem;font-weight:700;margin:0">Curva S \u2014 ${esc(ad.nome || 'Aditivo')}</h3>
-        ${dataFimAd ? `<span style="font-size:.75rem;color:var(--text-muted)">\u{1F3C1} T\u00e9rmino: <strong>${dataFimAd}</strong></span>` : ''}
+        ${dataFimAd ? `<span style="font-size:.75rem;color:var(--text-muted)">\u{1F3C1} Término: <strong>${dataFimAd}</strong></span>` : ''}
       </div>
       <div class="chart-scroll-wrap" id="adminCurvaS_wrap_${ad.id}"><div class="chart-container"><canvas id="adminCurvaS_ad_${ad.id}"></canvas></div></div>
     </div>`;
@@ -184,26 +287,26 @@ export function renderAdminDetail() {
   html +=
     `<div class="admin-stats-grid">
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Contratada</span><span class="stat-value" style="${VSSM}">${esc(obra.contratada||'-')}</span></div>
-       <div class="stat-card compact"><span class="stat-label" style="${LS}">Esta Medi\u00e7\u00e3o</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>
-       <div class="stat-card compact"><span class="stat-label" style="${LS}">\u{1F4C5} In\u00edcio</span><span class="stat-value" style="${VS}">${fmtDate(obra.dataInicio)}</span></div>
-       <div class="stat-card compact"><span class="stat-label" style="${LS}">\u{1F3C1} T\u00e9rmino</span><span class="stat-value" style="${VS}">${dataFimISO ? fmtDate(dataFimISO) : '-'}</span></div>
+       <div class="stat-card compact"><span class="stat-label" style="${LS}">Esta Medição</span><span class="stat-value" style="${VS}">${money(estaMed)}</span></div>
+       <div class="stat-card compact"><span class="stat-label" style="${LS}">\u{1F4C5} Início</span><span class="stat-value" style="${VS}">${fmtDate(obra.dataInicio)}</span></div>
+       <div class="stat-card compact"><span class="stat-label" style="${LS}">\u{1F3C1} Término</span><span class="stat-value" style="${VS}">${dataFimISO ? fmtDate(dataFimISO) : '-'}</span></div>
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Valor CT / Aditivo</span><span class="stat-value" style="${VS}">${money(vc)}</span></div>
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Acumulado Total</span><span class="stat-value" style="${VS};color:var(--success)">${money(ac)}</span></div>
        <div class="stat-card compact"><span class="stat-label" style="${LS}">Saldo</span><span class="stat-value" style="${VS}">${money(vc-ac)}</span></div>
        <div class="stat-card compact"><span class="stat-label" style="${LS}">% Geral</span><span class="stat-value" style="${VS}">${pct(p)}</span></div>
      </div>
      <div class="panel" style="margin-bottom:1.5rem">
-       <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S \u2014 \u00cdndice de Itens</h3>
+       <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S \u2014 Índice de Itens</h3>
        <div class="chart-scroll-wrap" id="adminCurvaSwrap"><div class="chart-container"><canvas id="adminCurvaS"></canvas></div></div>
      </div>
-     ${temCrono && temMensal ? `<div class="panel" style="margin-bottom:1.5rem"><h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S \u2014 Cronograma F\u00edsico-Financeiro (Contrato)</h3><div class="chart-scroll-wrap" id="adminCurvaSAditivoWrap"><div class="chart-container"><canvas id="adminCurvaSAditivo"></canvas></div></div></div>` : ''}
+     ${temCrono && temMensal ? `<div class="panel" style="margin-bottom:1.5rem"><h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Curva S \u2014 Cronograma Físico-Financeiro (Contrato)</h3><div class="chart-scroll-wrap" id="adminCurvaSAditivoWrap"><div class="chart-container"><canvas id="adminCurvaSAditivo"></canvas></div></div></div>` : ''}
      ${aditivosHTML}
      ${curvasPorServicoHTML}
      <div class="panel">
-       <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">\u00cdndice de Itens</h3>
+       <h3 style="margin-bottom:1rem;font-size:.95rem;font-weight:700">Índice de Itens</h3>
        <div class="table-container"><table class="admin-table">
          <thead><tr>
-           <th class="th-sticky" data-label="ITEM"></th><th class="th-sticky" data-label="DESCRI\u00c7\u00c3O"></th>
+           <th class="th-sticky" data-label="ITEM"></th><th class="th-sticky" data-label="DESCRIÇÃO"></th>
            <th class="th-sticky" style="text-align:right" data-label="VALOR CT"></th><th class="th-sticky" style="text-align:right" data-label="MED"></th>
            <th class="th-sticky" style="text-align:right" data-label="ACUMUL"></th><th class="th-sticky" style="text-align:right" data-label="SALDO"></th>
            <th class="th-sticky" style="text-align:right" data-label="%"></th>
@@ -233,4 +336,4 @@ export function renderAdminDetail() {
   });
 }
 
-export function renderAdminViews() { renderAdminStats(); renderAdminSidebar(); renderColabList(); }
+export function renderAdminViews() { renderAdminStats(); renderAdminSidebar(); renderColabList(); renderAdminDetail(); }
