@@ -261,6 +261,7 @@
       </div>
       <div class="header-actions">
         <button id="adminToggleColab" class="btn btn-sec">&#128101; Colaboradores</button>
+        <button id="adminToggleAuditoria" class="btn btn-sec">&#128196; Auditoria</button>
         <button id="logoutBtnAdmin" class="btn btn-sec" style="padding:.5rem .75rem">Sair</button>
       </div>
     </header>
@@ -293,6 +294,17 @@
         <div class="panel" style="margin-top:1.25rem">
           <h3 style="margin-bottom:1rem">Colaboradores cadastrados</h3>
           <div id="colabList" style="display:flex;flex-direction:column;gap:.5rem"></div>
+        </div>
+      </div>
+
+      <!-- PAINEL DE AUDITORIA -->
+      <div id="adminAuditoriaPanel" style="display:none;margin-top:1.5rem">
+        <div class="panel">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:.5rem">
+            <h3 style="margin:0;font-size:.95rem;font-weight:700">&#128196; Log de Auditoria <span style="font-size:.72rem;font-weight:400;color:var(--text-muted)">(&#250;ltimos 30 eventos)</span></h3>
+            <button id="auditoriaReloadBtn" class="btn btn-sec" style="font-size:.78rem;padding:.35rem .75rem">&#8635; Atualizar</button>
+          </div>
+          <div id="auditoriaContainer"></div>
         </div>
       </div>
     </main>

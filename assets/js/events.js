@@ -1,9 +1,10 @@
 import { $, state, showToast, cleanup, parseMoney, money } from './state.js';
-import { setupColabForm, setupLoginForm, setupLogout } from './auth-events.js';
+import { setupColabForm, setupLoginForm, setupLogout, toggleBloqueio, removeColab } from './auth-events.js';
 import { bindObraEvents } from './obra-events.js';
 import { renderAdminDetail, renderAdminSidebar } from './render-admin.js';
 import { updateDashboard } from './render-obra.js';
 import { importFile } from './import-service.js';
+import { renderPainelAuditoria } from './render-auditoria.js';
 
 /**
  * events.js — orquestrador de eventos (Fase 6-7 da refatoração).
@@ -34,6 +35,10 @@ export function bindEvents() {
     state.adminSelectedObraId = obraId || null; renderAdminDetail();
   };
 
+  // ── globals de colaboradores (chamados via onclick no HTML gerado) ──
+  window.toggleBloqueio = (uid, bloqueado) => toggleBloqueio(uid, bloqueado);
+  window.removeColab    = (uid)            => removeColab(uid);
+
   // ── tema ──
   const themeBtn = $('toggleTheme');
   if (themeBtn) themeBtn.onclick = () => {
@@ -59,6 +64,18 @@ export function bindEvents() {
     const p = $('adminColabPanel');
     if (p) p.style.display = p.style.display === 'none' ? 'block' : 'none';
   };
+
+  // ── painel de auditoria (admin) ──
+  const auditoriaToggle = $('adminToggleAuditoria');
+  if (auditoriaToggle) auditoriaToggle.onclick = () => {
+    const p = $('adminAuditoriaPanel');
+    if (!p) return;
+    const abrindo = p.style.display === 'none';
+    p.style.display = abrindo ? 'block' : 'none';
+    if (abrindo) renderPainelAuditoria('auditoriaContainer');
+  };
+  const auditoriaReload = $('auditoriaReloadBtn');
+  if (auditoriaReload) auditoriaReload.onclick = () => renderPainelAuditoria('auditoriaContainer');
 
   // ── botão topo ──
   window.addEventListener('scroll', () => {

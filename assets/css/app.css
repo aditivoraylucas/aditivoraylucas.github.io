@@ -167,6 +167,42 @@ table td:first-child{
 .proj-banner-item .val{font-size:.9rem;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
 .proj-banner-sep{width:1px;height:2rem;background:var(--border);flex-shrink:0}
 
+/* ── Painel de Auditoria ─────────────────────────────────────── */
+.auditoria-row{
+  display:flex;
+  align-items:flex-start;
+  gap:.75rem;
+  padding:.6rem 0;
+  border-bottom:1px solid var(--border);
+}
+.auditoria-row:last-child{border-bottom:none}
+.auditoria-badge{
+  flex-shrink:0;
+  font-size:.72rem;
+  font-weight:700;
+  padding:.2rem .55rem;
+  border-radius:999px;
+  background:color-mix(in srgb, var(--badge-cor,#64748b) 12%, transparent);
+  color:var(--badge-cor,#64748b);
+  white-space:nowrap;
+}
+.auditoria-info{
+  flex:1;
+  min-width:0;
+  font-size:.8rem;
+  color:var(--text);
+}
+.auditoria-who{
+  font-weight:600;
+}
+.auditoria-time{
+  flex-shrink:0;
+  font-size:.72rem;
+  color:var(--text-muted);
+  white-space:nowrap;
+  padding-top:.1rem;
+}
+
 /* ══════════════════════════════════════ MOBILE (<=900px) ══════════════════════════════════════ */
 @media(max-width:900px){
   html{ font-size:85%; }
@@ -314,6 +350,10 @@ table td:first-child{
   .proj-banner-item .val{max-width:100%;}
 
   th[data-label]::before{ content: attr(data-label) !important; }
+
+  /* auditoria no mobile */
+  .auditoria-row{flex-wrap:wrap;gap:.4rem;}
+  .auditoria-time{width:100%;}
 }
 
 @media(max-width:400px){
