@@ -11,7 +11,6 @@ const firebaseConfig = {
   appId: "1:358433192984:web:5af60313307f9bfadc176d"
 };
 
-export const ADMIN_SENHA = "35343535";
 export const app  = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db   = getFirestore(app);
