@@ -12,21 +12,24 @@ import {
 const POR_PAGINA = 30;
 
 const ACOES_LABEL = {
-  OBRA_CRIADA:         { icon: '🆕', label: 'Obra criada',              cor: '#10b981' },
-  OBRA_REMOVIDA:       { icon: '🗑', label: 'Obra removida',            cor: '#ef4444' },
-  ITEM_ADICIONADO:     { icon: '➕', label: 'Item adicionado',          cor: '#6366f1' },
-  ITEM_REMOVIDO:       { icon: '➖', label: 'Item removido',            cor: '#f59e0b' },
-  COLAB_CRIADO:        { icon: '👤', label: 'Colaborador criado',       cor: '#10b981' },
-  COLAB_BLOQUEADO:     { icon: '🔒', label: 'Colaborador bloqueado',    cor: '#ef4444' },
-  COLAB_DESBLOQUEADO:  { icon: '✅', label: 'Colaborador desbloqueado', cor: '#10b981' },
-  COLAB_REMOVIDO:      { icon: '🚫', label: 'Colaborador removido',     cor: '#ef4444' },
+  OBRA_CRIADA:          { icon: '🆕', label: 'Obra criada',               cor: '#10b981' },
+  OBRA_ATUALIZADA:      { icon: '🔄', label: 'Obra atualizada',            cor: '#3b82f6' },
+  OBRA_REMOVIDA:        { icon: '🗑', label: 'Obra removida',             cor: '#ef4444' },
+  CRONOGRAMA_PREVISTO:  { icon: '📅', label: 'Cronograma previsto',        cor: '#8b5cf6' },
+  CRONOGRAMA_EXECUCAO:  { icon: '📊', label: 'Cronograma de execução',    cor: '#0ea5e9' },
+  ITEM_ADICIONADO:      { icon: '➕', label: 'Item adicionado',           cor: '#6366f1' },
+  ITEM_REMOVIDO:        { icon: '➖', label: 'Item removido',             cor: '#f59e0b' },
+  COLAB_CRIADO:         { icon: '👤', label: 'Colaborador criado',        cor: '#10b981' },
+  COLAB_BLOQUEADO:      { icon: '🔒', label: 'Colaborador bloqueado',     cor: '#ef4444' },
+  COLAB_DESBLOQUEADO:   { icon: '✅', label: 'Colaborador desbloqueado',  cor: '#10b981' },
+  COLAB_REMOVIDO:       { icon: '🚫', label: 'Colaborador removido',      cor: '#ef4444' },
 };
 
 // Apenas campos simples (string/número/boolean) são exibidos
 const CAMPOS_PERMITIDOS = [
   'nome', 'nomeProjeto', 'name', 'contratada', 'email',
   'medicaoAtual', 'dataInicio', 'dataEmissao', 'arquivoNome',
-  'item', 'descricao', 'valorContrato', 'acumulado', 'pct',
+  'totalMeses', 'item', 'descricao', 'valorContrato', 'acumulado', 'pct',
 ];
 
 function nomeColaborador(uid) {
@@ -48,7 +51,6 @@ function formatarData(ts) {
 function snapshotHTML(snap) {
   if (!snap || typeof snap !== 'object') return '';
 
-  // Filtra apenas campos da lista com valores primitivos (sem arrays/objetos)
   const pares = CAMPOS_PERMITIDOS
     .filter(k => snap[k] !== undefined && snap[k] !== null && typeof snap[k] !== 'object')
     .map(k => `<span style="color:var(--text-muted)">${esc(k)}:</span> <strong>${esc(String(snap[k]))}</strong>`);
