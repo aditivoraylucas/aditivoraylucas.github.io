@@ -30,6 +30,19 @@ export function bindEvents() {
     state.adminSelectedObraId = obraId || null; renderAdminDetail();
   };
 
+  // ── navega direto para colaborador + obra (clique nos cards da visão geral) ──
+  window.adminSelectColabEObra = (uid, obraId) => {
+    state.adminSelectedUid    = uid;
+    state.adminSelectedObraId = obraId || null;
+    renderAdminSidebar();
+    renderAdminDetail();
+    // scroll suave até o painel de detalhe
+    requestAnimationFrame(() => {
+      const panel = document.getElementById('adminDetailPanel');
+      if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
   // ── filtros admin (Fase 3) ──
   window.adminFiltrarColab = valor => {
     if (!state.adminFiltros) state.adminFiltros = { busca: '', status: 'todas' };

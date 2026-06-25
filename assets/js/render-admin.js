@@ -124,7 +124,7 @@ export function renderColabList() {
      </div>`).join('');
 }
 
-export function adminObraCardHTML(obra) {
+export function adminObraCardHTML(obra, uid) {
   if (obra.deletedAt) return '';
   const it  = Array.isArray(obra.itens) ? obra.itens : [];
   const vc  = Number(obra.resumo?.valorContratoAditivo) || it.reduce((a,i)=>a+Number(i.valorContrato||0),0);
@@ -133,7 +133,13 @@ export function adminObraCardHTML(obra) {
   const nAd = Array.isArray(obra.aditivos) ? obra.aditivos.length : 0;
   const temCrono  = Array.isArray(obra.cronograma)         && obra.cronograma.length         > 0;
   const temMensal = Array.isArray(obra.cronogramaExecucao) && obra.cronogramaExecucao.length > 0;
-  return `<div class="obra-card" style="cursor:pointer" onclick="adminSelectObra('${obra.id}')">
+
+  // Se vier com uid (visão geral), usa adminSelectColabEObra para navegar direto
+  const clickFn = uid
+    ? `adminSelectColabEObra('${uid}','${obra.id}')`
+    : `adminSelectObra('${obra.id}')`;
+
+  return `<div class="obra-card" style="cursor:pointer" onclick="${clickFn}">
     <div class="obra-card-header">
       <div><div class="obra-card-title">${esc(obra.nome || 'Sem nome')}</div>
       <div class="obra-card-sub">${it.length} itens | Aba: ${esc(obra.medicaoAtual || '-')}${temCrono ? ' | \u{1F4C5} Cronograma' : ''}${temMensal ? ' | \u{1F4C8} Mensal' : ''}${nAd > 0 ? ` | \u{1F4CB} ${nAd} aditivo${nAd>1?'s':''}` : ''}</div></div>
@@ -151,9 +157,9 @@ function renderAdminGeral(panel) {
 
   // monta lista plana de todas obras com dono
   let todasObras = [];
-  colabs.forEach(([, u]) => {
+  colabs.forEach(([uid, u]) => {
     (u.obras || []).filter(o => !o.deletedAt).forEach(o => {
-      todasObras.push({ ...o, _donoNome: u.nome || u.email || '?' });
+      todasObras.push({ ...o, _donoNome: u.nome || u.email || '?', _uid: uid });
     });
   });
 
@@ -201,7 +207,7 @@ function renderAdminGeral(panel) {
       <div style="font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.6rem;padding-bottom:.35rem;border-bottom:1px solid var(--border)">
         👤 ${esc(nome)} — ${obras.length} obra${obras.length !== 1 ? 's' : ''}
       </div>
-      ${obras.map(adminObraCardHTML).join('')}
+      ${obras.map(o => adminObraCardHTML(o, o._uid)).join('')}
     </div>`).join('');
 
   panel.innerHTML = filtroHTML + obrasHTML;
@@ -230,7 +236,7 @@ export function renderAdminDetail() {
       </select></div></div>`;
 
   if (!state.adminSelectedObraId || !obrasList.length) {
-    panel.innerHTML = html + (obrasList.length ? obrasList.map(adminObraCardHTML).join('') : '<p style="color:var(--text-muted)">Sem obras.</p>');
+    panel.innerHTML = html + (obrasList.length ? obrasList.map(o => adminObraCardHTML(o)).join('') : '<p style="color:var(--text-muted)">Sem obras.</p>');
     return;
   }
   const obra = obrasList.find(o => o.id === state.adminSelectedObraId);
