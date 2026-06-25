@@ -3,6 +3,7 @@ import { readExcelFile, normalizeRows } from './excel.js';
 import { saveObra, currentObra } from './obra-service.js';
 import { updateDashboard, renderCronogramaBox, renderCronogramaMensalBox, renderAditivosSection, renderAll } from './render.js';
 import { parseCronogramaXLSX } from './cronograma.js';
+import { registrarEvento } from './auditoria.js';
 
 /**
  * import-service.js — importação de planilhas Excel e gestão de aditivos.
@@ -90,7 +91,8 @@ export function importFile(replace = false) {
         obj = await readExcelFile(file);
         rows = normalizeRows(obj.itens);
       }
-      const obraId   = replace && state.selectedObraId ? state.selectedObraId : ('obra_' + Date.now());
+      const isNova  = !(replace && state.selectedObraId);
+      const obraId  = isNova ? ('obra_' + Date.now()) : state.selectedObraId;
       const obraNome = baseName(file.name) || obj?.nome || 'Nova obra';
       const obra = {
         id: obraId, nome: obraNome,
@@ -118,6 +120,23 @@ export function importFile(replace = false) {
       }
       await saveObra(obra);
       state.selectedObraId = obraId;
+
+      // ―― Auditoria ――
+      const snap = {
+        nome:         obra.nome,
+        nomeProjeto:  obra.nomeProjeto,
+        contratada:   obra.contratada,
+        arquivoNome:  obra.arquivoNome,
+        medicaoAtual: obra.medicaoAtual,
+      };
+      registrarEvento({
+        uid:           state.user?.uid,
+        entidade:      'obras',
+        docId:         obraId,
+        acao:          isNova ? 'OBRA_CRIADA' : 'OBRA_ATUALIZADA',
+        snapshotAntes: snap,
+      }).catch(() => {});
+
       showToast(`✅ ${rows.length} itens importados`);
     } catch (err) { showToast('❌ ' + err.message, true); console.error(err); }
   };
