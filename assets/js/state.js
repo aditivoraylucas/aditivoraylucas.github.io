@@ -192,6 +192,13 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     }
   }
 
+  // Fallback: item tem execução acumulada (valor financeiro ou pct via boletim)
+  // mas todos os mensais são null (fora do mesesDecorridos) ou zero (pct não preenchido).
+  // Nesse caso, ancora a linha executada até o mesAtualIdx para não sumir o gráfico.
+  if (ultimoExecIdx === 0 && (acumExecValor > 0 || acumExecPct > 0) && mesAtualIdx > 0) {
+    ultimoExecIdx = mesAtualIdx;
+  }
+
   const execAcumFinal        = execAcumRaw.map((v, i)        => i <= ultimoExecIdx ? v : null);
   const execMensalFinal      = execMensalRaw.map((v, i)      => i <= ultimoExecIdx ? v : null);
   const execValorAcumFinal   = execValorAcumRaw.map((v, i)   => i <= ultimoExecIdx ? v : null);
