@@ -241,9 +241,9 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     String(r.item).trim() === String(itemCronograma.item).trim()
   );
   const valorContrato = +Number(
-    itemCronograma.valorTotal ||\
-    execItemFallback?.valorContrato   ||\
-    planValorAcum[planValorAcum.length - 1] ||\
+    itemCronograma.valorTotal ||
+    execItemFallback?.valorContrato ||
+    planValorAcum[planValorAcum.length - 1] ||
     0
   ).toFixed(2);
 
