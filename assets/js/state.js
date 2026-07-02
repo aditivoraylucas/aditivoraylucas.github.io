@@ -95,21 +95,27 @@ export function buildCronogramaTimeline(dataInicio, cronograma, dataEmissao){
  * EXECUTADO: a cauda final vazia é cortada com base no último mês
  * em que houve execução real do próprio item (pct > 0 OU valor > 0).
  * Buracos no meio (item pausa e retorna depois) são preservados.
+ *
+ * CORREÇÃO 1: mesesDecorridos sempre usa a data atual como referência,
+ * pois o cronograma de execução importado já representa o estado mais recente.
+ * Usar a dataEmissaoObra (data do arquivo) causava corte prematuro em itens
+ * que só aparecem nos últimos meses do cronograma.
+ *
+ * CORREÇÃO 2: ultimoExecIdx usa fallback pelo acumulado (acumExecPct/acumExecValor)
+ * quando nenhum mês individual tem pct > 0. Isso evita que a linha executada
+ * suma completamente do gráfico em itens onde o % mensal foi parseado como zero
+ * mas há execução real registrada no boletim de medição.
  */
 export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, totalMeses, dataEmissaoObra, itemCronogramaExecucao) {
   if (!dataInicio || !itemCronograma) return null;
 
   const [iniAno, iniMes] = dataInicio.split('-').map(Number);
 
-  let refAno, refMes;
-  if (dataEmissaoObra && dataEmissaoObra.mes && dataEmissaoObra.ano) {
-    refMes = dataEmissaoObra.mes;
-    refAno = dataEmissaoObra.ano;
-  } else {
-    const now = new Date();
-    refMes = now.getMonth() + 1;
-    refAno = now.getFullYear();
-  }
+  // CORREÇÃO 1: sempre usa data atual — o arquivo importado já é o estado mais recente.
+  // dataEmissaoObra era usado antes e causava corte prematuro de itens tardios.
+  const now = new Date();
+  const refMes = now.getMonth() + 1;
+  const refAno = now.getFullYear();
 
   const mesesDecorridos = Math.min(
     totalMeses,
@@ -126,7 +132,7 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
   const temExecucaoMensal = mesesExec.length > 0;
 
   // Ponto de origem: Mês 0
-  const labels          = ['M\u00eas 0'];
+  const labels          = ['Mês 0'];
   const planMensal      = [0];
   const planAcum        = [0];   // PLANEJADO — nunca cortado
   const planValorMensal = [0];
@@ -182,7 +188,7 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
   // ── Corte da cauda do EXECUTADO ───────────────────────────────────────────
   // Escaneia TODA a linha do item (do último para o primeiro).
   // Corta apenas após o último mês com execução real (pct > 0 ou valor > 0).
-  // Buracos no meio (item pausa e retorna no mês 17, p.ex.) são preservados.
+  // Buracos no meio (item pausa e retorna depois) são preservados.
   // PLANEJADO não é alterado.
   let ultimoExecIdx = 0;
   for (let i = execMensalRaw.length - 1; i >= 1; i--) {
@@ -190,6 +196,15 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
       ultimoExecIdx = i;
       break;
     }
+  }
+
+  // CORREÇÃO 2: fallback pelo acumulado.
+  // Se nenhum mês individual tem valor > 0 mas há execução acumulada
+  // (vinda do boletim de medição), o item TEM execução real.
+  // Nesse caso, exibimos a linha até o último mês decorrido para que
+  // ela não desapareça do gráfico por completo.
+  if (ultimoExecIdx === 0 && (acumExecPct > 0 || acumExecValor > 0)) {
+    ultimoExecIdx = Math.min(mesAtualIdx, mesesDecorridos);
   }
 
   const execAcumFinal        = execAcumRaw.map((v, i)        => i <= ultimoExecIdx ? v : null);
@@ -210,13 +225,25 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
     execAcumValorFinal = execItem ? +Number(execItem.acumulado           || 0).toFixed(2) : 0;
   }
 
+  // CORREÇÃO 2 (badge): se os mensais ficaram zerados mas o boletim tem valor,
+  // usa os valores do boletim para o badge de status também.
+  if (execAcumPctFinal === 0 && execAcumValorFinal === 0 && temExecucaoMensal) {
+    const execItemFallbackBadge = (itensExecucao || []).find(r =>
+      String(r.item).trim() === String(itemCronograma.item).trim()
+    );
+    if (execItemFallbackBadge) {
+      execAcumPctFinal   = +Number(execItemFallbackBadge.percentualExecutado || 0).toFixed(2);
+      execAcumValorFinal = +Number(execItemFallbackBadge.acumulado           || 0).toFixed(2);
+    }
+  }
+
   const execItemFallback = (itensExecucao || []).find(r =>
     String(r.item).trim() === String(itemCronograma.item).trim()
   );
   const valorContrato = +Number(
-    itemCronograma.valorTotal ||
-    execItemFallback?.valorContrato   ||
-    planValorAcum[planValorAcum.length - 1] ||
+    itemCronograma.valorTotal ||\
+    execItemFallback?.valorContrato   ||\
+    planValorAcum[planValorAcum.length - 1] ||\
     0
   ).toFixed(2);
 
@@ -244,7 +271,7 @@ export function buildCurvaServico(dataInicio, itemCronograma, itensExecucao, tot
   });
 
   return {
-    descricao:       itemCronograma.descricao || `Servi\u00e7o ${itemCronograma.item}`,
+    descricao:       itemCronograma.descricao || `Serviço ${itemCronograma.item}`,
     item:            itemCronograma.item,
     labels,
     planMensal,
@@ -287,7 +314,7 @@ export function detectarAnomaliaServico({ planMensal, execMensal, execAcumPctFin
     const mesesDeAntecipacao = primeiroPlanIdx - primeiroExecIdx;
     anomalias.push({
       tipo: 'INICIADO_ANTES_DO_PREVISTO',
-      mensagem: `Servi\u00e7o iniciado ${mesesDeAntecipacao} m\u00eas(es) antes do cronograma original.`,
+      mensagem: `Serviço iniciado ${mesesDeAntecipacao} mês(es) antes do cronograma original.`,
       severidade: 'alerta'
     });
   }
@@ -300,7 +327,7 @@ export function detectarAnomaliaServico({ planMensal, execMensal, execAcumPctFin
     if (ep > 0 && pp === 0) {
       anomalias.push({
         tipo: 'EXECUTADO_FORA_DO_CRONOGRAMA',
-        mensagem: `Execu\u00e7\u00e3o no m\u00eas ${i} n\u00e3o estava prevista no cronograma original.`,
+        mensagem: `Execução no mês ${i} não estava prevista no cronograma original.`,
         severidade: 'alerta'
       });
       break;
@@ -312,7 +339,7 @@ export function detectarAnomaliaServico({ planMensal, execMensal, execAcumPctFin
     if (desvio > THRESHOLD_ADIANTADO) {
       anomalias.push({
         tipo: 'MUITO_ADIANTADO',
-        mensagem: `Execu\u00e7\u00e3o acumulada ${desvio.toFixed(1)}pp acima do planejado (limite: ${THRESHOLD_ADIANTADO}pp).`,
+        mensagem: `Execução acumulada ${desvio.toFixed(1)}pp acima do planejado (limite: ${THRESHOLD_ADIANTADO}pp).`,
         severidade: 'aviso'
       });
     }
